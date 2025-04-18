@@ -1,0 +1,18 @@
+[project]
+name = "ab-test"
+version = "0.1.0"
+description = "Analyze the effects of an AB test using Python"
+authors = [
+    {name = "ConorMcNamara",email = "conor.s.mcnamara@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "scipy (>=1.15.2,<2.0.0)",
+    "pytest (>=8.3.5,<9.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
