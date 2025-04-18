@@ -5,12 +5,8 @@ from typing import Optional
 
 import numpy as np
 
-__all__ = [
-    "simple_hypothesis_from_composite",
-    "mle_under_null",
-    "mle_under_alternative",
-    "wilson_significance"
-]
+__all__ = ["simple_hypothesis_from_composite", "mle_under_null", "mle_under_alternative", "wilson_significance"]
+
 
 def simple_hypothesis_from_composite(
     group_sizes: np.ndarray,
@@ -91,15 +87,11 @@ def simple_hypothesis_from_composite(
 
     if lift == "relative":
         p_alt_a = (2 * na / (1 - p_null_a)) + (2 * nb * (1 + alt_lift) / (1 - p_null_b))
-        p_alt_a /= (2 * na) / (p_null_a * (1 - p_null_a)) + (
-            2 * nb * (1 + alt_lift) ** 2
-        ) / (p_null_b * (1 - p_null_b))
+        p_alt_a /= (2 * na) / (p_null_a * (1 - p_null_a)) + (2 * nb * (1 + alt_lift) ** 2) / (p_null_b * (1 - p_null_b))
     else:
         p_alt_a = 2 * na / (1 - p_null_a)
         p_alt_a += 2 * nb * (p_null_b - alt_lift) / (p_null_b * (1 - p_null_b))
-        p_alt_a /= 2 * na / (p_null_a * (1 - p_null_a)) + 2 * nb / (
-            p_null_b * (1 - p_null_b)
-        )
+        p_alt_a /= 2 * na / (p_null_a * (1 - p_null_a)) + 2 * nb / (p_null_b * (1 - p_null_b))
 
     if lift == "relative":
         p_alt_b = (1 + alt_lift) * p_alt_a
@@ -111,9 +103,7 @@ def simple_hypothesis_from_composite(
     return p_null, p_alt
 
 
-def observed_lift(
-    trials: np.array, successes: np.array, lift: str = "relative"
-) -> float:
+def observed_lift(trials: np.array, successes: np.array, lift: str = "relative") -> float:
     """Calculates the lift from our experiment
 
     Parameters

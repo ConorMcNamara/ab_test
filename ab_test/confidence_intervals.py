@@ -14,8 +14,9 @@ __all__ = [
     "confidence_interval",
     "agresti_coull_interval",
     "jeffrey_interval",
-    "clopper_pearson_interval"
+    "clopper_pearson_interval",
 ]
+
 
 def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     """Wilson Confidence Interval on binomial proportion
@@ -214,9 +215,9 @@ def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     z_squared = math.pow(z, 2)
     n_tilde = n + z_squared
     p_tilde = (s + z_squared / 2) / n_tilde
-    return p_tilde - z * math.sqrt(
+    return p_tilde - z * math.sqrt(p_tilde * (1 - p_tilde) / n_tilde), p_tilde + z * math.sqrt(
         p_tilde * (1 - p_tilde) / n_tilde
-    ), p_tilde + z * math.sqrt(p_tilde * (1 - p_tilde) / n_tilde)
+    )
 
 
 def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple:

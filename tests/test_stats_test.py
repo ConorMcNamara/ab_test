@@ -57,9 +57,7 @@ class TestScoreTest:
         trials = [1000, 1000]
         successes = [100, 110]
         one = score_test(trials, successes, null_lift=0.0)
-        two = score_test(
-            list(reversed(trials)), list(reversed(successes)), null_lift=0.0
-        )
+        two = score_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == two
 
     @staticmethod
@@ -148,9 +146,7 @@ class TestLikelihoodRatioTest:
         trials = [1000, 1000]
         successes = [100, 110]
         one = likelihood_ratio_test(trials, successes, null_lift=0.0)
-        two = likelihood_ratio_test(
-            list(reversed(trials)), list(reversed(successes)), null_lift=0.0
-        )
+        two = likelihood_ratio_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == two
 
 

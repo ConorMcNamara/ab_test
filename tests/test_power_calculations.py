@@ -102,9 +102,7 @@ class TestScorePower:
         null_lift = 0.0
         alt_lift = 0.50
 
-        p_null, p_alt = simple_hypothesis_from_composite(
-            trials, baseline, null_lift, alt_lift
-        )
+        p_null, p_alt = simple_hypothesis_from_composite(trials, baseline, null_lift, alt_lift)
 
         expected = score_power(trials, p_null, p_alt, alpha=alpha)
 
@@ -118,9 +116,7 @@ class TestScorePower:
         lb, ub = wilson_interval(b, B)
         with capsys.disabled():
             print(f"Predicted power: {expected:.03%}")
-            print(
-                f"Rejected null {b}/{B} times => {b / B:0.3%} in ({lb:.03%}, {ub:.03%})"
-            )
+            print(f"Rejected null {b}/{B} times => {b / B:0.3%} in ({lb:.03%}, {ub:.03%})")
 
         tol = 0.0026
         assert lb - tol <= expected

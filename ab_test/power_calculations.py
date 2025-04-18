@@ -14,6 +14,7 @@ __all__ = [
     "required_sample_size",
 ]
 
+
 def score_power(
     n: Union[np.ndarray, list],
     p_null: Union[np.ndarray, list],
@@ -90,9 +91,7 @@ def abtest_power(
         a, b, *_ = np.partition(group_sizes, 1)
         group_sizes = [a, b]
 
-    p_null, p_alt = simple_hypothesis_from_composite(
-        group_sizes, baseline, null_lift, alt_lift, lift=lift
-    )
+    p_null, p_alt = simple_hypothesis_from_composite(group_sizes, baseline, null_lift, alt_lift, lift=lift)
     return power(group_sizes, p_null, p_alt, alpha=alpha)
 
 

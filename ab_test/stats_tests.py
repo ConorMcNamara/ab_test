@@ -14,6 +14,7 @@ __all__ = [
     "z_test",
 ]
 
+
 def score_test(
     trials: Union[np.ndarray, list],
     successes: Union[np.array, list],
@@ -136,12 +137,7 @@ def likelihood_ratio_test(
         return 1.0
 
     def log_likelihood(p):
-        return sum(
-            [
-                si * np.log(pi) + (ti - si) * np.log(1 - pi)
-                for (si, ti, pi) in zip(successes, trials, p)
-            ]
-        )
+        return sum([si * np.log(pi) + (ti - si) * np.log(1 - pi) for (si, ti, pi) in zip(successes, trials, p)])
 
     ts = 2 * (log_likelihood(p1) - log_likelihood(p0))
     if crit is None:
