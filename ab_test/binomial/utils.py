@@ -281,8 +281,7 @@ def mle_under_alternative(
         successes = np.array(successes)
         trials = np.array(trials)
         return successes / trials
-    else:
-        return mle_under_null(trials, successes, null_lift=alt_lift, lift=lift)
+    return mle_under_null(trials, successes, null_lift=alt_lift, lift=lift)
 
 
 def wilson_significance(pval: float, alpha: float) -> float:

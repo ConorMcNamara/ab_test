@@ -1,16 +1,17 @@
+"Testing our power calculations"
 import numpy as np
 import pytest
 import scipy.stats as ss
 
-from ab_test.confidence_intervals import wilson_interval
-from ab_test.power_calculations import (
+from ab_test.binomial.confidence_intervals import wilson_interval
+from ab_test.binomial.power_calculations import (
     score_power,
     abtest_power,
     minimum_detectable_lift,
     required_sample_size,
-    simple_hypothesis_from_composite,
 )
-from ab_test.stats_tests import score_test
+from ab_test.binomial.stats_tests import score_test
+from ab_test.binomial.utils import simple_hypothesis_from_composite
 
 
 class TestScorePower:

@@ -4,13 +4,10 @@ __version__ = "0.1.0"
 
 from typing import List
 
-from ab_test import confidence_intervals, power_calculations, stats_tests, utils
+from ab_test import binomial
 
 __all__: List[str] = [
-    "confidence_intervals",
-    "power_calculations",
-    "stats_tests",
-    "utils",
+    "binomial"
 ]
 
 

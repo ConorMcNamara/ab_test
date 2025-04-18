@@ -1,13 +1,14 @@
+"Testing our confidence intervals"
 import pytest
 
-from ab_test.confidence_intervals import (
+from ab_test.binomial.confidence_intervals import (
     confidence_interval,
     wilson_interval,
     agresti_coull_interval,
     jeffrey_interval,
     clopper_pearson_interval,
 )
-from ab_test.stats_tests import likelihood_ratio_test, z_test
+from ab_test.binomial.stats_tests import likelihood_ratio_test, z_test
 
 
 class TestConfidenceInterval:

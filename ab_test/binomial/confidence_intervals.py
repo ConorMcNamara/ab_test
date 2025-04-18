@@ -6,8 +6,8 @@ from typing import Union
 import numpy as np
 import scipy.stats as ss
 
-from ab_test.stats_tests import score_test
-from ab_test.utils import observed_lift
+from ab_test.binomial.stats_tests import score_test
+from ab_test.binomial.utils import observed_lift
 
 __all__ = [
     "wilson_interval",
