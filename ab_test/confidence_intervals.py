@@ -1,3 +1,5 @@
+"""Calculates confidence intervals for AB Tests."""
+
 import math
 from typing import Union
 
@@ -7,6 +9,13 @@ import scipy.stats as ss
 from ab_test.stats_tests import score_test
 from ab_test.utils import observed_lift
 
+__all__ = [
+    "wilson_interval",
+    "confidence_interval",
+    "agresti_coull_interval",
+    "jeffrey_interval",
+    "clopper_pearson_interval"
+]
 
 def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     """Wilson Confidence Interval on binomial proportion

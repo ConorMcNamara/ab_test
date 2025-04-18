@@ -1,3 +1,5 @@
+"""Statistical tests to determine significance"""
+
 import math
 from typing import Optional, Union
 
@@ -6,6 +8,11 @@ import scipy.stats as ss
 
 from ab_test.utils import mle_under_null, mle_under_alternative
 
+__all__ = [
+    "score_test",
+    "likelihood_ratio_test",
+    "z_test",
+]
 
 def score_test(
     trials: Union[np.ndarray, list],

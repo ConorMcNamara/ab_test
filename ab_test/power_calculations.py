@@ -1,3 +1,5 @@
+"""Methods to calculate the power of a test"""
+
 from typing import Optional, Union
 
 import numpy as np
@@ -5,6 +7,12 @@ import scipy.stats as ss
 
 from ab_test.utils import simple_hypothesis_from_composite
 
+__all__ = [
+    "score_power",
+    "abtest_power",
+    "minimum_detectable_lift",
+    "required_sample_size",
+]
 
 def score_power(
     n: Union[np.ndarray, list],

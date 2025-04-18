@@ -1,8 +1,16 @@
+"""General utility functions."""
+
 import math
 from typing import Optional
 
 import numpy as np
 
+__all__ = [
+    "simple_hypothesis_from_composite",
+    "mle_under_null",
+    "mle_under_alternative",
+    "wilson_significance"
+]
 
 def simple_hypothesis_from_composite(
     group_sizes: np.ndarray,
