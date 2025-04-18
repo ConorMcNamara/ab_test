@@ -6,9 +6,7 @@ from typing import List
 
 from ab_test import binomial
 
-__all__: List[str] = [
-    "binomial"
-]
+__all__: List[str] = ["binomial"]
 
 
 def __dir__() -> List[str]:

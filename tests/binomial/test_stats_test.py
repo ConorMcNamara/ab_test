@@ -1,4 +1,5 @@
 """Testing our statistical tests"""
+
 import math
 
 import numpy as np
@@ -6,7 +7,18 @@ import pytest
 import scipy.stats as ss
 
 from ab_test.binomial.confidence_intervals import wilson_interval
-from ab_test.binomial.stats_tests import score_test, likelihood_ratio_test, z_test, fisher_test, barnard_exact_test, boschloo_exact_test, modified_log_likelihood_test, freeman_tukey_test, neyman_test, cressie_read_test
+from ab_test.binomial.stats_tests import (
+    score_test,
+    likelihood_ratio_test,
+    z_test,
+    fisher_test,
+    barnard_exact_test,
+    boschloo_exact_test,
+    modified_log_likelihood_test,
+    freeman_tukey_test,
+    neyman_test,
+    cressie_read_test,
+)
 
 
 class TestScoreTest:
@@ -268,6 +280,7 @@ class TestFreemanTukeyTest:
         two = freeman_tukey_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == pytest.approx(two, rel=1e-10)
 
+
 class TestNeymanTest:
     # Note that this test takes a while to go through all the permutations, even more than Barnard
     @staticmethod
@@ -306,6 +319,7 @@ class TestCressieReadTest:
         one = cressie_read_test(trials, successes, null_lift=0.0)
         two = cressie_read_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == pytest.approx(two, rel=1e-10)
+
 
 if __name__ == "__main__":
     pytest.main()

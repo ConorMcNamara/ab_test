@@ -1,4 +1,5 @@
-"Testing our power calculations"
+"""Testing our power calculations"""
+
 import numpy as np
 import pytest
 import scipy.stats as ss

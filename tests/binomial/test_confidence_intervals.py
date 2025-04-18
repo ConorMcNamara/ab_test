@@ -1,4 +1,5 @@
-"Testing our confidence intervals"
+"""Testing our confidence intervals"""
+
 import pytest
 
 from ab_test.binomial.confidence_intervals import (

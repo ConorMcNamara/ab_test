@@ -1,4 +1,5 @@
-"Testing our other functions"
+"""Testing our other functions"""
+
 import numpy as np
 import pytest
 

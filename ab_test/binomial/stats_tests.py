@@ -18,7 +18,7 @@ __all__ = [
     "modified_log_likelihood_test",
     "freeman_tukey_test",
     "neyman_test",
-    "cressie_read_test"
+    "cressie_read_test",
 ]
 
 
@@ -261,7 +261,7 @@ def fisher_test(
     if lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
 
-    non_successes = [(n_i - s_i)for n_i, s_i in zip(trials, successes)]
+    non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
     statistic, pval = ss.fisher_exact(contingency_table)
 
@@ -319,7 +319,7 @@ def barnard_exact_test(
     if lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
 
-    non_successes = [(n_i - s_i)for n_i, s_i in zip(trials, successes)]
+    non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
     barnard = ss.barnard_exact(contingency_table)
     statistic, pval = barnard.statistic, barnard.pvalue
@@ -378,7 +378,7 @@ def boschloo_exact_test(
     if lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
 
-    non_successes = [(n_i - s_i)for n_i, s_i in zip(trials, successes)]
+    non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
     boschloo = ss.boschloo_exact(contingency_table)
     statistic, pval = boschloo.statistic, boschloo.pvalue
@@ -437,7 +437,7 @@ def modified_log_likelihood_test(
     if lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
 
-    non_successes = [(n_i - s_i)for n_i, s_i in zip(trials, successes)]
+    non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
     mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="mod-log-likelihood")
     statistic, pval = mod_like.statistic, mod_like.pvalue
@@ -496,7 +496,7 @@ def freeman_tukey_test(
     if lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
 
-    non_successes = [(n_i - s_i)for n_i, s_i in zip(trials, successes)]
+    non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
     freeman_tukey = ss.chi2_contingency(contingency_table, correction=False, lambda_="freeman-tukey")
     statistic, pval = freeman_tukey.statistic, freeman_tukey.pvalue
@@ -555,7 +555,7 @@ def neyman_test(
     if lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
 
-    non_successes = [(n_i - s_i)for n_i, s_i in zip(trials, successes)]
+    non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
     neyman = ss.chi2_contingency(contingency_table, correction=False, lambda_="neyman")
     statistic, pval = neyman.statistic, neyman.pvalue
@@ -563,6 +563,7 @@ def neyman_test(
     if crit is None:
         return pval
     return abs(statistic) >= crit
+
 
 def cressie_read_test(
     trials: Union[np.ndarray, list],
@@ -613,7 +614,7 @@ def cressie_read_test(
     if lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
 
-    non_successes = [(n_i - s_i)for n_i, s_i in zip(trials, successes)]
+    non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
     mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="cressie-read")
     statistic, pval = mod_like.statistic, mod_like.pvalue
