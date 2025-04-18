@@ -7,7 +7,13 @@ import scipy.stats as ss
 from ab_test.utils import mle_under_null, mle_under_alternative
 
 
-def score_test(trials: Union[np.ndarray, list], successes: Union[np.array, list], null_lift: float = 0.0, lift: str = "relative", crit: Optional[float] = None) -> Union[float, bool]:
+def score_test(
+    trials: Union[np.ndarray, list],
+    successes: Union[np.array, list],
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    crit: Optional[float] = None,
+) -> Union[float, bool]:
     """Rao's score test for 2x2 contingency table.
 
     Parameters
@@ -41,7 +47,6 @@ def score_test(trials: Union[np.ndarray, list], successes: Union[np.array, list]
     Notes
     -----
     Only supports two experiment groups at this time.
-
     """
     if len(trials) > 2 or len(successes) > 2:
         raise NotImplementedError("Only supports a 2x2 contingency table")
@@ -70,7 +75,13 @@ def score_test(trials: Union[np.ndarray, list], successes: Union[np.array, list]
     return ts >= crit
 
 
-def likelihood_ratio_test(trials: np.ndarray, successes: np.ndarray, null_lift: float = 0.0, lift: str = "relative", crit: Optional[float] = None) -> Union[float, bool]:
+def likelihood_ratio_test(
+    trials: np.ndarray,
+    successes: np.ndarray,
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    crit: Optional[float] = None,
+) -> Union[float, bool]:
     """Likelihood ratio test for 2x2 contingency table.
 
     Parameters
@@ -104,7 +115,6 @@ def likelihood_ratio_test(trials: np.ndarray, successes: np.ndarray, null_lift: 
     Notes
     -----
     Only supports two experiment groups at this time.
-
     """
     if len(trials) > 2 or len(successes) > 2:
         raise NotImplementedError("Only supports a 2x2 contingency table")
@@ -133,7 +143,13 @@ def likelihood_ratio_test(trials: np.ndarray, successes: np.ndarray, null_lift: 
     return ts >= crit
 
 
-def z_test(trials: np.ndarray, successes: np.ndarray, null_lift: float = 0.0, lift: str = "relative", crit: Optional[float] = None) -> Union[float, bool]:
+def z_test(
+    trials: np.ndarray,
+    successes: np.ndarray,
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    crit: Optional[float] = None,
+) -> Union[float, bool]:
     """Z test for 2x2 contingency table.
 
     Parameters
@@ -169,7 +185,6 @@ def z_test(trials: np.ndarray, successes: np.ndarray, null_lift: float = 0.0, li
     Notes
     -----
     Only supports two experiment groups at this time.
-
     """
     if len(trials) > 2 or len(successes) > 2:
         raise NotImplementedError("Only supports a 2x2 contingency table")

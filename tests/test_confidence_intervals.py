@@ -1,12 +1,16 @@
 import pytest
 
-from ab_test.confidence_intervals import confidence_interval, wilson_interval, agresti_coull_interval, jeffrey_interval, \
-    clopper_pearson_interval
+from ab_test.confidence_intervals import (
+    confidence_interval,
+    wilson_interval,
+    agresti_coull_interval,
+    jeffrey_interval,
+    clopper_pearson_interval,
+)
 from ab_test.stats_tests import likelihood_ratio_test, z_test
 
 
 class TestConfidenceInterval:
-
     @staticmethod
     def test_conf_int_relative():
         trials = [1000, 1000]
@@ -186,6 +190,7 @@ class TestConfidenceInterval:
 
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
+
 
 if __name__ == "__main__":
     pytest.main()

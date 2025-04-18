@@ -1,11 +1,15 @@
 import numpy as np
 import pytest
 
-from ab_test.utils import observed_lift, simple_hypothesis_from_composite, wilson_significance, mle_under_null
+from ab_test.utils import (
+    observed_lift,
+    simple_hypothesis_from_composite,
+    wilson_significance,
+    mle_under_null,
+)
 
 
 class TestMisc:
-
     @staticmethod
     def test_observed_lift_relative():
         trials = [1000, 1000]
@@ -45,7 +49,11 @@ class TestMisc:
         ],
     )
     def test_simple_hypothesis_from_composite_relative_lift(
-        group_sizes: np.ndarray, baseline: float, null_lift: float, alt_lift: float, expected_p_alt: float
+        group_sizes: np.ndarray,
+        baseline: float,
+        null_lift: float,
+        alt_lift: float,
+        expected_p_alt: float,
     ):
         # Note: we used cvxpy to solve the problem directly, but then
         # hard-coded the result so I don't need to have cvxpy as a dependency.
@@ -91,7 +99,11 @@ class TestMisc:
         ],
     )
     def test_simple_hypothesis_from_composite_absolute_lift(
-        group_sizes: np.ndarray, baseline: float, null_lift: float, alt_lift: float, expected_p_alt: np.ndarray
+        group_sizes: np.ndarray,
+        baseline: float,
+        null_lift: float,
+        alt_lift: float,
+        expected_p_alt: np.ndarray,
     ):
         # Note: we used cvxpy to solve the problem directly, but then
         # hard-coded the result so I don't need to have cvxpy as a dependency.
@@ -143,6 +155,7 @@ class TestMisc:
         actual = wilson_significance(pval, alpha)
         assert actual == pytest.approx(expected)
 
+
 class TestMaximumLikelihoodEstimation:
     @staticmethod
     def test_null_lift_zero():
@@ -174,9 +187,7 @@ class TestMaximumLikelihoodEstimation:
         # prob.solve()
         # expected = p.value
         expected = [0.10945852024217109, 0.1105531054445928]
-        actual = mle_under_null(
-            trials, successes, null_lift=null_lift, lift="relative"
-        )
+        actual = mle_under_null(trials, successes, null_lift=null_lift, lift="relative")
 
         assert actual[1] == pytest.approx(actual[0] * (1 + null_lift))
         assert actual == pytest.approx(expected)
@@ -202,9 +213,7 @@ class TestMaximumLikelihoodEstimation:
         # prob.solve()
         # expected = p.value
         expected = [0.10480017, 0.11480017]
-        actual = mle_under_null(
-            trials, successes, null_lift=null_lift, lift="absolute"
-        )
+        actual = mle_under_null(trials, successes, null_lift=null_lift, lift="absolute")
 
         assert actual[1] == pytest.approx(actual[0] + null_lift)
         assert actual == pytest.approx(expected, abs=1e-6)

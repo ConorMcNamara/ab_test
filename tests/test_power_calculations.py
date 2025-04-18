@@ -3,8 +3,13 @@ import pytest
 import scipy.stats as ss
 
 from ab_test.confidence_intervals import wilson_interval
-from ab_test.power_calculations import score_power, abtest_power, minimum_detectable_lift, required_sample_size, \
-    simple_hypothesis_from_composite
+from ab_test.power_calculations import (
+    score_power,
+    abtest_power,
+    minimum_detectable_lift,
+    required_sample_size,
+    simple_hypothesis_from_composite,
+)
 from ab_test.stats_tests import score_test
 
 
@@ -114,7 +119,7 @@ class TestScorePower:
         with capsys.disabled():
             print(f"Predicted power: {expected:.03%}")
             print(
-                f"Rejected null {b}/{B} times => {b/B:0.3%} in ({lb:.03%}, {ub:.03%})"
+                f"Rejected null {b}/{B} times => {b / B:0.3%} in ({lb:.03%}, {ub:.03%})"
             )
 
         tol = 0.0026

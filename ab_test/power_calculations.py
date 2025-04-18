@@ -6,7 +6,12 @@ import scipy.stats as ss
 from ab_test.utils import simple_hypothesis_from_composite
 
 
-def score_power(n: Union[np.ndarray, list], p_null: Union[np.ndarray, list], p_alt: Union[np.ndarray, list], alpha: float = 0.05) -> float:
+def score_power(
+    n: Union[np.ndarray, list],
+    p_null: Union[np.ndarray, list],
+    p_alt: Union[np.ndarray, list],
+    alpha: float = 0.05,
+) -> float:
     """Power of Rao's Score Test
 
     Parameters
@@ -31,10 +36,9 @@ def score_power(n: Union[np.ndarray, list], p_null: Union[np.ndarray, list], p_a
     -----
     Rao's score test is the same as Pearson's chi-squared test for 2x2
     contingency tables, so the power has a nice simple form.
-
     """
     nc = 0.0
-    for (ni, null, alt) in zip(n, p_null, p_alt):
+    for ni, null, alt in zip(n, p_null, p_alt):
         nc += ni * (null - alt) * (null - alt) / (null * (1.0 - null))
     return ss.ncx2.sf(ss.chi2.isf(alpha, df=1), df=1, nc=nc)
 
@@ -72,7 +76,6 @@ def abtest_power(
     -------
      power : float
         The power of the test.
-
     """
     if len(group_sizes) > 2:
         # Get two smallest groups -- this governs the overall power
@@ -83,6 +86,7 @@ def abtest_power(
         group_sizes, baseline, null_lift, alt_lift, lift=lift
     )
     return power(group_sizes, p_null, p_alt, alpha=alpha)
+
 
 def minimum_detectable_lift(
     group_sizes: Union[np.ndarray, list],
@@ -129,7 +133,6 @@ def minimum_detectable_lift(
     -----
     Uses binary search to compute the smallest lift/drop with adequate
     power.
-
     """
 
     tol = 1e-6
@@ -244,7 +247,6 @@ def required_sample_size(
     -----
     Uses binary search to compute the smallest sample size with
     adequate power.
-
     """
 
     tol = 0.01

@@ -9,7 +9,6 @@ from ab_test.stats_tests import score_test, likelihood_ratio_test, z_test
 
 
 class TestScoreTest:
-
     @staticmethod
     def test_null_lift():
         trials = [1000, 1000]
@@ -24,9 +23,7 @@ class TestScoreTest:
         successes = [100, 110]
         null_lift = 0.10
         expected = 1.0
-        actual = score_test(
-            trials, successes, null_lift=null_lift, lift="relative"
-        )
+        actual = score_test(trials, successes, null_lift=null_lift, lift="relative")
         assert actual == pytest.approx(expected)
 
     @staticmethod
@@ -35,9 +32,7 @@ class TestScoreTest:
         successes = [100, 110]
         null_lift = 0.01
         expected = 1.0
-        actual = score_test(
-            trials, successes, null_lift=null_lift, lift="absolute"
-        )
+        actual = score_test(trials, successes, null_lift=null_lift, lift="absolute")
         assert actual == pytest.approx(expected)
 
     @staticmethod
@@ -46,9 +41,7 @@ class TestScoreTest:
         successes = [100, 110]
         null_lift = 0.10
         expected = 1.0
-        actual = score_test(
-            trials, successes, null_lift=null_lift, lift="relative"
-        )
+        actual = score_test(trials, successes, null_lift=null_lift, lift="relative")
         assert actual == pytest.approx(expected)
 
     @staticmethod
@@ -127,9 +120,9 @@ class TestScoreTest:
         lbz, ubz = wilson_interval(bz, B)
         with capsys.disabled():
             print(f"With {B:,d} trials, half width of 95% conf int: {wdth:.04%}")
-            print(f"Score test: b={bs} => {bs/B:.04%} in ({lbs:.04%}, {ubs:.04%})")
-            print(f"LR test: b={bl} => {bl/B:.04%} in ({lbl:.04%}, {ubl:.04%})")
-            print(f"Z test: b={bz} => {bz/B:.04%} in ({lbz:.04%}, {ubz:.04%})")
+            print(f"Score test: b={bs} => {bs / B:.04%} in ({lbs:.04%}, {ubs:.04%})")
+            print(f"LR test: b={bl} => {bl / B:.04%} in ({lbl:.04%}, {ubl:.04%})")
+            print(f"Z test: b={bz} => {bz / B:.04%} in ({lbz:.04%}, {ubz:.04%})")
 
         tol = 0.0028
         assert lbs - tol <= alpha
@@ -141,7 +134,6 @@ class TestScoreTest:
 
 
 class TestLikelihoodRatioTest:
-
     @staticmethod
     def test_null_lift():
         trials = [1000, 1000]
@@ -161,6 +153,7 @@ class TestLikelihoodRatioTest:
         )
         assert one == two
 
+
 class TestZTest:
     @staticmethod
     def test_null_lift():
@@ -176,10 +169,9 @@ class TestZTest:
         trials = [1000, 1000]
         successes = [100, 110]
         one = z_test(trials, successes, null_lift=0.0)
-        two = z_test(
-            list(reversed(trials)), list(reversed(successes)), null_lift=0.0
-        )
+        two = z_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == two
+
 
 if __name__ == "__main__":
     pytest.main()

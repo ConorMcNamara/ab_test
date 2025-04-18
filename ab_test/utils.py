@@ -5,7 +5,11 @@ import numpy as np
 
 
 def simple_hypothesis_from_composite(
-    group_sizes: np.ndarray, baseline: float, null_lift: float, alt_lift: float, lift: str = "relative"
+    group_sizes: np.ndarray,
+    baseline: float,
+    null_lift: float,
+    alt_lift: float,
+    lift: str = "relative",
 ) -> np.array:
     """Translate a composite hypothesis into a simple hypothesis.
 
@@ -67,7 +71,6 @@ def simple_hypothesis_from_composite(
     we can minimize lambda subject to the constraint pb = pa * (1 + alt_lift).
     Treating na, nb, pi_a, and pi_b as data, this is a convex optimization
     problem. The solution (pa, pb) is the simple alternative hypothesis.
-
     """
     na = group_sizes[0]
     nb = group_sizes[1]
@@ -100,21 +103,23 @@ def simple_hypothesis_from_composite(
     return p_null, p_alt
 
 
-def observed_lift(trials: np.array, successes: np.array, lift: str = "relative") -> float:
+def observed_lift(
+    trials: np.array, successes: np.array, lift: str = "relative"
+) -> float:
     """Calculates the lift from our experiment
 
     Parameters
     ----------
-    trials: numpy array
+    trials : numpy array
         The number of trials for each iteration of an AB test
-    successes: numpy array
+    successes : numpy array
         The number of successes for each iteration of an AB test
-    lift: {'relative', 'absolute'}
+    lift : {'relative', 'absolute'}
         The lift we are measuring
 
     Returns
     -------
-    ote: float
+    ote : float
         The observed treatment effect, i.e., lift of our experiment
     """
     pa = successes[0] / trials[0]
@@ -126,7 +131,12 @@ def observed_lift(trials: np.array, successes: np.array, lift: str = "relative")
     return ote
 
 
-def mle_under_null(trials: np.ndarray, successes: np.ndarray, null_lift: float = 0.0, lift: str = "relative") -> np.ndarray:
+def mle_under_null(
+    trials: np.ndarray,
+    successes: np.ndarray,
+    null_lift: float = 0.0,
+    lift: str = "relative",
+) -> np.ndarray:
     """Maximum Likelihood Estimation under H0
 
     Parameters
@@ -171,7 +181,6 @@ def mle_under_null(trials: np.ndarray, successes: np.ndarray, null_lift: float =
     complicated! It involves solving a quadratic equation. When using absolute
     lift, we need to find the root of a cubic polynomial. It is easiest to use
     Newton's method for this.
-
     """
     if null_lift == 0:
         # MLE of parameters under null hypothesis
@@ -237,7 +246,12 @@ def mle_under_null(trials: np.ndarray, successes: np.ndarray, null_lift: float =
     return p
 
 
-def mle_under_alternative(trials: np.ndarray, successes: np.ndarray, alt_lift: Optional[float] = None, lift: str = "relative") -> np.ndarray:
+def mle_under_alternative(
+    trials: np.ndarray,
+    successes: np.ndarray,
+    alt_lift: Optional[float] = None,
+    lift: str = "relative",
+) -> np.ndarray:
     """Maximum Likelihood Estimation under H1
 
     Parameters
@@ -264,7 +278,6 @@ def mle_under_alternative(trials: np.ndarray, successes: np.ndarray, alt_lift: O
     The most common alternative hypothesis considered is unconstrained, in
     which case p is simply successes / trials. But we also support an
     alternative hypothesis of the same form as H0, in case we ever want that.
-
     """
     if alt_lift is None:
         successes = np.array(successes)
@@ -297,7 +310,6 @@ def wilson_significance(pval: float, alpha: float) -> float:
      - When the result is statistically significant, W > 0.
      - The larger W, the stronger the evidence.
      - An increase in W of 1 corresponds to a 10x decrease in p-value.
-
     """
     try:
         W = math.log10(alpha) - math.log10(pval)

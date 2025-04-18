@@ -28,7 +28,6 @@ def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     Notes
     -----
     Assuming s ~ Binom(n, p), this function returns a confidence interval on p.
-
     """
     z = ss.norm.isf(alpha / 2)
     z_squared = math.pow(z, 2)
@@ -43,8 +42,13 @@ def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     # wdth = (z / (n + z_squared)) * math.sqrt(inner_wdth)
     return (ctr - wdth) / denom, (ctr + wdth) / denom
 
+
 def confidence_interval(
-    trials: Union[np.ndarray, list], successes:Union[np.ndarray, list], test=score_test, alpha: float = 0.05, lift: str = "relative"
+    trials: Union[np.ndarray, list],
+    successes: Union[np.ndarray, list],
+    test=score_test,
+    alpha: float = 0.05,
+    lift: str = "relative",
 ) -> tuple:
     """Confidence interval for relative lift.
 
@@ -75,7 +79,6 @@ def confidence_interval(
     Notes
     -----
     Uses binary search to compute a confidence interval.
-
     """
 
     tol = 1e-6
@@ -176,6 +179,7 @@ def confidence_interval(
 
     return lb, ub
 
+
 def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     """Agresti-Coull Interval on binomial proportions
 
@@ -196,13 +200,14 @@ def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     Notes
     -----
     This returns a confidence interval on `p_tilde`
-
     """
     z = ss.norm.isf(alpha / 2)
     z_squared = math.pow(z, 2)
     n_tilde = n + z_squared
     p_tilde = (s + z_squared / 2) / n_tilde
-    return p_tilde - z * math.sqrt(p_tilde * (1 - p_tilde) / n_tilde), p_tilde + z * math.sqrt(p_tilde * (1 - p_tilde) / n_tilde)
+    return p_tilde - z * math.sqrt(
+        p_tilde * (1 - p_tilde) / n_tilde
+    ), p_tilde + z * math.sqrt(p_tilde * (1 - p_tilde) / n_tilde)
 
 
 def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
@@ -225,7 +230,6 @@ def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     Notes
     -----
     This assumes a Beta distribution of (1 / 2, 1 / 2)
-
     """
     lb = ss.beta.ppf(alpha / 2, s + 1 / 2, n - s + 1 / 2)
     ub = ss.beta.ppf(1 - alpha / 2, s + 1 / 2, n - s + 1 / 2)
@@ -255,5 +259,5 @@ def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     an exact method, meaning that its intervals can be wider than other methods like Wilson or Jeffrey
     """
     lb = ss.beta.ppf(alpha / 2, s, n - s + 1)
-    ub = ss.beta.ppf(1 - alpha /2, s + 1, n - s)
+    ub = ss.beta.ppf(1 - alpha / 2, s + 1, n - s)
     return lb, ub
