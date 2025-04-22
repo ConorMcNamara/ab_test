@@ -15,7 +15,7 @@ __all__ = [
     "agresti_coull_interval",
     "jeffrey_interval",
     "clopper_pearson_interval",
-    "wald_interval"
+    "wald_interval",
 ]
 
 
@@ -55,13 +55,13 @@ def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
 
 
 def confidence_interval(
-        trials: Union[np.ndarray, list],
-        successes: Union[np.ndarray, list],
-        test=score_test,
-        alpha: float = 0.05,
-        lift: str = "relative",
-        method: str = "binary_search",
-        tol: float = 1e-06
+    trials: Union[np.ndarray, list],
+    successes: Union[np.ndarray, list],
+    test=score_test,
+    alpha: float = 0.05,
+    lift: str = "relative",
+    method: str = "binary_search",
+    tol: float = 1e-06,
 ) -> tuple:
     """Confidence interval for relative lift.
 
@@ -105,7 +105,6 @@ def confidence_interval(
         upper_bound_exists = False
     if method == "binary_search":
         if test.__name__ in ["score_test", "likelihood_ratio_test", "z_test"]:
-
             if lift == "relative":
                 lb_lb = ote - 0.01
                 lb_ub = ote
@@ -196,7 +195,7 @@ def confidence_interval(
         else:
             raise NotImplementedError(f"binary_search is not implemented for {test}")
     else:
-        if method in ["wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald']:
+        if method in ["wilson", "jeffrey", "agresti-coull", "clopper-pearson", "wald"]:
             if method == "wilson":
                 lower1, upper1 = wilson_interval(successes[0], trials[0], alpha)
                 lower2, upper2 = wilson_interval(successes[1], trials[1], alpha)
@@ -213,10 +212,10 @@ def confidence_interval(
                 lower1, upper1 = wald_interval(successes[0], trials[0], alpha)
                 lower2, upper2 = wald_interval(successes[1], trials[1], alpha)
             if lift == "relative" and method != "delta":
-                lower1 /= (successes[0] / trials[0])
-                lower2 /= (successes[0] / trials[0])
-                upper1 /= (successes[0] / trials[0])
-                upper2 /= (successes[0] / trials[0])
+                lower1 /= successes[0] / trials[0]
+                lower2 /= successes[0] / trials[0]
+                upper1 /= successes[0] / trials[0]
+                upper2 /= successes[0] / trials[0]
             var_p1 = math.pow((upper1 - lower1) / 2, 2)
             var_p2 = math.pow((upper2 - lower2) / 2, 2)
             lb = ote - math.sqrt(var_p1 + var_p2)
@@ -310,6 +309,7 @@ def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     ub = ss.beta.ppf(1 - alpha / 2, s + 1, n - s)
     return lb, ub
 
+
 def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     """The Wald Interval on Binomial Proportions
 
@@ -338,7 +338,9 @@ def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     return lb, ub
 
 
-def delta_interval(trials: Union[np.ndarray, list], successes: Union[np.ndarray, list], alpha: float, lift: str ="relative") -> tuple:
+def delta_interval(
+    trials: Union[np.ndarray, list], successes: Union[np.ndarray, list], alpha: float, lift: str = "relative"
+) -> tuple:
     """The confidence interval for Binomial Proportions using the Delta Method
 
     Parameters
@@ -372,6 +374,7 @@ def delta_interval(trials: Union[np.ndarray, list], successes: Union[np.ndarray,
             return -p1 / math.pow(p2, 2)
     else:
         diff = p1_hat - p2_hat
+
         def dg_dp1(p2):
             return 1
 
@@ -381,9 +384,11 @@ def delta_interval(trials: Union[np.ndarray, list], successes: Union[np.ndarray,
     var_p1 = p1_hat * (1 - p1_hat) / trials[1]
     var_p2 = p2_hat * (1 - p2_hat) / trials[0]
     cov_p1_p2 = 0  # Covariance is 0 for independent samples
-    var_g = math.pow(dg_dp1(p2_hat), 2) * var_p1 + \
-            math.pow(dg_dp2(p1_hat, p2_hat), 2) * var_p2 + \
-            2 * dg_dp1(p2_hat) * dg_dp2(p1_hat, p2_hat) * cov_p1_p2
+    var_g = (
+        math.pow(dg_dp1(p2_hat), 2) * var_p1
+        + math.pow(dg_dp2(p1_hat, p2_hat), 2) * var_p2
+        + 2 * dg_dp1(p2_hat) * dg_dp2(p1_hat, p2_hat) * cov_p1_p2
+    )
     se_g = np.sqrt(var_g)
     z = ss.norm.isf(alpha / 2)  # Calculate the z-score
     lb = diff - z * se_g

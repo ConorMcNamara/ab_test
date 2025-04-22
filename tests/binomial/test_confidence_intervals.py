@@ -7,7 +7,8 @@ from ab_test.binomial.confidence_intervals import (
     wilson_interval,
     agresti_coull_interval,
     jeffrey_interval,
-    clopper_pearson_interval, wald_interval,
+    clopper_pearson_interval,
+    wald_interval,
 )
 from ab_test.binomial.stats_tests import likelihood_ratio_test, z_test
 
@@ -147,12 +148,7 @@ class TestConfidenceIntervalComparison:
         expected_high = 0.03686652401053076
 
         actual_low, actual_high = confidence_interval(
-            trials,
-            successes,
-            test=z_test,
-            alpha=0.05,
-            lift="absolute",
-            method="wald"
+            trials, successes, test=z_test, alpha=0.05, lift="absolute", method="wald"
         )
 
         assert actual_low == pytest.approx(expected_low)
@@ -168,12 +164,7 @@ class TestConfidenceIntervalComparison:
         expected_high = 0.036900154961672066
 
         actual_low, actual_high = confidence_interval(
-            trials,
-            successes,
-            test=z_test,
-            alpha=0.05,
-            lift="absolute",
-            method="wilson"
+            trials, successes, test=z_test, alpha=0.05, lift="absolute", method="wilson"
         )
 
         assert actual_low == pytest.approx(expected_low)
@@ -189,12 +180,7 @@ class TestConfidenceIntervalComparison:
         expected_high = 0.036984648684095955
 
         actual_low, actual_high = confidence_interval(
-            trials,
-            successes,
-            test=z_test,
-            alpha=0.05,
-            lift="absolute",
-            method="agresti-coull"
+            trials, successes, test=z_test, alpha=0.05, lift="absolute", method="agresti-coull"
         )
 
         assert actual_low == pytest.approx(expected_low)
@@ -210,17 +196,11 @@ class TestConfidenceIntervalComparison:
         expected_high = 0.036862989912939875
 
         actual_low, actual_high = confidence_interval(
-            trials,
-            successes,
-            test=z_test,
-            alpha=0.05,
-            lift="absolute",
-            method="jeffrey"
+            trials, successes, test=z_test, alpha=0.05, lift="absolute", method="jeffrey"
         )
 
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
-
 
     @staticmethod
     def test_conf_int_absolute_clopper_pearson():
@@ -232,12 +212,7 @@ class TestConfidenceIntervalComparison:
         expected_high = 0.03756781187886864
 
         actual_low, actual_high = confidence_interval(
-            trials,
-            successes,
-            test=z_test,
-            alpha=0.05,
-            lift="absolute",
-            method="clopper-pearson"
+            trials, successes, test=z_test, alpha=0.05, lift="absolute", method="clopper-pearson"
         )
 
         assert actual_low == pytest.approx(expected_low)
@@ -253,12 +228,7 @@ class TestConfidenceIntervalComparison:
         expected_high = 0.3818534520135499
 
         actual_low, actual_high = confidence_interval(
-            trials,
-            successes,
-            test=z_test,
-            alpha=0.05,
-            lift="relative",
-            method="delta"
+            trials, successes, test=z_test, alpha=0.05, lift="relative", method="delta"
         )
 
         assert actual_low == pytest.approx(expected_low)
@@ -274,12 +244,7 @@ class TestConfidenceIntervalComparison:
         expected_high = 0.03686652401053076
 
         actual_low, actual_high = confidence_interval(
-            trials,
-            successes,
-            test=z_test,
-            alpha=0.05,
-            lift="absolute",
-            method="delta"
+            trials, successes, test=z_test, alpha=0.05, lift="absolute", method="delta"
         )
 
         assert actual_low == pytest.approx(expected_low)
@@ -287,7 +252,6 @@ class TestConfidenceIntervalComparison:
 
 
 class TestConfidenceInterval:
-
     @staticmethod
     def test_wilson_interval():
         s = 100
@@ -357,6 +321,7 @@ class TestConfidenceInterval:
 
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
+
 
 if __name__ == "__main__":
     pytest.main()
