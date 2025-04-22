@@ -1,7 +1,7 @@
 """General utility functions."""
 
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 
@@ -9,7 +9,7 @@ __all__ = ["simple_hypothesis_from_composite", "mle_under_null", "mle_under_alte
 
 
 def simple_hypothesis_from_composite(
-    group_sizes: np.ndarray,
+    group_sizes: Union[np.ndarray, list],
     baseline: float,
     null_lift: float,
     alt_lift: float,
@@ -103,7 +103,7 @@ def simple_hypothesis_from_composite(
     return p_null, p_alt
 
 
-def observed_lift(trials: np.array, successes: np.array, lift: str = "relative") -> float:
+def observed_lift(trials: Union[np.array, list], successes: Union[np.array, list], lift: str = "relative") -> float:
     """Calculates the lift from our experiment
 
     Parameters
@@ -130,8 +130,8 @@ def observed_lift(trials: np.array, successes: np.array, lift: str = "relative")
 
 
 def mle_under_null(
-    trials: np.ndarray,
-    successes: np.ndarray,
+    trials: Union[np.ndarray, list],
+    successes: Union[np.ndarray, list],
     null_lift: float = 0.0,
     lift: str = "relative",
 ) -> np.ndarray:
@@ -245,8 +245,8 @@ def mle_under_null(
 
 
 def mle_under_alternative(
-    trials: np.ndarray,
-    successes: np.ndarray,
+    trials: Union[np.ndarray, list],
+    successes: Union[np.ndarray, list],
     alt_lift: Optional[float] = None,
     lift: str = "relative",
 ) -> np.ndarray:

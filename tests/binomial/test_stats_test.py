@@ -242,7 +242,6 @@ class TestBoschlooTest:
 
 
 class TestModifiedLikelihoodTest:
-    # Note that this test takes a while to go through all the permutations, even more than Barnard
     @staticmethod
     def test_null_lift():
         trials = [1000, 1000]
@@ -262,7 +261,6 @@ class TestModifiedLikelihoodTest:
 
 
 class TestFreemanTukeyTest:
-    # Note that this test takes a while to go through all the permutations, even more than Barnard
     @staticmethod
     def test_null_lift():
         trials = [1000, 1000]
@@ -282,7 +280,6 @@ class TestFreemanTukeyTest:
 
 
 class TestNeymanTest:
-    # Note that this test takes a while to go through all the permutations, even more than Barnard
     @staticmethod
     def test_null_lift():
         trials = [1000, 1000]
@@ -302,7 +299,6 @@ class TestNeymanTest:
 
 
 class TestCressieReadTest:
-    # Note that this test takes a while to go through all the permutations, even more than Barnard
     @staticmethod
     def test_null_lift():
         trials = [1000, 1000]

@@ -15,6 +15,7 @@ __all__ = [
     "agresti_coull_interval",
     "jeffrey_interval",
     "clopper_pearson_interval",
+    "wald_interval"
 ]
 
 
@@ -54,11 +55,13 @@ def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
 
 
 def confidence_interval(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
-    test=score_test,
-    alpha: float = 0.05,
-    lift: str = "relative",
+        trials: Union[np.ndarray, list],
+        successes: Union[np.ndarray, list],
+        test=score_test,
+        alpha: float = 0.05,
+        lift: str = "relative",
+        method: str = "binary_search",
+        tol: float = 1e-06
 ) -> tuple:
     """Confidence interval for relative lift.
 
@@ -80,6 +83,10 @@ def confidence_interval(
         Whether to interpret the null lift relative to the baseline success
         rate, or in absolute terms. See Notes in
         `maximum_likelihood_estimation`.
+    method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald'}
+        How we want to calculate the confidence interval
+    tol : float, default=1e-06
+        The tolerance for our binary search. Lower values means narrower CIs
 
     Returns
     -------
@@ -90,103 +97,134 @@ def confidence_interval(
     -----
     Uses binary search to compute a confidence interval.
     """
-
-    tol = 1e-6
-    upper_bound_exists = True
     try:
         ote = observed_lift(trials, successes, lift=lift)
+        upper_bound_exists = True
     except ZeroDivisionError:
         ote = 1.0
         upper_bound_exists = False
+    if method == "binary_search":
+        if test.__name__ in ["score_test", "likelihood_ratio_test", "z_test"]:
 
-    if lift == "relative":
-        lb_lb = ote - 0.01
-        lb_ub = ote
-        ub_lb = ote
-        ub_ub = ote + 0.01
-    else:
-        pa = successes[0] / trials[0]
-        lb_lb = max(ote - 0.01, -pa)
-        lb_ub = ote
-        ub_lb = ote
-        ub_ub = min(ote + 0.01, 1.0 - pa)
+            if lift == "relative":
+                lb_lb = ote - 0.01
+                lb_ub = ote
+                ub_lb = ote
+                ub_ub = ote + 0.01
+            else:
+                pa = successes[0] / trials[0]
+                lb_lb = max(ote - 0.01, -pa)
+                lb_ub = ote
+                ub_lb = ote
+                ub_ub = min(ote + 0.01, 1.0 - pa)
 
-    # Initial search for a lower bound on the lower bound of the
-    # confidence interval.
-    eps = 0.01
-    lower_bound_exists = True
-    while True:
-        if (lift == "relative" and lb_lb < -1) or (lift == "absolute" and lb_lb < -pa):
-            lower_bound_exists = False
-            break
+            # Initial search for a lower bound on the lower bound of the
+            # confidence interval.
+            eps = 0.01
+            lower_bound_exists = True
+            while True:
+                if (lift == "relative" and lb_lb < -1) or (lift == "absolute" and lb_lb < -pa):
+                    lower_bound_exists = False
+                    break
 
-        pval = test(trials, successes, null_lift=lb_lb, lift=lift)
-        if pval >= alpha:
-            # lb_lb is consistent with data; decrease it
-            lb_ub = lb_lb
-            lb_lb -= eps
-            eps *= 2
+                pval = test(trials, successes, null_lift=lb_lb, lift=lift)
+                if pval >= alpha:
+                    # lb_lb is consistent with data; decrease it
+                    lb_ub = lb_lb
+                    lb_lb -= eps
+                    eps *= 2
+                else:
+                    break
+
+            if lower_bound_exists:
+                # (lb_lb, lb_ub) is a bound on the lower bound of the confidence interval
+                while (lb_ub - lb_lb) > tol:
+                    lb = 0.5 * (lb_lb + lb_ub)
+                    pval = test(trials, successes, null_lift=lb, lift=lift)
+                    if pval >= alpha:
+                        # lb is consistent with data; expand the interval by
+                        # decreasing lb.
+                        lb_ub = lb
+                    else:
+                        # lb is rejected by the test; shrink the interval by
+                        # increasing lb.
+                        lb_lb = lb
+
+                lb = 0.5 * (lb_lb + lb_ub)
+            elif successes[0] > 0:
+                lb = -1.0
+            else:
+                lb = "-Infinity"
+
+            # Initial search for an upper bound on the upper bound of the
+            # confidence interval.
+            if upper_bound_exists:
+                eps = 0.01
+                while True:
+                    if ub_ub > 100:
+                        upper_bound_exists = False
+                        break
+
+                    pval = test(trials, successes, null_lift=ub_ub, lift=lift)
+                    if pval >= alpha:
+                        # ub_ub is consistent with data; increase it
+                        ub_lb = ub_ub
+                        ub_ub += eps
+                        eps *= 2
+                    else:
+                        break
+
+            if upper_bound_exists:
+                # (ub_lb, ub_ub) is a bound on the upper bound of the confidence interval
+                while (ub_ub - ub_lb) > tol:
+                    ub = 0.5 * (ub_lb + ub_ub)
+                    pval = test(trials, successes, null_lift=ub, lift=lift)
+                    if pval >= alpha:
+                        # ub is consistent with data; expand the interval by
+                        # increasing ub.
+                        ub_lb = ub
+                    else:
+                        # ub is rejected by the test; shrink the interval by
+                        # decreasing ub.
+                        ub_ub = ub
+
+                ub = 0.5 * (ub_lb + ub_ub)
+            elif lift == "relative":
+                ub = "Infinity"
+            else:
+                ub = 1.0
         else:
-            break
-
-    if lower_bound_exists:
-        # (lb_lb, lb_ub) is a bound on the lower bound of the confidence interval
-        while (lb_ub - lb_lb) > tol:
-            lb = 0.5 * (lb_lb + lb_ub)
-            pval = test(trials, successes, null_lift=lb, lift=lift)
-            if pval >= alpha:
-                # lb is consistent with data; expand the interval by
-                # decreasing lb.
-                lb_ub = lb
-            else:
-                # lb is rejected by the test; shrink the interval by
-                # increasing lb.
-                lb_lb = lb
-
-        lb = 0.5 * (lb_lb + lb_ub)
-    elif successes[0] > 0:
-        lb = -1.0
+            raise NotImplementedError(f"binary_search is not implemented for {test}")
     else:
-        lb = "-Infinity"
-
-    # Initial search for an upper bound on the upper bound of the
-    # confidence interval.
-    if upper_bound_exists:
-        eps = 0.01
-        while True:
-            if ub_ub > 100:
-                upper_bound_exists = False
-                break
-
-            pval = test(trials, successes, null_lift=ub_ub, lift=lift)
-            if pval >= alpha:
-                # ub_ub is consistent with data; increase it
-                ub_lb = ub_ub
-                ub_ub += eps
-                eps *= 2
+        if method in ["wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald']:
+            if method == "wilson":
+                lower1, upper1 = wilson_interval(successes[0], trials[0], alpha)
+                lower2, upper2 = wilson_interval(successes[1], trials[1], alpha)
+            elif method == "jeffrey":
+                lower1, upper1 = jeffrey_interval(successes[0], trials[0], alpha)
+                lower2, upper2 = jeffrey_interval(successes[1], trials[1], alpha)
+            elif method == "agresti-coull":
+                lower1, upper1 = agresti_coull_interval(successes[0], trials[0], alpha)
+                lower2, upper2 = agresti_coull_interval(successes[1], trials[1], alpha)
+            elif method == "clopper-pearson":
+                lower1, upper1 = clopper_pearson_interval(successes[0], trials[0], alpha)
+                lower2, upper2 = clopper_pearson_interval(successes[1], trials[1], alpha)
             else:
-                break
-
-    if upper_bound_exists:
-        # (ub_lb, ub_ub) is a bound on the upper bound of the confidence interval
-        while (ub_ub - ub_lb) > tol:
-            ub = 0.5 * (ub_lb + ub_ub)
-            pval = test(trials, successes, null_lift=ub, lift=lift)
-            if pval >= alpha:
-                # ub is consistent with data; expand the interval by
-                # increasing ub.
-                ub_lb = ub
-            else:
-                # ub is rejected by the test; shrink the interval by
-                # decreasing ub.
-                ub_ub = ub
-
-        ub = 0.5 * (ub_lb + ub_ub)
-    elif lift == "relative":
-        ub = "Infinity"
-    else:
-        ub = 1.0
-
+                lower1, upper1 = wald_interval(successes[0], trials[0], alpha)
+                lower2, upper2 = wald_interval(successes[1], trials[1], alpha)
+            if lift == "relative" and method != "delta":
+                lower1 /= (successes[0] / trials[0])
+                lower2 /= (successes[0] / trials[0])
+                upper1 /= (successes[0] / trials[0])
+                upper2 /= (successes[0] / trials[0])
+            var_p1 = math.pow((upper1 - lower1) / 2, 2)
+            var_p2 = math.pow((upper2 - lower2) / 2, 2)
+            lb = ote - math.sqrt(var_p1 + var_p2)
+            ub = ote + math.sqrt(var_p1 + var_p2)
+        elif method == "delta":
+            lb, ub = delta_interval(trials, successes, alpha, lift)
+        else:
+            raise NotImplementedError(f"No support for {method} method of generating confidence intervals")
     return lb, ub
 
 
@@ -270,4 +308,84 @@ def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     """
     lb = ss.beta.ppf(alpha / 2, s, n - s + 1)
     ub = ss.beta.ppf(1 - alpha / 2, s + 1, n - s)
+    return lb, ub
+
+def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
+    """The Wald Interval on Binomial Proportions
+
+    Parameters
+    ----------
+     s, n : int
+        The number of successes, trials.
+     alpha : float
+        The significance level. Defaults to 0.05, corresponding to a 95%
+        confidence interval.
+
+    Returns
+    -------
+     lb, ub : float
+        Lower and upper bounds of a 100(1-`alpha`)% confidence interval on the
+        binomial proportion.
+
+    Notes
+    -----
+    This is based off the Wald formula. Note that this formula is fragile to proportions near 0 or 1.
+    """
+    p_hat = s / n
+    z = ss.norm.isf(alpha / 2)
+    lb = p_hat - z * math.sqrt(p_hat * (1 - p_hat) / n)
+    ub = p_hat + z * math.sqrt(p_hat * (1 - p_hat) / n)
+    return lb, ub
+
+
+def delta_interval(trials: Union[np.ndarray, list], successes: Union[np.ndarray, list], alpha: float, lift: str ="relative") -> tuple:
+    """The confidence interval for Binomial Proportions using the Delta Method
+
+    Parameters
+    ----------
+    trials : array_like
+        Number of trials in each group.
+    successes : array_like
+        Number of successes in each group.
+    alpha : float
+        The significance level. Defaults to 0.05, corresponding to a 95%
+        confidence interval.
+    lift : ["relative", "absolute"]
+        Whether to interpret the null lift relative to the baseline success
+        rate, or in absolute terms. See Notes in
+        `maximum_likelihood_estimation`.
+
+    Returns
+    -------
+    lb, ub : float
+        Lower and upper bounds on a confidence interval.
+    """
+    p1_hat = successes[1] / trials[1]
+    p2_hat = successes[0] / trials[0]
+    if lift == "relative":
+        diff = (p1_hat - p2_hat) / p2_hat
+
+        def dg_dp1(p2):
+            return 1 / p2
+
+        def dg_dp2(p1, p2):
+            return -p1 / math.pow(p2, 2)
+    else:
+        diff = p1_hat - p2_hat
+        def dg_dp1(p2):
+            return 1
+
+        def dg_dp2(p1, p2):
+            return -1
+
+    var_p1 = p1_hat * (1 - p1_hat) / trials[1]
+    var_p2 = p2_hat * (1 - p2_hat) / trials[0]
+    cov_p1_p2 = 0  # Covariance is 0 for independent samples
+    var_g = math.pow(dg_dp1(p2_hat), 2) * var_p1 + \
+            math.pow(dg_dp2(p1_hat, p2_hat), 2) * var_p2 + \
+            2 * dg_dp1(p2_hat) * dg_dp2(p1_hat, p2_hat) * cov_p1_p2
+    se_g = np.sqrt(var_g)
+    z = ss.norm.isf(alpha / 2)  # Calculate the z-score
+    lb = diff - z * se_g
+    ub = diff + z * se_g
     return lb, ub
