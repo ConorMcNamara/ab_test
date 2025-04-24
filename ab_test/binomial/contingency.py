@@ -1,4 +1,4 @@
-"Our wrapper for analyzing experiment results"
+"""Our wrapper for analyzing experiment results"""
 
 from typing import Optional, Union
 
@@ -16,11 +16,11 @@ class ContingencyTable:
 
         Parameters
         ----------
-        name: str
+        name : str
             The name of our experiment associated with our Contingency Table
-        spend: float
+        spend : float
             The amount we spent for this campaign. Used to calculate the ROAS of our campaign
-        msrp: float
+        msrp : float
             The average msrp of our product. Used to calculate the revenue return of our campaign
         """
         self.experiment_name = name
@@ -36,21 +36,18 @@ class ContingencyTable:
 
         Parameters
         ----------
-        cell_name: str
+        cell_name : str
             The name of our cell.
-        successes: float
+        successes : float
             The number of successes in our cell_name
-        trials: float
+        trials : float
             The number of trials in our cell_name
 
         Returns
         -------
         ContingencyTable, to be chained with other methods
         """
-        cell_dict = {
-            "successes": successes,
-            "trials": trials
-        }
+        cell_dict = {"successes": successes, "trials": trials}
         self.successes += successes
         self.trials += trials
         self.cells["table"][cell_name] = cell_dict
@@ -62,10 +59,11 @@ class ContingencyTable:
 
         Parameters
         ----------
-        method: {"pandas", "polars"}
+        method : {"pandas", "polars"}
             Whether we want our DataFrame as a pandas or polars DataFrame
-        include_total: bool, default=False
+        include_total : bool, default=False
             Whether we want to include another section with the total amount
+
         Returns
         -------
         Our ContingencyTable as a DataFrame
@@ -74,7 +72,9 @@ class ContingencyTable:
         if method == "pandas":
             return_df = pd.DataFrame(self.to_list(include_total), columns=["cell_name", "successes", "trials"])
         elif method == "polars":
-            return_df = pl.DataFrame(self.to_list(include_total), schema=["cell_name", "successes", "trials"], orient="row")
+            return_df = pl.DataFrame(
+                self.to_list(include_total), schema=["cell_name", "successes", "trials"], orient="row"
+            )
         elif method == "pyspark":
             raise NotImplementedError("Have not implemented Pyspark yet")
         elif method == "data.table":
@@ -90,7 +90,7 @@ class ContingencyTable:
 
         Parameters
         ----------
-        include_total: bool, default=False
+        include_total : bool, default=False
             Whether we want to include another section with the total amount
 
         Returns
@@ -115,7 +115,7 @@ class ContingencyTable:
 
         Parameters
         ----------
-        include_total: bool, default=False
+        include_total : bool, default=False
             Whether we want to include another section with the total amount
 
         Returns
@@ -129,7 +129,7 @@ class ContingencyTable:
 
         Parameters
         ----------
-        include_total: bool, default=False
+        include_total : bool, default=False
             Whether we want to include another section with the total amount
 
         Returns
@@ -137,10 +137,7 @@ class ContingencyTable:
         Our ContingencyTable as a JSON
         """
         if include_total:
-            total_dict = {
-                "successes": self.successes,
-                "trials": self.trials
-            }
+            total_dict = {"successes": self.successes, "trials": self.trials}
             self.cells["table"]["Total"] = total_dict
         return self.cells
 
@@ -150,7 +147,7 @@ class ContingencyTable:
 
         Parameters
         ----------
-        serial: dict
+        serial : dict
             A serialized version of our ContingencyTable
 
         Returns
@@ -163,12 +160,14 @@ class ContingencyTable:
         self.cells = serial
         return self
 
-    def analyze(self, lift: str = "relative", test_method: str = "score", conf_int_method: str = "binary_search", alpha: float = 0.05) -> None:
+    def analyze(
+        self,
+        lift: str = "relative",
+        test_method: str = "score",
+        conf_int_method: str = "binary_search",
+        alpha: float = 0.05,
+    ) -> None:
         raise NotImplementedError("Haven't implemented yet")
 
     def __str__(self):
         return tabulate(self.to_list(include_total=True), headers=["cell_name", "successes", "trials"], tablefmt="grid")
-
-
-
-

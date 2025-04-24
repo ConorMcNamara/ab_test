@@ -18,6 +18,7 @@ __all__ = [
     "wald_interval",
 ]
 
+
 def confidence_interval(
     trials: Union[np.ndarray, list],
     successes: Union[np.ndarray, list],
@@ -339,10 +340,10 @@ def delta_interval(
     else:
         diff = p1_hat - p2_hat
 
-        def dg_dp1(p2): # To maintain compatibility with relative
+        def dg_dp1(p2):  # To maintain compatibility with relative
             return 1
 
-        def dg_dp2(p1, p2): # To maintain compatibility with relative
+        def dg_dp2(p1, p2):  # To maintain compatibility with relative
             return -1
 
     var_p1 = p1_hat * (1 - p1_hat) / trials[1]

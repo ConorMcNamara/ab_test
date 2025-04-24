@@ -21,13 +21,14 @@ __all__ = [
     "cressie_read_test",
 ]
 
+
 def ab_test(
-        trials: Union[np.ndarray, list],
-        successes: Union[np.array, list],
-        null_lift: float = 0.0,
-        lift: str = "relative",
-        crit: Optional[float] = None,
-        method: str = "score_test",
+    trials: Union[np.ndarray, list],
+    successes: Union[np.array, list],
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    crit: Optional[float] = None,
+    method: str = "score_test",
 ) -> Union[float, bool]:
     """A wrapper for our different statistical tests
 
@@ -50,7 +51,7 @@ def ab_test(
         simulations where we will be repeatedly assessing significance, since
         calculating the critical value can be done once instead of repeatedly.
         This makes such simulations about 5x faster.
-    method: {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo', 'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
+    method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo', 'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
         How we plan on calculating the p_value or critical value of our experiment
 
     Returns
@@ -91,6 +92,7 @@ def ab_test(
     else:
         raise ValueError(f"No support for calculating the p-value and critical value of {method}")
     return val
+
 
 def score_test(
     trials: Union[np.ndarray, list],
