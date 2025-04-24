@@ -18,42 +18,6 @@ __all__ = [
     "wald_interval",
 ]
 
-
-def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
-    """Wilson Confidence Interval on binomial proportion
-
-    Parameters
-    ----------
-     s, n : int
-        The number of successes, trials.
-     alpha : float
-        The significance level. Defaults to 0.05, corresponding to a 95%
-        confidence interval.
-
-    Returns
-    -------
-     lb, ub : float
-        Lower and upper bounds of a 100(1-`alpha`)% confidence interval on the
-        binomial proportion.
-
-    Notes
-    -----
-    Assuming s ~ Binom(n, p), this function returns a confidence interval on p.
-    """
-    z = ss.norm.isf(alpha / 2)
-    z_squared = math.pow(z, 2)
-    p_hat = s / n
-    ctr = p_hat + z_squared / (2 * n)
-    inner_width = (p_hat * (1 - p_hat) + z_squared / (4 * n)) / n
-    denom = 1 + z_squared / n
-    wdth = z * math.sqrt(inner_width)
-    # Alternative implementation using n_s and n_f
-    # ctr = (s + 0.5 * z_squared) / (n + z_squared)
-    # inner_wdth = s * (n - s) / n + z_squared / 4
-    # wdth = (z / (n + z_squared)) * math.sqrt(inner_wdth)
-    return (ctr - wdth) / denom, (ctr + wdth) / denom
-
-
 def confidence_interval(
     trials: Union[np.ndarray, list],
     successes: Union[np.ndarray, list],
@@ -375,10 +339,10 @@ def delta_interval(
     else:
         diff = p1_hat - p2_hat
 
-        def dg_dp1(p2):
+        def dg_dp1(p2): # To maintain compatibility with relative
             return 1
 
-        def dg_dp2(p1, p2):
+        def dg_dp2(p1, p2): # To maintain compatibility with relative
             return -1
 
     var_p1 = p1_hat * (1 - p1_hat) / trials[1]
@@ -394,3 +358,38 @@ def delta_interval(
     lb = diff - z * se_g
     ub = diff + z * se_g
     return lb, ub
+
+
+def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
+    """Wilson Confidence Interval on binomial proportion
+
+    Parameters
+    ----------
+     s, n : int
+        The number of successes, trials.
+     alpha : float
+        The significance level. Defaults to 0.05, corresponding to a 95%
+        confidence interval.
+
+    Returns
+    -------
+     lb, ub : float
+        Lower and upper bounds of a 100(1-`alpha`)% confidence interval on the
+        binomial proportion.
+
+    Notes
+    -----
+    Assuming s ~ Binom(n, p), this function returns a confidence interval on p.
+    """
+    z = ss.norm.isf(alpha / 2)
+    z_squared = math.pow(z, 2)
+    p_hat = s / n
+    ctr = p_hat + z_squared / (2 * n)
+    inner_width = (p_hat * (1 - p_hat) + z_squared / (4 * n)) / n
+    denom = 1 + z_squared / n
+    wdth = z * math.sqrt(inner_width)
+    # Alternative implementation using n_s and n_f
+    # ctr = (s + 0.5 * z_squared) / (n + z_squared)
+    # inner_wdth = s * (n - s) / n + z_squared / 4
+    # wdth = (z / (n + z_squared)) * math.sqrt(inner_wdth)
+    return (ctr - wdth) / denom, (ctr + wdth) / denom

@@ -21,6 +21,76 @@ __all__ = [
     "cressie_read_test",
 ]
 
+def ab_test(
+        trials: Union[np.ndarray, list],
+        successes: Union[np.array, list],
+        null_lift: float = 0.0,
+        lift: str = "relative",
+        crit: Optional[float] = None,
+        method: str = "score_test",
+) -> Union[float, bool]:
+    """A wrapper for our different statistical tests
+
+    Parameters
+    ----------
+     trials : array_like
+        Number of trials in each group.
+     successes : array_like
+        Number of successes in each group.
+     null_lift : float
+        Lift associated with null hypothesis. Defaults to 0.0.
+     lift : ["relative", "absolute"]
+        Whether to interpret the null lift relative to the baseline success
+        rate, or in absolute terms. See Notes in
+        `maximum_likelihood_estimation`.
+     crit : float, optional
+        Critical value for the test statistic. If omitted, a p-value will be
+        returned. If passed, a boolean will be returned corresponding to
+        whether the result is statistically significant. Useful primarily for
+        simulations where we will be repeatedly assessing significance, since
+        calculating the critical value can be done once instead of repeatedly.
+        This makes such simulations about 5x faster.
+    method: {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo', 'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
+        How we plan on calculating the p_value or critical value of our experiment
+
+    Returns
+    -------
+     pval : float
+        P-value. Returned if `crit` is None.
+     stat_sig : boolean
+        True if the result is statistically significant, i.e. if the test
+        statistic is >= `crit`. Returned if `crit` is not None.
+
+    Notes
+    -----
+    Only supports two experiment groups at this time.
+    """
+    if len(trials) > 2 or len(successes) > 2:
+        raise NotImplementedError("Only supports a 2x2 contingency table")
+    method = method.casefold()
+    if method == "score":
+        val = score_test(trials, successes, null_lift, lift, crit)
+    elif method == "likelihood":
+        val = likelihood_ratio_test(trials, successes, null_lift, lift, crit)
+    elif method == "z":
+        val = z_test(trials, successes, null_lift, lift, crit)
+    elif method == "fisher":
+        val = fisher_test(trials, successes, null_lift, lift, crit)
+    elif method == "barnard":
+        val = barnard_exact_test(trials, successes, null_lift, lift, crit)
+    elif method == "boschloo":
+        val = boschloo_exact_test(trials, successes, null_lift, lift, crit)
+    elif method == "modified_likelihood":
+        val = modified_log_likelihood_test(trials, successes, null_lift, lift, crit)
+    elif method == "freeman-tukey":
+        val = freeman_tukey_test(trials, successes, null_lift, lift, crit)
+    elif method == "neyman":
+        val = neyman_test(trials, successes, null_lift, lift, crit)
+    elif method == "cressie-read":
+        val = cressie_read_test(trials, successes, null_lift, lift, crit)
+    else:
+        raise ValueError(f"No support for calculating the p-value and critical value of {method}")
+    return val
 
 def score_test(
     trials: Union[np.ndarray, list],
