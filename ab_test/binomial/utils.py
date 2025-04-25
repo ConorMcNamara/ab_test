@@ -5,7 +5,13 @@ from typing import Optional, Union
 
 import numpy as np
 
-__all__ = ["simple_hypothesis_from_composite", "mle_under_null", "mle_under_alternative", "wilson_significance", "observed_lift"]
+__all__ = [
+    "simple_hypothesis_from_composite",
+    "mle_under_null",
+    "mle_under_alternative",
+    "wilson_significance",
+    "observed_lift",
+]
 
 
 def simple_hypothesis_from_composite(

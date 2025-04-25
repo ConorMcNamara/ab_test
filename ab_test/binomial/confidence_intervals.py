@@ -203,7 +203,7 @@ def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: 
      alpha : float
         The significance level. Defaults to 0.05, corresponding to a 95%
         confidence interval.
-    method: {"wilson", "agresti-coull", "jeffrey", "clopper-pearson", "wald"}
+    method : {"wilson", "agresti-coull", "jeffrey", "clopper-pearson", "wald"}
             The method for calculating individual confidence intervals
 
     Returns

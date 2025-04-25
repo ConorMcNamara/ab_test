@@ -13,7 +13,17 @@ class TestContingencyTable:
     @pytest.mark.parametrize(
         "include_total, expected",
         [
-            (False, [["Holdout", 100, 1_000, ], ["Test", 110, 1_000]]),
+            (
+                False,
+                [
+                    [
+                        "Holdout",
+                        100,
+                        1_000,
+                    ],
+                    ["Test", 110, 1_000],
+                ],
+            ),
             (True, [["Holdout", 100, 1_000], ["Test", 110, 1_000], ["Total", 210, 2_000]]),
         ],
     )
@@ -98,7 +108,7 @@ class TestContingencyTable:
         serial = ct.serialize()
         expected = {
             "experiment_name": "Initial AB Test",
-            'metric_name': "sales",
+            "metric_name": "sales",
             "spend": None,
             "msrp": None,
             "table": {"Holdout": {"successes": 100, "trials": 1_000}, "Test": {"successes": 110, "trials": 1_000}},
@@ -146,7 +156,6 @@ class TestContingencyTable:
                 [100, 110],
                 "absolute",
                 {
-                    ""
                     "lift_type": "absolute",
                     "lift": 0.1,
                     "Holdout": 0.10,
@@ -251,6 +260,7 @@ class TestContingencyTable:
             ]
         )
         assert expected == ct.analyze_individually()
+
 
 if __name__ == "__main__":
     pytest.main()
