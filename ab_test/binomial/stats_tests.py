@@ -9,6 +9,7 @@ import scipy.stats as ss
 from ab_test.binomial.utils import mle_under_null, mle_under_alternative
 
 __all__ = [
+    "ab_test",
     "score_test",
     "likelihood_ratio_test",
     "z_test",

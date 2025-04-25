@@ -25,12 +25,24 @@ class TestMisc:
         assert actual == pytest.approx(expected)
 
     @staticmethod
-    def test_observed_lift():
+    def test_observed_lift_absolute():
         trials = [1000, 1000]
         successes = [100, 110]
         expected = 0.01
         actual = observed_lift(trials, successes, lift="absolute")
         assert actual == pytest.approx(expected)
+
+    @pytest.mark.parametrize(
+        "trials, successes, expected",
+        [
+            ([1000, 1000], [100, 110], 10),
+            ([1000, 500], [100, 55], 10),
+            ([500, 1000], [50, 110], 10),
+        ],
+    )
+    def test_observed_lift_incremental(self, trials, successes, expected):
+        actual = observed_lift(trials, successes, lift="incremental")
+        assert actual == expected
 
     @staticmethod
     def test_observed_lift_undefined():

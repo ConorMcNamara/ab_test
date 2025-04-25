@@ -28,7 +28,7 @@ def confidence_interval(
     method: str = "binary_search",
     tol: float = 1e-06,
 ) -> tuple:
-    """Confidence interval for relative lift.
+    """Wrapper for calculating confidence intervals
 
     Parameters
     ----------
@@ -44,7 +44,7 @@ def confidence_interval(
         Threshold for significance. The confidence interval will have
         level 100(1-alpha)%. Defaults to 0.05, corresponding to a 95%
         confidence interval.
-     lift : ["relative", "absolute"]
+     lift : ["relative", "absolute", "incremental", "roas", "revenue"]
         Whether to interpret the null lift relative to the baseline success
         rate, or in absolute terms. See Notes in
         `maximum_likelihood_estimation`.

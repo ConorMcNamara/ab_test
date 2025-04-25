@@ -112,7 +112,7 @@ def observed_lift(trials: Union[np.array, list], successes: Union[np.array, list
         The number of trials for each iteration of an AB test
     successes : numpy array
         The number of successes for each iteration of an AB test
-    lift : {'relative', 'absolute'}
+    lift : {'relative', 'absolute', 'incremental'}
         The lift we are measuring
 
     Returns
@@ -125,6 +125,13 @@ def observed_lift(trials: Union[np.array, list], successes: Union[np.array, list
     if lift == "relative":
         ote = (pb - pa) / pa
     else:
+        if lift == "incremental":
+            if trials[0] > trials[1]:
+                pb = successes[1] * (trials[0] / trials[1])
+                pa = successes[0]
+            else:
+                pa = successes[0] * (trials[1] / trials[0])
+                pb = successes[1]
         ote = pb - pa
     return ote
 
