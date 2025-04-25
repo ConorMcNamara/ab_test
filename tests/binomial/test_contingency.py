@@ -28,18 +28,18 @@ class TestContingencyTable:
         "include_total, expected",
         [
             (
-                    False,
-                    pd.DataFrame({"cell_name": ["Holdout", "Test"], "successes": [100, 110], "trials": [1_000, 1_000]}),
+                False,
+                pd.DataFrame({"cell_name": ["Holdout", "Test"], "successes": [100, 110], "trials": [1_000, 1_000]}),
             ),
             (
-                    True,
-                    pd.DataFrame(
-                        {
-                            "cell_name": ["Holdout", "Test", "Total"],
-                            "successes": [100, 110, 210],
-                            "trials": [1_000, 1_000, 2_000],
-                        }
-                    ),
+                True,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test", "Total"],
+                        "successes": [100, 110, 210],
+                        "trials": [1_000, 1_000, 2_000],
+                    }
+                ),
             ),
         ],
     )
@@ -54,18 +54,18 @@ class TestContingencyTable:
         "include_total, expected",
         [
             (
-                    False,
-                    pl.DataFrame({"cell_name": ["Holdout", "Test"], "successes": [100, 110], "trials": [1_000, 1_000]}),
+                False,
+                pl.DataFrame({"cell_name": ["Holdout", "Test"], "successes": [100, 110], "trials": [1_000, 1_000]}),
             ),
             (
-                    True,
-                    pl.DataFrame(
-                        {
-                            "cell_name": ["Holdout", "Test", "Total"],
-                            "successes": [100, 110, 210],
-                            "trials": [1_000, 1_000, 2_000],
-                        }
-                    ),
+                True,
+                pl.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test", "Total"],
+                        "successes": [100, 110, 210],
+                        "trials": [1_000, 1_000, 2_000],
+                    }
+                ),
             ),
         ],
     )
@@ -139,58 +139,81 @@ class TestContingencyTable:
     @pytest.mark.parametrize(
         "name, trials, success, lift, expected",
         [
-            (["Holdout", "Test"], [1_000, 1_000], [100, 110], "absolute",
-             {
-                 "lift_type": "absolute",
-                 "lift": 0.1,
-                 "Holdout": 0.10,
-                 "Test": 0.11,
-                 "p_value": 0.4657435879336349,
-                 "ci_lower": -0.016966857910156258,
-                 "ci_upper": 0.037053527832031245,
-             }
-             ),
-            (["Holdout", "Test"], [1_000, 1_000], [100, 110], "relative",
-             {
-                 "lift_type": "relative",
-                 "lift": 1.0,
-                 "Holdout": 0.10,
-                 "Test": 0.11,
-                 "p_value": 0.4657435879336349,
-                 "ci_lower": -0.14798553466796882,
-                 "ci_upper": 0.4204476928710939,
-             }),
-            (["Holdout", "Test"], [1_000, 1_000], [100, 110], "incremental",
-             {
-                 "lift_type": "incremental",
-                 "lift": 10,
-                 "Holdout": 100,
-                 "Test": 110,
-                 "p_value": 0.4657435879336349,
-                 "ci_lower": -16,
-                 "ci_upper": 38,
-             }
-             ),
-            (["Holdout", "Test"], [1_000, 1_000], [100, 110], "roas",
-             {
-                 "lift_type": "roas",
-                 "lift": 10,
-                 "Holdout": 1.00,
-                 "Test": 0.909090909090909,
-                 "p_value": 0.4657435879336349,
-                 "ci_lower": np.inf,
-                 "ci_upper": 2.63157894737,
-             }),
-            (["Holdout", "Test"], [1_000, 1_000], [100, 110], "revenue",
-             {
-                 "lift_type": "revenue",
-                 "lift": 20,
-                 "Holdout": 200,
-                 "Test": 220,
-                 "p_value": 0.4657435879336349,
-                 "ci_lower": -32,
-                 "ci_upper": 76,
-             }),
+            (
+                ["Holdout", "Test"],
+                [1_000, 1_000],
+                [100, 110],
+                "absolute",
+                {
+                    "lift_type": "absolute",
+                    "lift": 0.1,
+                    "Holdout": 0.10,
+                    "Test": 0.11,
+                    "p_value": 0.4657435879336349,
+                    "ci_lower": -0.016966857910156258,
+                    "ci_upper": 0.037053527832031245,
+                },
+            ),
+            (
+                ["Holdout", "Test"],
+                [1_000, 1_000],
+                [100, 110],
+                "relative",
+                {
+                    "lift_type": "relative",
+                    "lift": 1.0,
+                    "Holdout": 0.10,
+                    "Test": 0.11,
+                    "p_value": 0.4657435879336349,
+                    "ci_lower": -0.14798553466796882,
+                    "ci_upper": 0.4204476928710939,
+                },
+            ),
+            (
+                ["Holdout", "Test"],
+                [1_000, 1_000],
+                [100, 110],
+                "incremental",
+                {
+                    "lift_type": "incremental",
+                    "lift": 10,
+                    "Holdout": 100,
+                    "Test": 110,
+                    "p_value": 0.4657435879336349,
+                    "ci_lower": -16,
+                    "ci_upper": 38,
+                },
+            ),
+            (
+                ["Holdout", "Test"],
+                [1_000, 1_000],
+                [100, 110],
+                "roas",
+                {
+                    "lift_type": "roas",
+                    "lift": 10,
+                    "Holdout": 1.00,
+                    "Test": 0.909090909090909,
+                    "p_value": 0.4657435879336349,
+                    "ci_lower": np.inf,
+                    "ci_upper": 2.63157894737,
+                },
+            ),
+            (
+                ["Holdout", "Test"],
+                [1_000, 1_000],
+                [100, 110],
+                "revenue",
+                {
+                    "lift_type": "revenue",
+                    "lift": 20,
+                    "Holdout": 200,
+                    "Test": 220,
+                    "p_value": 0.4657435879336349,
+                    "ci_lower": -32,
+                    "ci_upper": 76,
+                },
+            ),
         ],
     )
     def test_contingency_results(self, name, trials, success, lift, expected):
@@ -205,7 +228,6 @@ class TestContingencyTable:
         assert expected["p_value"] == pytest.approx(ct.results["p_value"])
         assert expected["ci_lower"] == pytest.approx(ct.results["ci_lower"])
         assert expected["ci_upper"] == pytest.approx(ct.results["ci_upper"])
-
 
 
 if __name__ == "__main__":

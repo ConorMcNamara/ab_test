@@ -178,13 +178,13 @@ class ContingencyTable:
 
         Parameters
         ----------
-        lift: {'relative', 'absolute', 'incremental', 'roas', 'revenue'}
+        lift : {'relative', 'absolute', 'incremental', 'roas', 'revenue'}
             The kind of lift we are measuring for our campaign
-        test_method: {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo', 'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
+        test_method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo', 'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
             The method we plan to use to assess whether our result is statistically significant
-        conf_int_method: {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald'}
+        conf_int_method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald'}
             The method we plan to use to craft confidence intervals of our lift
-        alpha: float, default = 0.05
+        alpha : float, default = 0.05
             The alpha level of our experiment, to be used to craft confidence intervals.
         null_lift : float
             Lift associated with null hypothesis. Defaults to 0.0.
@@ -208,7 +208,9 @@ class ContingencyTable:
             ci_lift = "absolute"
         else:
             ci_lift = lift
-        lb, ub = confidence_interval(self.trials, self.successes, test=test, alpha=alpha, lift=ci_lift, method=conf_int_method)
+        lb, ub = confidence_interval(
+            self.trials, self.successes, test=test, alpha=alpha, lift=ci_lift, method=conf_int_method
+        )
         if lift in ["incremental", "roas", "revenue"]:
             if self.trials[0] > self.trials[1]:
                 pb = math.ceil(self.successes[1] * (self.trials[0] / self.trials[1]))
@@ -235,7 +237,7 @@ class ContingencyTable:
                 ub *= self.msrp
             success_rate = [pa, pb]
         else:
-            success_rate = [si / ti for ti, si in zip(self.trials,self.successes)]
+            success_rate = [si / ti for ti, si in zip(self.trials, self.successes)]
         self.results = {
             "lift_type": lift,
             "lift": test_lift,
@@ -243,7 +245,7 @@ class ContingencyTable:
             f"{self.names[1]}": success_rate[1],
             "p_value": p_value,
             "ci_lower": lb,
-            "ci_upper": ub
+            "ci_upper": ub,
         }
         table_headers = self.names + ["Lift", "Conf. Int. Lower **", "Conf. Int. Higher **", "p-value"]
         str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
@@ -253,4 +255,6 @@ class ContingencyTable:
         print(f"** = {round((1 - alpha) * 100)}% Confidence Interval")
 
     def __str__(self):
-        return tabulate(self.to_list(include_total=True), headers=["cell_name", "successes", "trials"], tablefmt="grid", intfmt=",")
+        return tabulate(
+            self.to_list(include_total=True), headers=["cell_name", "successes", "trials"], tablefmt="grid", intfmt=","
+        )
