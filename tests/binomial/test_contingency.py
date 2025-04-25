@@ -13,12 +13,12 @@ class TestContingencyTable:
     @pytest.mark.parametrize(
         "include_total, expected",
         [
-            (False, [["Holdout", 100, 1_000], ["Test", 110, 1_000]]),
+            (False, [["Holdout", 100, 1_000, ], ["Test", 110, 1_000]]),
             (True, [["Holdout", 100, 1_000], ["Test", 110, 1_000], ["Total", 210, 2_000]]),
         ],
     )
     def test_contingency_to_list(self, include_total, expected):
-        ct = ContingencyTable(name="Initial AB Test")
+        ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000)
         ct.add("Test", 110, 1_000)
         ct_list = ct.to_list(include_total=include_total)
@@ -44,7 +44,7 @@ class TestContingencyTable:
         ],
     )
     def test_contingency_to_df_pandas(self, include_total, expected):
-        ct = ContingencyTable(name="Initial AB Test")
+        ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000)
         ct.add("Test", 110, 1_000)
         ct_df = ct.to_df(include_total=include_total)
@@ -70,7 +70,7 @@ class TestContingencyTable:
         ],
     )
     def test_contingency_to_df_polars(self, include_total, expected):
-        ct = ContingencyTable(name="Initial AB Test")
+        ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000)
         ct.add("Test", 110, 1_000)
         ct_df = ct.to_df(method="polars", include_total=include_total)
@@ -84,7 +84,7 @@ class TestContingencyTable:
         ],
     )
     def test_contingency_to_numpy(self, include_total, expected):
-        ct = ContingencyTable(name="Initial AB Test")
+        ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000)
         ct.add("Test", 110, 1_000)
         ct_array = ct.to_numpy(include_total=include_total)
@@ -92,12 +92,13 @@ class TestContingencyTable:
 
     @staticmethod
     def test_contingency_serialize():
-        ct = ContingencyTable(name="Initial AB Test")
+        ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000)
         ct.add("Test", 110, 1_000)
         serial = ct.serialize()
         expected = {
             "experiment_name": "Initial AB Test",
+            'metric_name': "sales",
             "spend": None,
             "msrp": None,
             "table": {"Holdout": {"successes": 100, "trials": 1_000}, "Test": {"successes": 110, "trials": 1_000}},
@@ -106,7 +107,7 @@ class TestContingencyTable:
 
     @staticmethod
     def test_contingency_deserialize():
-        ct = ContingencyTable(name="Initial AB Test")
+        ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000)
         ct.add("Test", 110, 1_000)
         serial = ct.serialize()
@@ -118,7 +119,7 @@ class TestContingencyTable:
 
     @staticmethod
     def test_contingency_print():
-        ct = ContingencyTable(name="Initial AB Test")
+        ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000)
         ct.add("Test", 110, 1_000)
         expected = "\n".join(
@@ -145,6 +146,7 @@ class TestContingencyTable:
                 [100, 110],
                 "absolute",
                 {
+                    ""
                     "lift_type": "absolute",
                     "lift": 0.1,
                     "Holdout": 0.10,
@@ -217,10 +219,10 @@ class TestContingencyTable:
         ],
     )
     def test_contingency_results(self, name, trials, success, lift, expected):
-        ct = ContingencyTable(name="Initial AB Test", spend=100, msrp=2)
+        ct = ContingencyTable(name="Initial AB Test", spend=100, msrp=2, metric_name="sales")
         ct.add(name[0], success[0], trials[0])
         ct.add(name[1], success[1], trials[1])
-        ct.analyze(lift=lift)
+        print(ct.analyze(lift=lift))
         assert ct.results["lift_type"] == expected["lift_type"]
         assert expected["lift"] == pytest.approx(ct.results["lift"], abs=1)
         assert expected[f"{name[0]}"] == pytest.approx(ct.results[f"{name[0]}"])
@@ -229,6 +231,26 @@ class TestContingencyTable:
         assert expected["ci_lower"] == pytest.approx(ct.results["ci_lower"])
         assert expected["ci_upper"] == pytest.approx(ct.results["ci_upper"])
 
+    @staticmethod
+    def test_contingency_analyze_individual_results():
+        ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
+        ct.add("Holdout", 100, 1_000)
+        ct.add("Test", 110, 1_000)
+        expected = "\n".join(
+            [
+                "+-------------+-------------+----------+----------------+----------------------+----------------------+",
+                "| Cell Name   |   Successes |   Trials | Success Rate   | Conf. Int. Lower**   | Conf. Int. Upper**   |",
+                "+=============+=============+==========+================+======================+======================+",
+                "| Holdout     |         100 |     1000 | 10.0%          | 8.29%                | 12.02%               |",
+                "+-------------+-------------+----------+----------------+----------------------+----------------------+",
+                "| Test        |         110 |     1000 | 11.0%          | 9.21%                | 13.09%               |",
+                "+-------------+-------------+----------+----------------+----------------------+----------------------+",
+                "| Total       |         210 |     2000 | 10.5%          | 9.23%                | 11.92%               |",
+                "+-------------+-------------+----------+----------------+----------------------+----------------------+",
+                "** 95% Confidence Interval",
+            ]
+        )
+        assert expected == ct.analyze_individually()
 
 if __name__ == "__main__":
     pytest.main()

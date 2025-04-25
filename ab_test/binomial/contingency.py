@@ -8,7 +8,7 @@ import pandas as pd
 import polars as pl
 from tabulate import tabulate
 
-from ab_test.binomial.confidence_intervals import confidence_interval
+from ab_test.binomial.confidence_intervals import confidence_interval, individual_confidence_interval
 from ab_test.binomial.stats_tests import ab_test, score_test, likelihood_ratio_test, z_test, cressie_read_test
 from ab_test.binomial.utils import observed_lift
 
@@ -16,13 +16,15 @@ from ab_test.binomial.utils import observed_lift
 class ContingencyTable:
     """A class for analyzing experiment results"""
 
-    def __init__(self, name: str, spend: Optional[float] = None, msrp: Optional[float] = None) -> None:
+    def __init__(self, name: str, metric_name: str, spend: Optional[float] = None, msrp: Optional[float] = None) -> None:
         """ContingencyTable is our class for creating and analyzing experiment results
 
         Parameters
         ----------
         name : str
             The name of our experiment associated with our Contingency Table
+        metric_name: str
+            The name of our metric
         spend : float
             The amount we spent for this campaign. Used to calculate the ROAS of our campaign
         msrp : float
@@ -30,23 +32,24 @@ class ContingencyTable:
         """
         self.experiment_name = name
         self.names = []
+        self.metric_name = metric_name
         self.spend = spend
         self.msrp = msrp
-        self.cells = {"experiment_name": self.experiment_name, "spend": self.spend, "msrp": self.msrp, "table": {}}
+        self.cells = {"experiment_name": self.experiment_name, "metric_name": self.metric_name, "spend": self.spend, "msrp": self.msrp, "table": {}}
         self.successes = []
         self.trials = []
         self.results = None
 
-    def add(self, cell_name: str, successes: float, trials: float) -> "ContingencyTable":
+    def add(self, cell_name: str, successes: int, trials: int) -> "ContingencyTable":
         """A method to add cells to our contingency table
 
         Parameters
         ----------
         cell_name : str
             The name of our cell.
-        successes : float
+        successes : int
             The number of successes in our cell_name
-        trials : float
+        trials : int
             The number of trials in our cell_name
 
         Returns
@@ -164,6 +167,7 @@ class ContingencyTable:
         self.spend = serial["spend"]
         self.msrp = serial["msrp"]
         self.cells = serial
+        self.metric_name = serial["metric_name"]
         return self
 
     def analyze(
@@ -173,7 +177,7 @@ class ContingencyTable:
         conf_int_method: str = "binary_search",
         alpha: float = 0.05,
         null_lift: float = 0.0,
-    ) -> None:
+    ) -> str:
         """Analyzes the effect of our experiments through the ContingencyTable
 
         Parameters
@@ -191,7 +195,7 @@ class ContingencyTable:
 
         Returns
         -------
-        The results (lift as well as confidence intervals) of our experiment
+        The results (lift as well as confidence intervals) of our experiment in string format, to be printed
         """
         lift = lift.casefold()
         p_value = ab_test(self.trials, self.successes, null_lift, lift, method=test_method)
@@ -247,14 +251,88 @@ class ContingencyTable:
             "ci_lower": lb,
             "ci_upper": ub,
         }
-        table_headers = self.names + ["Lift", "Conf. Int. Lower **", "Conf. Int. Higher **", "p-value"]
+        table_headers = ["Metric", "Metric Name"] + self.names + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", "p-value"]
         str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
-        table_list = [success_rate + [test_lift, lb, ub, str_pvalue]]
-        print(tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=","))
-        print(f"* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level")
-        print(f"** = {round((1 - alpha) * 100)}% Confidence Interval")
+        table_list = [[lift, self.metric_name] + self._convert_to_tabulate_str(success_rate, lift) + self._convert_to_tabulate_str([test_lift, lb, ub], lift) + [str_pvalue]]
+        return_string = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
+        return_string += f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
+        return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
+        return return_string
+
+
+    def analyze_individually(
+        self,
+        conf_int_method: str = "wilson",
+        alpha: float = 0.05,
+    ) -> str:
+        """Analyzes the individual cells
+
+        Parameters
+        ----------
+        conf_int_method: {"wilson", "agresti-coull", "jeffrey", "clopper-pearson", "wald"}
+            The method for calculating individual confidence intervals
+        alpha : float
+            The significance level. Defaults to 0.05, corresponding to a 95%
+            confidence interval.
+
+        Returns
+        -------
+        The results (success as well as confidence intervals) of our individual cells in string format, to be printed
+        """
+        table_list = []
+        for name_i, s_i, n_i in zip(self.names, self.successes, self.trials):
+            success_rate = s_i / n_i
+            lb, ub = individual_confidence_interval(s_i, n_i, alpha, conf_int_method)
+            name_list = [name_i, s_i, n_i] + self._convert_to_tabulate_str([success_rate, lb, ub], "absolute")
+            table_list.append(name_list)
+        total_success, total_trials = np.sum(self.successes), np.sum(self.trials)
+        total_success_rate = total_success / total_trials
+        lb_total, ub_total = individual_confidence_interval(total_success, total_trials, alpha, conf_int_method)
+        total_list = ["Total", total_success, total_trials] + self._convert_to_tabulate_str([total_success_rate, lb_total, ub_total], "absolute")
+        table_list.append(total_list)
+        table_headers = ["Cell Name", "Successes", "Trials", "Success Rate", "Conf. Int. Lower**", "Conf. Int. Upper**"]
+        return_string = tabulate(table_list, headers=table_headers, tablefmt="grid", intfmt=",")
+        return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
+        return return_string
+
+    @staticmethod
+    def _convert_to_tabulate_str(value: Union[float, list], lift: str) -> Union[str, list, float]:
+        """Converts our lift values to either percentages or dollar signs
+
+        Parameters
+        ----------
+        value: float or list
+            The value we are changing
+        lift: str
+            Depending on the lift type, whether we are adding percentages or dollar signs
+
+        Returns
+        -------
+        Our new str_value, as either a percentage or dollar sign
+        """
+        if isinstance(value, float):
+            if lift in ["revenue", "roas"]:
+                str_value = f'${round(value, 2):,}'
+            elif lift in ["absolute", "relative"]:
+                str_value = f'{round(value * 100.0, 2)}%'
+            elif lift in ["incremental"]:
+                str_value = value
+            else:
+                raise ValueError(f"No support for {lift}")
+        elif isinstance(value, list):
+            if lift in ["revenue", "roas"]:
+                str_value = [f'${round(val, 2):,}' for val in value]
+            elif lift in ["absolute", "relative"]:
+                str_value = [f'{round(val * 100.0, 2)}%' for val in value]
+            elif lift == "incremental":
+                str_value = value
+            else:
+                raise ValueError(f"No support for {lift}")
+        else:
+            raise TypeError(f"No support for converting {value} to string")
+        return str_value
 
     def __str__(self):
         return tabulate(
-            self.to_list(include_total=True), headers=["cell_name", "successes", "trials"], tablefmt="grid", intfmt=","
+            self.to_list(include_total=True), headers=["cell_name", "successes", "trials", "90% CI Lower", "90% CI Upper"], tablefmt="grid", intfmt=","
         )

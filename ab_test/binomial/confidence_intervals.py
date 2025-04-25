@@ -10,8 +10,9 @@ from ab_test.binomial.stats_tests import score_test
 from ab_test.binomial.utils import observed_lift
 
 __all__ = [
-    "wilson_interval",
     "confidence_interval",
+    "individual_confidence_interval",
+    "wilson_interval",
     "agresti_coull_interval",
     "jeffrey_interval",
     "clopper_pearson_interval",
@@ -189,6 +190,39 @@ def confidence_interval(
             lb, ub = delta_interval(trials, successes, alpha, lift)
         else:
             raise NotImplementedError(f"No support for {method} method of generating confidence intervals")
+    return lb, ub
+
+
+def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: str = "wilson") -> tuple:
+    """A wrapper for calculating confidence intervals for individual cells
+
+    Parameters
+    ----------
+     s, n : int
+        The number of successes, trials.
+     alpha : float
+        The significance level. Defaults to 0.05, corresponding to a 95%
+        confidence interval.
+    method: {"wilson", "agresti-coull", "jeffrey", "clopper-pearson", "wald"}
+            The method for calculating individual confidence intervals
+
+    Returns
+    -------
+    A confidence interval for our individual cell
+    """
+    method = method.casefold()
+    if method == "wilson":
+        lb, ub = wilson_interval(s, n, alpha)
+    elif method == "agresti-coull":
+        lb, ub = agresti_coull_interval(s, n, alpha)
+    elif method == "jeffrey":
+        lb, ub = jeffrey_interval(s, n, alpha)
+    elif method == "clopper-pearson":
+        lb, ub = clopper_pearson_interval(s, n, alpha)
+    elif method == "wald":
+        lb, ub = wald_interval(s, n, alpha)
+    else:
+        raise ValueError(f"No support for calculating confidence interval using {method}")
     return lb, ub
 
 
