@@ -302,11 +302,7 @@ class ContingencyTable:
             success_rate = s_i / n_i
             lb, ub = individual_confidence_interval(s_i, n_i, alpha, conf_int_method)
             name_list = [name_i, s_i, n_i] + self._convert_to_tabulate_str([success_rate, lb, ub], "absolute")
-            self.individual_results[name_i] = {
-                "lift": success_rate,
-                "ci_lower": lb,
-                "ci_upper": ub
-            }
+            self.individual_results[name_i] = {"lift": success_rate, "ci_lower": lb, "ci_upper": ub}
             table_list.append(name_list)
         total_success, total_trials = np.sum(self.successes), np.sum(self.trials)
         total_success_rate = total_success / total_trials
@@ -314,11 +310,7 @@ class ContingencyTable:
         total_list = ["Total", total_success, total_trials] + self._convert_to_tabulate_str(
             [total_success_rate, lb_total, ub_total], "absolute"
         )
-        self.individual_results["Total"] = {
-            "lift": total_success_rate,
-            "ci_lower": lb_total,
-            "ci_upper": ub_total
-        }
+        self.individual_results["Total"] = {"lift": total_success_rate, "ci_lower": lb_total, "ci_upper": ub_total}
         table_list.append(total_list)
         table_headers = ["Cell Name", "Successes", "Trials", "Success Rate", "Conf. Int. Lower**", "Conf. Int. Upper**"]
         return_string = tabulate(table_list, headers=table_headers, tablefmt="grid", intfmt=",")
@@ -363,20 +355,20 @@ class ContingencyTable:
         return str_value
 
     def plot(
-            self,
-            is_individual: bool = True,
-            reverse_plot: bool = True,
-            color: Optional[Union[str, dict, list]] = None,
+        self,
+        is_individual: bool = True,
+        reverse_plot: bool = True,
+        color: Optional[Union[str, dict, list]] = None,
     ) -> None:
         """Plots the point estimates as well as confidence intervals
 
         Parameters
         ----------
-        is_individual: bool, default=True
+        is_individual : bool, default=True
             Whether we are looking at the individual performance of each cell or the comparative performance
-        reverse_plot: bool, default=True
+        reverse_plot : bool, default=True
             Whether we are reversing the order of our plot or not.
-        color: str or list or dict, default=None
+        color : str or list or dict, default=None
             If None, then uses plotly's default color scheme.
             If a string, then one of the available colorblind options
             If a list, then each item in the list corresponds to a color for the relevant group
@@ -387,7 +379,7 @@ class ContingencyTable:
         A plot of our point estimates as well as confidence intervals
 
         Notes
-        ------
+        -----
         This function is intended to be run _after_ either .analyze() or .analyze_individually()
         """
         if isinstance(color, str):
@@ -402,7 +394,17 @@ class ContingencyTable:
             elif color == "tol_vibrant":
                 plot_color = ["#ee7733", "#0077bb", "#33bbee", "#ee3377", "#cc3311", "#009988"]
             elif color == "tol_muted":
-                plot_color = ["#cc6677", "#332288", "#ddcc77", "#117733", "#88ccee", "#882255", "#44aa99", "#999933", "#aa4499"]
+                plot_color = [
+                    "#cc6677",
+                    "#332288",
+                    "#ddcc77",
+                    "#117733",
+                    "#88ccee",
+                    "#882255",
+                    "#44aa99",
+                    "#999933",
+                    "#aa4499",
+                ]
             elif color == "tol_light":
                 plot_color = ["#77aadd", "#ee8866", "#eedd88", "#ffaabb", "#99ddff", "#44bb99", "#bbcc33", "#bbcc33"]
             else:
@@ -417,68 +419,82 @@ class ContingencyTable:
         if is_individual:
             for index, name in enumerate(self.names):
                 ind_results = self.individual_results[name]
-                fig.add_trace(go.Scatter(
-                    x=[ind_results["lift"]],
-                    y=[name],
-                    marker={"color": plot_color[index] if isinstance(plot_color, list) else plot_color[name],
+                fig.add_trace(
+                    go.Scatter(
+                        x=[ind_results["lift"]],
+                        y=[name],
+                        marker={
+                            "color": plot_color[index] if isinstance(plot_color, list) else plot_color[name],
                             "symbol": "diamond",
-                            "size": 12.5},
-                    error_x={
-                        "type": "data",
-                        "symmetric": False,
-                        "array": [ind_results["ci_upper"] - ind_results["lift"]],
-                        "arrayminus": [ind_results["lift"] - ind_results["ci_lower"]],
-                        "visible": True,
-                        "color": plot_color[index] if isinstance(plot_color, list) else plot_color[name],
-                    },
-                    name=name,
-                ))
+                            "size": 12.5,
+                        },
+                        error_x={
+                            "type": "data",
+                            "symmetric": False,
+                            "array": [ind_results["ci_upper"] - ind_results["lift"]],
+                            "arrayminus": [ind_results["lift"] - ind_results["ci_lower"]],
+                            "visible": True,
+                            "color": plot_color[index] if isinstance(plot_color, list) else plot_color[name],
+                        },
+                        name=name,
+                    )
+                )
             fig.add_trace(
                 go.Scatter(
                     x=[self.individual_results["Total"]["lift"]],
                     y=["Total"],
-                    marker={"color": plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"],
-                            "symbol": "diamond",
-                            "size": 12.5},
+                    marker={
+                        "color": plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"],
+                        "symbol": "diamond",
+                        "size": 12.5,
+                    },
                     error_x={
                         "type": "data",
                         "symmetric": False,
-                        "array": [self.individual_results["Total"]["ci_upper"] - self.individual_results["Total"]["lift"]],
-                        "arrayminus": [self.individual_results["Total"]["lift"] - self.individual_results["Total"]["ci_lower"]],
+                        "array": [
+                            self.individual_results["Total"]["ci_upper"] - self.individual_results["Total"]["lift"]
+                        ],
+                        "arrayminus": [
+                            self.individual_results["Total"]["lift"] - self.individual_results["Total"]["ci_lower"]
+                        ],
                         "visible": True,
                         "color": plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"],
                     },
                     name="Total",
                 )
             )
-            fig.layout.xaxis.tickformat = ',.0%'
+            fig.layout.xaxis.tickformat = ",.0%"
         else:
-            fig.add_trace(go.Scatter(
-                x=[self.incremental_results["lift"]],
-                y=["Total"],
-                marker={"color": plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0],
+            fig.add_trace(
+                go.Scatter(
+                    x=[self.incremental_results["lift"]],
+                    y=["Total"],
+                    marker={
+                        "color": plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0],
                         "symbol": "diamond",
-                        "size": 12.5},
-                error_x={
-                    "type": "data",
-                    "symmetric": False,
-                    "array": [self.incremental_results["ci_upper"] - self.incremental_results["lift"]],
-                    "arrayminus": [self.incremental_results["lift"] - self.incremental_results["ci_lower"]],
-                    "visible": True,
-                    "color": plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0],
-                },
-                name="Total",
-            ))
+                        "size": 12.5,
+                    },
+                    error_x={
+                        "type": "data",
+                        "symmetric": False,
+                        "array": [self.incremental_results["ci_upper"] - self.incremental_results["lift"]],
+                        "arrayminus": [self.incremental_results["lift"] - self.incremental_results["ci_lower"]],
+                        "visible": True,
+                        "color": plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0],
+                    },
+                    name="Total",
+                )
+            )
             if self.incremental_results["lift_type"] in ["relative", "absolute"]:
-                fig.layout.xaxis.tickformat = ',.0%'
+                fig.layout.xaxis.tickformat = ",.0%"
             elif self.incremental_results["lift_type"] in ["revenue", "roas"]:
-                fig.layout.xaxis.tickprefix = '$'
+                fig.layout.xaxis.tickprefix = "$"
                 if self.incremental_results == "revenue":
                     fig.layout.xaxis.tickformat = "~s"
                 else:
-                    fig.layout.xaxis.tickformat ='0.2'
+                    fig.layout.xaxis.tickformat = "0.2"
             else:
-                fig.layout.xaxis.tickformat = '~s'
+                fig.layout.xaxis.tickformat = "~s"
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
         fig.show()
