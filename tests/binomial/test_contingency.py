@@ -232,13 +232,13 @@ class TestContingencyTable:
         ct.add(name[0], success[0], trials[0])
         ct.add(name[1], success[1], trials[1])
         print(ct.analyze(lift=lift))
-        assert ct.results["lift_type"] == expected["lift_type"]
-        assert expected["lift"] == pytest.approx(ct.results["lift"], abs=1)
-        assert expected[f"{name[0]}"] == pytest.approx(ct.results[f"{name[0]}"])
-        assert expected[f"{name[1]}"] == pytest.approx(ct.results[f"{name[1]}"])
-        assert expected["p_value"] == pytest.approx(ct.results["p_value"])
-        assert expected["ci_lower"] == pytest.approx(ct.results["ci_lower"])
-        assert expected["ci_upper"] == pytest.approx(ct.results["ci_upper"])
+        assert ct.incremental_results["lift_type"] == expected["lift_type"]
+        assert expected["lift"] == pytest.approx(ct.incremental_results["lift"], abs=1)
+        assert expected[f"{name[0]}"] == pytest.approx(ct.incremental_results[f"{name[0]}"])
+        assert expected[f"{name[1]}"] == pytest.approx(ct.incremental_results[f"{name[1]}"])
+        assert expected["p_value"] == pytest.approx(ct.incremental_results["p_value"])
+        assert expected["ci_lower"] == pytest.approx(ct.incremental_results["ci_lower"])
+        assert expected["ci_upper"] == pytest.approx(ct.incremental_results["ci_upper"])
 
     @staticmethod
     def test_contingency_analyze_individual_results():
