@@ -1,7 +1,6 @@
 """General utility functions."""
 
 import math
-from typing import Optional, Union
 
 import numpy as np
 
@@ -15,12 +14,12 @@ __all__ = [
 
 
 def simple_hypothesis_from_composite(
-    group_sizes: Union[np.ndarray, list],
+    group_sizes: np.ndarray | list,
     baseline: float,
     null_lift: float,
     alt_lift: float,
     lift: str = "relative",
-) -> np.array:
+) -> tuple:
     """Translate a composite hypothesis into a simple hypothesis.
 
     Parameters
@@ -109,7 +108,7 @@ def simple_hypothesis_from_composite(
     return p_null, p_alt
 
 
-def observed_lift(trials: Union[np.array, list], successes: Union[np.array, list], lift: str = "relative") -> float:
+def observed_lift(trials: np.ndarray | list, successes: np.ndarray | list, lift: str = "relative") -> float:
     """Calculates the lift from our experiment
 
     Parameters
@@ -143,11 +142,11 @@ def observed_lift(trials: Union[np.array, list], successes: Union[np.array, list
 
 
 def mle_under_null(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-) -> np.ndarray:
+) -> list:
     """Maximum Likelihood Estimation under H0
 
     Parameters
@@ -258,11 +257,11 @@ def mle_under_null(
 
 
 def mle_under_alternative(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
-    alt_lift: Optional[float] = None,
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
+    alt_lift: float | None = None,
     lift: str = "relative",
-) -> np.ndarray:
+) -> np.ndarray | list:
     """Maximum Likelihood Estimation under H1
 
     Parameters

@@ -1,7 +1,6 @@
 """Calculates confidence intervals for AB Tests."""
 
 import math
-from typing import Union
 
 import numpy as np
 import scipy.stats as ss
@@ -21,8 +20,8 @@ __all__ = [
 
 
 def confidence_interval(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     test=score_test,
     alpha: float = 0.05,
     lift: str = "relative",
@@ -69,6 +68,8 @@ def confidence_interval(
     except ZeroDivisionError:
         ote = 1.0
         upper_bound_exists = False
+    lb: float | str
+    ub: float | str
     if method == "binary_search":
         if test.__name__ in ["score_test", "likelihood_ratio_test", "z_test"]:
             if lift == "relative":
@@ -338,7 +339,7 @@ def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
 
 
 def delta_interval(
-    trials: Union[np.ndarray, list], successes: Union[np.ndarray, list], alpha: float, lift: str = "relative"
+    trials: np.ndarray | list, successes: np.ndarray | list, alpha: float, lift: str = "relative"
 ) -> tuple:
     """The confidence interval for Binomial Proportions using the Delta Method
 

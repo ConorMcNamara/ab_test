@@ -139,7 +139,7 @@ class TestConfidenceIntervalComparison:
         assert actual_high == pytest.approx(expected_high)
 
     @staticmethod
-    def test_conf_int_absoulte_wald():
+    def test_conf_int_absolute_wald():
         trials = [1000, 1000]
         successes = [100, 110]
         # Compare:     -0.016966857910156258 for score test
@@ -155,7 +155,7 @@ class TestConfidenceIntervalComparison:
         assert actual_high == pytest.approx(expected_high)
 
     @staticmethod
-    def test_conf_int_absoulte_wilson():
+    def test_conf_int_absolute_wilson():
         trials = [1000, 1000]
         successes = [100, 110]
         # Compare:     -0.016966857910156258 for score test

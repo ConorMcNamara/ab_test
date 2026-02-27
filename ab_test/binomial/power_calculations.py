@@ -1,7 +1,5 @@
 """Methods to calculate the power of a test"""
 
-from typing import Optional, Union
-
 import numpy as np
 import scipy.stats as ss
 
@@ -16,9 +14,9 @@ __all__ = [
 
 
 def score_power(
-    n: Union[np.ndarray, list],
-    p_null: Union[np.ndarray, list],
-    p_alt: Union[np.ndarray, list],
+    n: np.ndarray | list,
+    p_null: np.ndarray | list,
+    p_alt: np.ndarray | list,
     alpha: float = 0.05,
 ) -> float:
     """Power of Rao's Score Test
@@ -53,7 +51,7 @@ def score_power(
 
 
 def abtest_power(
-    group_sizes: Union[np.ndarray, list],
+    group_sizes: np.ndarray | list,
     baseline: float,
     alt_lift: float,
     alpha: float = 0.05,
@@ -96,7 +94,7 @@ def abtest_power(
 
 
 def minimum_detectable_lift(
-    group_sizes: Union[np.ndarray, list],
+    group_sizes: np.ndarray | list,
     baseline: float,
     alpha: float = 0.05,
     beta: float = 0.2,
@@ -213,7 +211,7 @@ def required_sample_size(
     alt_lift: float,
     alpha: float = 0.05,
     beta: float = 0.2,
-    group_proportions: Optional[np.ndarray] = None,
+    group_proportions: np.ndarray | list | None = None,
     null_lift: float = 0.0,
     power=score_power,
     lift: str = "relative",

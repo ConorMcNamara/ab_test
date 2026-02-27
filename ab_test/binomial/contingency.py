@@ -1,7 +1,7 @@
 """Our wrapper for analyzing experiment results"""
 
-from typing import Optional, Union
 import math
+from typing import Any, overload
 
 import numpy as np
 import pandas as pd
@@ -18,7 +18,7 @@ class ContingencyTable:
     """A class for analyzing experiment results"""
 
     def __init__(
-        self, name: str, metric_name: str, spend: Optional[float] = None, msrp: Optional[float] = None
+        self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None
     ) -> None:
         """ContingencyTable is our class for creating and analyzing experiment results
 
@@ -33,22 +33,22 @@ class ContingencyTable:
         msrp : float
             The average msrp of our product. Used to calculate the revenue return of our campaign
         """
-        self.experiment_name = name
-        self.names = []
-        self.metric_name = metric_name
-        self.spend = spend
-        self.msrp = msrp
-        self.cells = {
+        self.experiment_name: str = name
+        self.names: list[str] = []
+        self.metric_name: str = metric_name
+        self.spend: float | None = spend
+        self.msrp: float | None = msrp
+        self.cells: dict[str, Any] = {
             "experiment_name": self.experiment_name,
             "metric_name": self.metric_name,
             "spend": self.spend,
             "msrp": self.msrp,
             "table": {},
         }
-        self.successes = []
-        self.trials = []
-        self.incremental_results = None
-        self.individual_results = {}
+        self.successes: list[int] = []
+        self.trials: list[int] = []
+        self.incremental_results: dict[str, Any] | None = None
+        self.individual_results: dict[str, dict[str, float]] = {}
 
     def add(self, cell_name: str, successes: int, trials: int) -> "ContingencyTable":
         """A method to add cells to our contingency table
@@ -73,7 +73,7 @@ class ContingencyTable:
         self.trials.append(trials)
         return self
 
-    def to_df(self, method: str = "pandas", include_total: bool = False) -> Union[pd.DataFrame, pl.DataFrame]:
+    def to_df(self, method: str = "pandas", include_total: bool = False) -> pd.DataFrame | pl.DataFrame:
         """Returns our ContingencyTable as a DataFrame
 
         Parameters
@@ -101,7 +101,7 @@ class ContingencyTable:
         elif method == "modin":
             raise NotImplementedError("Have not implemented modin yet")
         else:
-            raise ValueError(f"Methdod {method} not supported for creating DataFrames")
+            raise ValueError(f"Method {method} not supported for creating DataFrames")
         return return_df
 
     def to_list(self, include_total: bool = False) -> list:
@@ -143,7 +143,7 @@ class ContingencyTable:
         """
         return np.array(self.to_list(include_total))
 
-    def serialize(self, include_total: bool = False):
+    def serialize(self, include_total: bool = False) -> dict:
         """Returns our ContingencyTable as a JSON, with all information
 
         Parameters
@@ -194,7 +194,8 @@ class ContingencyTable:
         ----------
         lift : {'relative', 'absolute', 'incremental', 'roas', 'revenue'}
             The kind of lift we are measuring for our campaign
-        test_method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo', 'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
+        test_method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo',
+                       'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
             The method we plan to use to assess whether our result is statistically significant
         conf_int_method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald'}
             The method we plan to use to craft confidence intervals of our lift
@@ -225,7 +226,10 @@ class ContingencyTable:
         lb, ub = confidence_interval(
             self.trials, self.successes, test=test, alpha=alpha, lift=ci_lift, method=conf_int_method
         )
+        success_rate: list[int | float]
         if lift in ["incremental", "roas", "revenue"]:
+            pa: int | float
+            pb: int | float
             if self.trials[0] > self.trials[1]:
                 pb = math.ceil(self.successes[1] * (self.trials[0] / self.trials[1]))
                 pa = math.ceil(self.successes[0])
@@ -238,12 +242,16 @@ class ContingencyTable:
                 ub = math.ceil(ub * self.trials[1])
             test_lift = pb - pa
             if lift == "roas":
+                if self.spend is None:
+                    raise ValueError("spend must be set for ROAS calculations")
                 test_lift = self.spend / test_lift
                 pa = self.spend / pa if pa > 0 else np.inf
                 pb = self.spend / pb if pb > 0 else np.inf
                 lb = self.spend / lb if lb > 0 else np.inf
                 ub = self.spend / ub if ub > 0 else np.inf
             if lift == "revenue":
+                if self.msrp is None:
+                    raise ValueError("msrp must be set for revenue calculations")
                 test_lift *= self.msrp
                 pa *= self.msrp
                 pb *= self.msrp
@@ -317,8 +325,16 @@ class ContingencyTable:
         return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
         return return_string
 
+    @overload
     @staticmethod
-    def _convert_to_tabulate_str(value: Union[float, list], lift: str) -> Union[str, list, float]:
+    def _convert_to_tabulate_str(value: float, lift: str) -> str | float: ...
+
+    @overload
+    @staticmethod
+    def _convert_to_tabulate_str(value: list, lift: str) -> list: ...
+
+    @staticmethod
+    def _convert_to_tabulate_str(value: float | list, lift: str) -> str | list | float:
         """Converts our lift values to either percentages or dollar signs
 
         Parameters
@@ -332,6 +348,7 @@ class ContingencyTable:
         -------
         Our new str_value, as either a percentage or dollar sign
         """
+        str_value: str | list[str] | float
         if isinstance(value, float):
             if lift in ["revenue", "roas"]:
                 str_value = f"${round(value, 2):,}"
@@ -358,7 +375,7 @@ class ContingencyTable:
         self,
         is_individual: bool = True,
         reverse_plot: bool = True,
-        color: Optional[Union[str, dict, list]] = None,
+        color: str | dict | list | None = None,
     ) -> None:
         """Plots the point estimates as well as confidence intervals
 
@@ -372,7 +389,8 @@ class ContingencyTable:
             If None, then uses plotly's default color scheme.
             If a string, then one of the available colorblind options
             If a list, then each item in the list corresponds to a color for the relevant group
-            If a dictionary, then each key in the dictionary corresponds to a group with the value pertaining to its color
+            If a dictionary, then each key in the dictionary corresponds to a group with the
+            value pertaining to its color
 
         Returns
         -------
@@ -382,6 +400,7 @@ class ContingencyTable:
         -----
         This function is intended to be run _after_ either .analyze() or .analyze_individually()
         """
+        plot_color: list[str] | dict[str, str]
         if isinstance(color, str):
             if color == "ibm":
                 plot_color = ["#648fff", "#785ef0", "#dc267f", "#fe6100", "#ffb000"]
@@ -465,6 +484,8 @@ class ContingencyTable:
             )
             fig.layout.xaxis.tickformat = ",.0%"
         else:
+            if self.incremental_results is None:
+                raise ValueError("Call .analyze() before plotting incremental results.")
             fig.add_trace(
                 go.Scatter(
                     x=[self.incremental_results["lift"]],
@@ -489,7 +510,7 @@ class ContingencyTable:
                 fig.layout.xaxis.tickformat = ",.0%"
             elif self.incremental_results["lift_type"] in ["revenue", "roas"]:
                 fig.layout.xaxis.tickprefix = "$"
-                if self.incremental_results == "revenue":
+                if self.incremental_results["lift_type"] == "revenue":
                     fig.layout.xaxis.tickformat = "~s"
                 else:
                     fig.layout.xaxis.tickformat = "0.2"
@@ -499,7 +520,7 @@ class ContingencyTable:
             fig.update_layout(yaxis={"autorange": "reversed"})
         fig.show()
 
-    def __str__(self):
+    def __str__(self) -> str:
         return tabulate(
             self.to_list(include_total=True),
             headers=["cell_name", "successes", "trials", "90% CI Lower", "90% CI Upper"],

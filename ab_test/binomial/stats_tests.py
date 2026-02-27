@@ -1,7 +1,6 @@
 """Statistical tests to determine significance"""
 
 import math
-from typing import Optional, Union
 
 import numpy as np
 import scipy.stats as ss
@@ -24,13 +23,13 @@ __all__ = [
 
 
 def ab_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.array, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
+    crit: float | None = None,
     method: str = "score_test",
-) -> Union[float, bool]:
+) -> float | bool:
     """A wrapper for our different statistical tests
 
     Parameters
@@ -52,7 +51,8 @@ def ab_test(
         simulations where we will be repeatedly assessing significance, since
         calculating the critical value can be done once instead of repeatedly.
         This makes such simulations about 5x faster.
-    method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo', 'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
+    method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo',
+              'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
         How we plan on calculating the p_value or critical value of our experiment
 
     Returns
@@ -96,12 +96,12 @@ def ab_test(
 
 
 def score_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.array, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Rao's score test for 2x2 contingency table.
 
     Parameters
@@ -164,12 +164,12 @@ def score_test(
 
 
 def likelihood_ratio_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Likelihood ratio test for 2x2 contingency table.
 
     Parameters
@@ -227,12 +227,12 @@ def likelihood_ratio_test(
 
 
 def z_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Z test for 2x2 contingency table.
 
     Parameters
@@ -286,12 +286,12 @@ def z_test(
 
 
 def fisher_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Fisher's Exact Test for a 2x2 Contingency Table
 
     Parameters
@@ -344,12 +344,12 @@ def fisher_test(
 
 
 def barnard_exact_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Barnard's Exact Test for a 2x2 Contingency Table
 
     Parameters
@@ -403,12 +403,12 @@ def barnard_exact_test(
 
 
 def boschloo_exact_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Boschloo's Exact Test for a 2x2 Contingency Table
 
     Parameters
@@ -462,12 +462,12 @@ def boschloo_exact_test(
 
 
 def modified_log_likelihood_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Modified Log Likelihood Ratio Test for a 2x2 Contingency Table
 
     Parameters
@@ -521,12 +521,12 @@ def modified_log_likelihood_test(
 
 
 def freeman_tukey_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Freeman-Tukey's Test for a 2x2 Contingency Table
 
     Parameters
@@ -580,12 +580,12 @@ def freeman_tukey_test(
 
 
 def neyman_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Neyman's Test for a 2x2 Contingency Table
 
     Parameters
@@ -639,12 +639,12 @@ def neyman_test(
 
 
 def cressie_read_test(
-    trials: Union[np.ndarray, list],
-    successes: Union[np.ndarray, list],
+    trials: np.ndarray | list,
+    successes: np.ndarray | list,
     null_lift: float = 0.0,
     lift: str = "relative",
-    crit: Optional[float] = None,
-) -> Union[float, bool]:
+    crit: float | None = None,
+) -> float | bool:
     """Cressie-Read's Test for a 2x2 Contingency Table
 
     Parameters

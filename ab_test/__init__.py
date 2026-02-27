@@ -2,12 +2,10 @@
 
 __version__ = "0.1.0"
 
-from typing import List
-
 from ab_test import binomial
 
-__all__: List[str] = ["binomial"]
+__all__: list[str] = ["binomial"]
 
 
-def __dir__() -> List[str]:
+def __dir__() -> list[str]:
     return __all__
