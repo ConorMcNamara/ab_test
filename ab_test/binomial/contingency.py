@@ -17,9 +17,7 @@ from ab_test.binomial.utils import observed_lift
 class ContingencyTable:
     """A class for analyzing experiment results"""
 
-    def __init__(
-        self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None
-    ) -> None:
+    def __init__(self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None) -> None:
         """ContingencyTable is our class for creating and analyzing experiment results
 
         Parameters
