@@ -77,7 +77,7 @@ jobs:
           pip install ".[dev]"
 
       - name: Run tests with coverage
-        run: pytest --cov=GeoCausality --cov-report=xml --cov-report=term-missing
+        run: pytest --cov=ab_test --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
