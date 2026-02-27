@@ -1,4 +1,4 @@
-.PHONY: install test lint format typecheck check clean
+.PHONY: install test lint format typecheck coverage check clean
 
 # Install all dependencies including dev tools
 install:
@@ -22,6 +22,11 @@ lint:
 format:
 	poetry run ruff format ab_test/ tests/
 	poetry run ruff check --fix ab_test/ tests/
+
+# Run tests and open an HTML coverage report
+coverage:
+	poetry run pytest tests/ -v --cov-report=html
+	open htmlcov/index.html
 
 # Run mypy type checking
 typecheck:

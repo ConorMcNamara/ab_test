@@ -55,6 +55,7 @@ jobs:
         run: poetry run mypy ab_test/
 
   # ── Tests ─────────────────────────────────────────────────────────────────
+  # ── Tests ─────────────────────────────────────────────────────────────────
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
     strategy:
@@ -79,5 +80,12 @@ jobs:
       - name: Install dependencies
         run: poetry install --extras dev --no-root
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: poetry run pytest tests/ -v
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: ${{ matrix.os }}-py${{ matrix.python-version }}
+          fail_ci_if_error: true
