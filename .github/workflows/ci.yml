@@ -39,7 +39,7 @@ jobs:
         run: ruff check .
 
       - name: Run mypy type checking
-        run: mypy GeoCausality --ignore-missing-imports
+        run: mypy ab_test --ignore-missing-imports
 
   test:
     name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
