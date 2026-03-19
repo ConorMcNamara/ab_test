@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy types-tabulate
+          pip install ruff zuban
 
       - name: Run ruff format check
         run: ruff format --check .
@@ -38,8 +38,8 @@ jobs:
       - name: Run ruff linting
         run: ruff check .
 
-      - name: Run mypy type checking
-        run: mypy ab_test --ignore-missing-imports
+      - name: Run zuban type checking
+        run: zuban check ab_test
 
   test:
     name: Test Python ${{ matrix.python-version }} on ${{ matrix.os }}
