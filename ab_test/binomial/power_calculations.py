@@ -47,7 +47,7 @@ def score_power(
     nc = 0.0
     for ni, null, alt in zip(n, p_null, p_alt):
         nc += ni * (null - alt) * (null - alt) / (null * (1.0 - null))
-    return ss.ncx2.sf(ss.chi2.isf(alpha, df=1), df=1, nc=nc)
+    return float(ss.ncx2.sf(ss.chi2.isf(alpha, df=1), df=1, nc=nc))
 
 
 def abtest_power(

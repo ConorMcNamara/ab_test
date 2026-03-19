@@ -159,7 +159,7 @@ def score_test(
         # anything else here. On the other hand, if we can optimize this line, then
         # great!
         pval = ss.chi2.sf(ts, df=1)
-        return pval
+        return float(pval)
     return ts >= crit
 
 
@@ -222,7 +222,7 @@ def likelihood_ratio_test(
     ts = 2 * (log_likelihood(p1) - log_likelihood(p0))
     if crit is None:
         pval = ss.chi2.sf(ts, df=1)
-        return pval
+        return float(pval)
     return ts >= crit
 
 
@@ -281,7 +281,7 @@ def z_test(
     sigma2 = sum([p_i * (1 - p_i) / t_i for (p_i, t_i) in zip(p0, trials)])
     z = (p1[1] - p1[0] - null_lift) / math.sqrt(sigma2)
     if crit is None:
-        return 2.0 * ss.norm.cdf(-abs(z))
+        return float(2.0 * ss.norm.cdf(-abs(z)))
     return abs(z) >= crit
 
 

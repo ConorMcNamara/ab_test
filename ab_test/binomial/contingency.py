@@ -87,7 +87,7 @@ class ContingencyTable:
         """
         method = method.casefold()
         if method == "pandas":
-            return_df = pd.DataFrame(self.to_list(include_total), columns=["cell_name", "successes", "trials"])
+            return_df = pd.DataFrame(self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials"]))
         elif method == "polars":
             return_df = pl.DataFrame(
                 self.to_list(include_total), schema=["cell_name", "successes", "trials"], orient="row"
@@ -480,7 +480,7 @@ class ContingencyTable:
                     name="Total",
                 )
             )
-            fig.layout.xaxis.tickformat = ",.0%"
+            fig.update_layout(xaxis_tickformat=",.0%")
         else:
             if self.incremental_results is None:
                 raise ValueError("Call .analyze() before plotting incremental results.")
@@ -505,15 +505,14 @@ class ContingencyTable:
                 )
             )
             if self.incremental_results["lift_type"] in ["relative", "absolute"]:
-                fig.layout.xaxis.tickformat = ",.0%"
+                fig.update_layout(xaxis_tickformat=",.0%")
             elif self.incremental_results["lift_type"] in ["revenue", "roas"]:
-                fig.layout.xaxis.tickprefix = "$"
                 if self.incremental_results["lift_type"] == "revenue":
-                    fig.layout.xaxis.tickformat = "~s"
+                    fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="~s")
                 else:
-                    fig.layout.xaxis.tickformat = "0.2"
+                    fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="0.2")
             else:
-                fig.layout.xaxis.tickformat = "~s"
+                fig.update_layout(xaxis_tickformat="~s")
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
         fig.show()

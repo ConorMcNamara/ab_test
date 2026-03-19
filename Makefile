@@ -28,9 +28,9 @@ coverage:
 	poetry run pytest tests/ -v --cov-report=html
 	open htmlcov/index.html
 
-# Run mypy type checking
+# Run zuban type checking
 typecheck:
-	poetry run mypy ab_test/
+	poetry run zuban check ab_test/
 
 # Run lint + typecheck + tests (full quality gate)
 check: lint typecheck test

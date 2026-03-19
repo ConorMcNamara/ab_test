@@ -367,19 +367,19 @@ def delta_interval(
     if lift == "relative":
         diff = (p1_hat - p2_hat) / p2_hat
 
-        def dg_dp1(p2):
+        def dg_dp1(p2) -> float:
             return 1 / p2
 
-        def dg_dp2(p1, p2):
+        def dg_dp2(p1, p2) -> float:
             return -p1 / math.pow(p2, 2)
     else:
         diff = p1_hat - p2_hat
 
-        def dg_dp1(p2):  # To maintain compatibility with relative
-            return 1
+        def dg_dp1(p2) -> float:  # To maintain compatibility with relative
+            return 1.0
 
-        def dg_dp2(p1, p2):  # To maintain compatibility with relative
-            return -1
+        def dg_dp2(p1, p2) -> float:  # To maintain compatibility with relative
+            return -1.0
 
     var_p1 = p1_hat * (1 - p1_hat) / trials[1]
     var_p2 = p2_hat * (1 - p2_hat) / trials[0]
