@@ -340,7 +340,10 @@ def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
 
 
 def delta_interval(
-    trials: np.ndarray[Any, Any] | list[Any], successes: np.ndarray[Any, Any] | list[Any], alpha: float, lift: str = "relative"
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+    alpha: float,
+    lift: str = "relative",
 ) -> tuple[Any, ...]:
     """The confidence interval for Binomial Proportions using the Delta Method
 

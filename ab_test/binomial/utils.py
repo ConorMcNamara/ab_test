@@ -109,7 +109,9 @@ def simple_hypothesis_from_composite(
     return p_null, p_alt
 
 
-def observed_lift(trials: np.ndarray[Any, Any] | list[Any], successes: np.ndarray[Any, Any] | list[Any], lift: str = "relative") -> float:
+def observed_lift(
+    trials: np.ndarray[Any, Any] | list[Any], successes: np.ndarray[Any, Any] | list[Any], lift: str = "relative"
+) -> float:
     """Calculates the lift from our experiment
 
     Parameters
