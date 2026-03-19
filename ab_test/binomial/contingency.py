@@ -87,7 +87,9 @@ class ContingencyTable:
         """
         method = method.casefold()
         if method == "pandas":
-            return_df = pd.DataFrame(self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials"]))
+            return_df = pd.DataFrame(
+                self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials"])
+            )
         elif method == "polars":
             return_df = pl.DataFrame(
                 self.to_list(include_total), schema=["cell_name", "successes", "trials"], orient="row"
