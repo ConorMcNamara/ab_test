@@ -513,7 +513,7 @@ def modified_log_likelihood_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="mod-log-likelihood")  # type: ignore[no-untyped-call, attr-defined]
+    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="mod-log-likelihood")  # type: ignore[no-untyped-call, attr-defined, var-annotated]
     statistic, pval = mod_like.statistic, mod_like.pvalue
 
     if crit is None:
@@ -572,7 +572,7 @@ def freeman_tukey_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    freeman_tukey = ss.chi2_contingency(contingency_table, correction=False, lambda_="freeman-tukey")  # type: ignore[no-untyped-call, attr-defined]
+    freeman_tukey = ss.chi2_contingency(contingency_table, correction=False, lambda_="freeman-tukey")  # type: ignore[no-untyped-call, attr-defined, var-annotated]
     statistic, pval = freeman_tukey.statistic, freeman_tukey.pvalue
 
     if crit is None:
@@ -631,7 +631,7 @@ def neyman_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    neyman = ss.chi2_contingency(contingency_table, correction=False, lambda_="neyman")  # type: ignore[no-untyped-call, attr-defined]
+    neyman = ss.chi2_contingency(contingency_table, correction=False, lambda_="neyman")  # type: ignore[no-untyped-call, attr-defined, var-annotated]
     statistic, pval = neyman.statistic, neyman.pvalue
 
     if crit is None:
@@ -690,7 +690,7 @@ def cressie_read_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="cressie-read")  # type: ignore[no-untyped-call, attr-defined]
+    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="cressie-read")  # type: ignore[no-untyped-call, attr-defined, var-annotated]
     statistic, pval = mod_like.statistic, mod_like.pvalue
 
     if crit is None:

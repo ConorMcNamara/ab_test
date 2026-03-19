@@ -279,7 +279,7 @@ class ContingencyTable:
             + self._convert_to_tabulate_str([test_lift, lb, ub], lift)
             + [str_pvalue]
         ]
-        return_string = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
+        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
         return_string += (
             f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
         )
@@ -321,7 +321,7 @@ class ContingencyTable:
         self.individual_results["Total"] = {"lift": total_success_rate, "ci_lower": lb_total, "ci_upper": ub_total}
         table_list.append(total_list)
         table_headers = ["Cell Name", "Successes", "Trials", "Success Rate", "Conf. Int. Lower**", "Conf. Int. Upper**"]
-        return_string = tabulate(table_list, headers=table_headers, tablefmt="grid", intfmt=",")
+        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", intfmt=",")
         return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
         return return_string
 
@@ -520,9 +520,10 @@ class ContingencyTable:
         fig.show()  # type: ignore[no-untyped-call]
 
     def __str__(self) -> str:
-        return tabulate(
+        result: str = tabulate(
             self.to_list(include_total=True),
             headers=["cell_name", "successes", "trials", "90% CI Lower", "90% CI Upper"],
             tablefmt="grid",
             intfmt=",",
         )
+        return result
