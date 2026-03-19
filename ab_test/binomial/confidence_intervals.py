@@ -1,6 +1,7 @@
 """Calculates confidence intervals for AB Tests."""
 
 import math
+from typing import Any
 
 import numpy as np
 import scipy.stats as ss
@@ -20,14 +21,14 @@ __all__ = [
 
 
 def confidence_interval(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
-    test=score_test,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+    test: Any = score_test,
     alpha: float = 0.05,
     lift: str = "relative",
     method: str = "binary_search",
     tol: float = 1e-06,
-) -> tuple:
+) -> tuple[Any, ...]:
     """Wrapper for calculating confidence intervals
 
     Parameters
@@ -194,7 +195,7 @@ def confidence_interval(
     return lb, ub
 
 
-def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: str = "wilson") -> tuple:
+def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: str = "wilson") -> tuple[Any, ...]:
     """A wrapper for calculating confidence intervals for individual cells
 
     Parameters
@@ -227,7 +228,7 @@ def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: 
     return lb, ub
 
 
-def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
+def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
     """Agresti-Coull Interval on binomial proportions
 
     Parameters
@@ -248,7 +249,7 @@ def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     -----
     This returns a confidence interval on `p_tilde`
     """
-    z = ss.norm.isf(alpha / 2)
+    z = ss.norm.isf(alpha / 2)  # type: ignore[no-untyped-call]
     z_squared = math.pow(z, 2)
     n_tilde = n + z_squared
     p_tilde = (s + z_squared / 2) / n_tilde
@@ -257,7 +258,7 @@ def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     )
 
 
-def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
+def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
     """Jeffrey's Interval on Binomial Proportions
 
     Parameters
@@ -278,12 +279,12 @@ def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     -----
     This assumes a Beta distribution of (1 / 2, 1 / 2)
     """
-    lb = ss.beta.ppf(alpha / 2, s + 1 / 2, n - s + 1 / 2)
-    ub = ss.beta.ppf(1 - alpha / 2, s + 1 / 2, n - s + 1 / 2)
+    lb = ss.beta.ppf(alpha / 2, s + 1 / 2, n - s + 1 / 2)  # type: ignore[no-untyped-call]
+    ub = ss.beta.ppf(1 - alpha / 2, s + 1 / 2, n - s + 1 / 2)  # type: ignore[no-untyped-call]
     return lb, ub
 
 
-def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
+def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
     """Clopper-Pearson's Interval on Binomial Proportions
 
     Parameters
@@ -305,12 +306,12 @@ def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     This is based off the Beta representation of Clopper-Pearson's formula. Note that Clopper-Pearson is
     an exact method, meaning that its intervals can be wider than other methods like Wilson or Jeffrey
     """
-    lb = ss.beta.ppf(alpha / 2, s, n - s + 1)
-    ub = ss.beta.ppf(1 - alpha / 2, s + 1, n - s)
+    lb = ss.beta.ppf(alpha / 2, s, n - s + 1)  # type: ignore[no-untyped-call]
+    ub = ss.beta.ppf(1 - alpha / 2, s + 1, n - s)  # type: ignore[no-untyped-call]
     return lb, ub
 
 
-def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
+def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
     """The Wald Interval on Binomial Proportions
 
     Parameters
@@ -332,15 +333,15 @@ def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     This is based off the Wald formula. Note that this formula is fragile to proportions near 0 or 1.
     """
     p_hat = s / n
-    z = ss.norm.isf(alpha / 2)
+    z = ss.norm.isf(alpha / 2)  # type: ignore[no-untyped-call]
     lb = p_hat - z * math.sqrt(p_hat * (1 - p_hat) / n)
     ub = p_hat + z * math.sqrt(p_hat * (1 - p_hat) / n)
     return lb, ub
 
 
 def delta_interval(
-    trials: np.ndarray | list, successes: np.ndarray | list, alpha: float, lift: str = "relative"
-) -> tuple:
+    trials: np.ndarray[Any, Any] | list[Any], successes: np.ndarray[Any, Any] | list[Any], alpha: float, lift: str = "relative"
+) -> tuple[Any, ...]:
     """The confidence interval for Binomial Proportions using the Delta Method
 
     Parameters
@@ -367,18 +368,18 @@ def delta_interval(
     if lift == "relative":
         diff = (p1_hat - p2_hat) / p2_hat
 
-        def dg_dp1(p2) -> float:
-            return 1 / p2
+        def dg_dp1(p2: float) -> float:
+            return float(1 / p2)
 
-        def dg_dp2(p1, p2) -> float:
-            return -p1 / math.pow(p2, 2)
+        def dg_dp2(p1: float, p2: float) -> float:
+            return float(-p1 / math.pow(p2, 2))
     else:
         diff = p1_hat - p2_hat
 
-        def dg_dp1(p2) -> float:  # To maintain compatibility with relative
+        def dg_dp1(p2: float) -> float:  # To maintain compatibility with relative
             return 1.0
 
-        def dg_dp2(p1, p2) -> float:  # To maintain compatibility with relative
+        def dg_dp2(p1: float, p2: float) -> float:  # To maintain compatibility with relative
             return -1.0
 
     var_p1 = p1_hat * (1 - p1_hat) / trials[1]
@@ -390,13 +391,13 @@ def delta_interval(
         + 2 * dg_dp1(p2_hat) * dg_dp2(p1_hat, p2_hat) * cov_p1_p2
     )
     se_g = np.sqrt(var_g)
-    z = ss.norm.isf(alpha / 2)  # Calculate the z-score
+    z = ss.norm.isf(alpha / 2)  # type: ignore[no-untyped-call]  # Calculate the z-score
     lb = diff - z * se_g
     ub = diff + z * se_g
     return lb, ub
 
 
-def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
+def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
     """Wilson Confidence Interval on binomial proportion
 
     Parameters
@@ -417,7 +418,7 @@ def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple:
     -----
     Assuming s ~ Binom(n, p), this function returns a confidence interval on p.
     """
-    z = ss.norm.isf(alpha / 2)
+    z = ss.norm.isf(alpha / 2)  # type: ignore[no-untyped-call]
     z_squared = math.pow(z, 2)
     p_hat = s / n
     ctr = p_hat + z_squared / (2 * n)

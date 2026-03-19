@@ -1,6 +1,7 @@
 """Statistical tests to determine significance"""
 
 import math
+from typing import Any
 
 import numpy as np
 import scipy.stats as ss
@@ -23,8 +24,8 @@ __all__ = [
 
 
 def ab_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -96,8 +97,8 @@ def ab_test(
 
 
 def score_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -158,14 +159,14 @@ def score_test(
         # MLE, which is really fast! So there's no real point in optimizing
         # anything else here. On the other hand, if we can optimize this line, then
         # great!
-        pval = ss.chi2.sf(ts, df=1)
+        pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
         return float(pval)
     return ts >= crit
 
 
 def likelihood_ratio_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -216,19 +217,19 @@ def likelihood_ratio_test(
     if min(p1) <= 1e-12 or max(p1) + 1e-12 >= 1.0:
         return 1.0
 
-    def log_likelihood(p):
+    def log_likelihood(p: list[Any] | np.ndarray[Any, Any]) -> float:
         return sum([si * np.log(pi) + (ti - si) * np.log(1 - pi) for (si, ti, pi) in zip(successes, trials, p)])
 
     ts = 2 * (log_likelihood(p1) - log_likelihood(p0))
     if crit is None:
-        pval = ss.chi2.sf(ts, df=1)
+        pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
         return float(pval)
     return ts >= crit
 
 
 def z_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -281,13 +282,13 @@ def z_test(
     sigma2 = sum([p_i * (1 - p_i) / t_i for (p_i, t_i) in zip(p0, trials)])
     z = (p1[1] - p1[0] - null_lift) / math.sqrt(sigma2)
     if crit is None:
-        return float(2.0 * ss.norm.cdf(-abs(z)))
-    return abs(z) >= crit
+        return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]
+    return bool(abs(z) >= crit)
 
 
 def fisher_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -336,16 +337,16 @@ def fisher_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    statistic, pval = ss.fisher_exact(contingency_table)
+    statistic, pval = ss.fisher_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
 
     if crit is None:
-        return pval
-    return abs(statistic) >= crit
+        return float(pval)
+    return bool(abs(statistic) >= crit)
 
 
 def barnard_exact_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -394,17 +395,17 @@ def barnard_exact_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    barnard = ss.barnard_exact(contingency_table)
+    barnard = ss.barnard_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     statistic, pval = barnard.statistic, barnard.pvalue
 
     if crit is None:
-        return pval
-    return abs(statistic) >= crit
+        return float(pval)
+    return bool(abs(statistic) >= crit)
 
 
 def boschloo_exact_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -453,17 +454,17 @@ def boschloo_exact_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    boschloo = ss.boschloo_exact(contingency_table)
+    boschloo = ss.boschloo_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     statistic, pval = boschloo.statistic, boschloo.pvalue
 
     if crit is None:
-        return pval
-    return abs(statistic) >= crit
+        return float(pval)
+    return bool(abs(statistic) >= crit)
 
 
 def modified_log_likelihood_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -512,17 +513,17 @@ def modified_log_likelihood_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="mod-log-likelihood")
+    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="mod-log-likelihood")  # type: ignore[no-untyped-call, attr-defined]
     statistic, pval = mod_like.statistic, mod_like.pvalue
 
     if crit is None:
-        return pval
-    return abs(statistic) >= crit
+        return float(pval)
+    return bool(abs(statistic) >= crit)
 
 
 def freeman_tukey_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -571,17 +572,17 @@ def freeman_tukey_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    freeman_tukey = ss.chi2_contingency(contingency_table, correction=False, lambda_="freeman-tukey")
+    freeman_tukey = ss.chi2_contingency(contingency_table, correction=False, lambda_="freeman-tukey")  # type: ignore[no-untyped-call, attr-defined]
     statistic, pval = freeman_tukey.statistic, freeman_tukey.pvalue
 
     if crit is None:
-        return pval
-    return abs(statistic) >= crit
+        return float(pval)
+    return bool(abs(statistic) >= crit)
 
 
 def neyman_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -630,17 +631,17 @@ def neyman_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    neyman = ss.chi2_contingency(contingency_table, correction=False, lambda_="neyman")
+    neyman = ss.chi2_contingency(contingency_table, correction=False, lambda_="neyman")  # type: ignore[no-untyped-call, attr-defined]
     statistic, pval = neyman.statistic, neyman.pvalue
 
     if crit is None:
-        return pval
-    return abs(statistic) >= crit
+        return float(pval)
+    return bool(abs(statistic) >= crit)
 
 
 def cressie_read_test(
-    trials: np.ndarray | list,
-    successes: np.ndarray | list,
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
@@ -689,9 +690,9 @@ def cressie_read_test(
 
     non_successes = [(n_i - s_i) for n_i, s_i in zip(trials, successes)]
     contingency_table = [successes, non_successes]
-    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="cressie-read")
+    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="cressie-read")  # type: ignore[no-untyped-call, attr-defined]
     statistic, pval = mod_like.statistic, mod_like.pvalue
 
     if crit is None:
-        return pval
-    return abs(statistic) >= crit
+        return float(pval)
+    return bool(abs(statistic) >= crit)

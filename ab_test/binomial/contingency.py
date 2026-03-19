@@ -104,7 +104,7 @@ class ContingencyTable:
             raise ValueError(f"Method {method} not supported for creating DataFrames")
         return return_df
 
-    def to_list(self, include_total: bool = False) -> list:
+    def to_list(self, include_total: bool = False) -> list[Any]:
         """Returns our ContingencyTable as a list
 
         Parameters
@@ -129,7 +129,7 @@ class ContingencyTable:
                 pass
         return return_list
 
-    def to_numpy(self, include_total: bool = False) -> np.ndarray:
+    def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
         """Returns our ContingencyTable as a numpy array
 
         Parameters
@@ -143,7 +143,7 @@ class ContingencyTable:
         """
         return np.array(self.to_list(include_total))
 
-    def serialize(self, include_total: bool = False) -> dict:
+    def serialize(self, include_total: bool = False) -> dict[str, Any]:
         """Returns our ContingencyTable as a JSON, with all information
 
         Parameters
@@ -160,7 +160,7 @@ class ContingencyTable:
             self.cells["table"]["Total"] = total_dict
         return self.cells
 
-    def deserialize(self, serial: dict) -> "ContingencyTable":
+    def deserialize(self, serial: dict[str, Any]) -> "ContingencyTable":
         """Takes in a serialized version of our ContingencyTable. Used when we want to populate our
         ContingencyTable with results from a prior campaign.
 
@@ -331,10 +331,10 @@ class ContingencyTable:
 
     @overload
     @staticmethod
-    def _convert_to_tabulate_str(value: list, lift: str) -> list: ...
+    def _convert_to_tabulate_str(value: list[Any], lift: str) -> list[Any]: ...
 
     @staticmethod
-    def _convert_to_tabulate_str(value: float | list, lift: str) -> str | list | float:
+    def _convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[Any] | float:
         """Converts our lift values to either percentages or dollar signs
 
         Parameters
@@ -375,7 +375,7 @@ class ContingencyTable:
         self,
         is_individual: bool = True,
         reverse_plot: bool = True,
-        color: str | dict | list | None = None,
+        color: str | dict[str, Any] | list[Any] | None = None,
     ) -> None:
         """Plots the point estimates as well as confidence intervals
 
@@ -434,12 +434,12 @@ class ContingencyTable:
             plot_color = color
         else:
             raise TypeError("Color can be a string, list or dict")
-        fig = go.Figure()
+        fig = go.Figure()  # type: ignore[attr-defined]
         if is_individual:
             for index, name in enumerate(self.names):
                 ind_results = self.individual_results[name]
                 fig.add_trace(
-                    go.Scatter(
+                    go.Scatter(  # type: ignore[attr-defined]
                         x=[ind_results["lift"]],
                         y=[name],
                         marker={
@@ -459,7 +459,7 @@ class ContingencyTable:
                     )
                 )
             fig.add_trace(
-                go.Scatter(
+                go.Scatter(  # type: ignore[attr-defined]
                     x=[self.individual_results["Total"]["lift"]],
                     y=["Total"],
                     marker={
@@ -487,7 +487,7 @@ class ContingencyTable:
             if self.incremental_results is None:
                 raise ValueError("Call .analyze() before plotting incremental results.")
             fig.add_trace(
-                go.Scatter(
+                go.Scatter(  # type: ignore[attr-defined]
                     x=[self.incremental_results["lift"]],
                     y=["Total"],
                     marker={
@@ -517,7 +517,7 @@ class ContingencyTable:
                 fig.update_layout(xaxis_tickformat="~s")
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
-        fig.show()
+        fig.show()  # type: ignore[no-untyped-call]
 
     def __str__(self) -> str:
         return tabulate(

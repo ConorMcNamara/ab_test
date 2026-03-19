@@ -1,5 +1,8 @@
 """Methods to calculate the power of a test"""
 
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
 import scipy.stats as ss
 
@@ -14,9 +17,9 @@ __all__ = [
 
 
 def score_power(
-    n: np.ndarray | list,
-    p_null: np.ndarray | list,
-    p_alt: np.ndarray | list,
+    n: np.ndarray[Any, Any] | list[Any],
+    p_null: np.ndarray[Any, Any] | list[Any],
+    p_alt: np.ndarray[Any, Any] | list[Any],
     alpha: float = 0.05,
 ) -> float:
     """Power of Rao's Score Test
@@ -47,18 +50,18 @@ def score_power(
     nc = 0.0
     for ni, null, alt in zip(n, p_null, p_alt):
         nc += ni * (null - alt) * (null - alt) / (null * (1.0 - null))
-    return float(ss.ncx2.sf(ss.chi2.isf(alpha, df=1), df=1, nc=nc))
+    return float(ss.ncx2.sf(ss.chi2.isf(alpha, df=1), df=1, nc=nc))  # type: ignore[no-untyped-call]
 
 
 def abtest_power(
-    group_sizes: np.ndarray | list,
+    group_sizes: np.ndarray[Any, Any] | list[Any],
     baseline: float,
     alt_lift: float,
     alpha: float = 0.05,
     null_lift: float = 0.0,
-    power=score_power,
+    power: Callable[..., float] = score_power,
     lift: str = "relative",
-):
+) -> float:
     """Power associated with an A/B Test
 
     Parameters
@@ -94,15 +97,15 @@ def abtest_power(
 
 
 def minimum_detectable_lift(
-    group_sizes: np.ndarray | list,
+    group_sizes: np.ndarray[Any, Any] | list[Any],
     baseline: float,
     alpha: float = 0.05,
     beta: float = 0.2,
     null_lift: float = 0.0,
-    power=score_power,
+    power: Callable[..., float] = score_power,
     drop: bool = False,
     lift: str = "relative",
-):
+) -> float:
     """Minimum detectable lift.
 
     Parameters
@@ -211,11 +214,11 @@ def required_sample_size(
     alt_lift: float,
     alpha: float = 0.05,
     beta: float = 0.2,
-    group_proportions: np.ndarray | list | None = None,
+    group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     null_lift: float = 0.0,
-    power=score_power,
+    power: Callable[..., float] = score_power,
     lift: str = "relative",
-):
+) -> int:
     """Required sample size.
 
     Parameters
@@ -259,7 +262,7 @@ def required_sample_size(
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
-    def sample_size_to_group_sizes(ss):
+    def sample_size_to_group_sizes(ss: int) -> list[int]:
         return [int(ss * g) for g in group_proportions]
 
     # Find an upper bound on the required sample size
