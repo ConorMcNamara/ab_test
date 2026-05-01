@@ -16,6 +16,7 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 - **Power & sample size** — Power calculations, minimum detectable lift, and required sample size via binary search
 - **Lift types** — Relative, absolute, incremental, ROAS, and revenue lift
 - **`ContingencyTable`** — A chainable class that ties everything together, with DataFrame export, serialization, and plotting
+- **Bayesian inference** — Posterior sampling, P(B > A), expected loss, ROPE analysis, and lift probability thresholds
 
 ## Requirements
 
@@ -112,6 +113,45 @@ lb, ub = confidence_interval(
 )
 ```
 
+### Bayesian analysis
+
+Use `calculate_metrics` for an all-in-one result, or call the lower-level functions directly for more control.
+
+```python
+import numpy as np
+from ab_test.bayesian_binomial.stats_tests import calculate_metrics
+
+metrics = calculate_metrics(
+    successes=np.array([100, 130]),
+    trials=np.array([1_000, 1_000]),
+    alphas=np.array([1.0, 1.0]),
+    betas=np.array([1.0, 1.0]),
+    n_samples=10_000,
+    lift="relative",
+    low_threshold=-0.01,
+    high_threshold=0.01,
+)
+print(metrics)
+```
+
+```python
+from ab_test.bayesian_binomial.stats_tests import (
+    probability_b_greater_than_a,
+    expected_loss_b,
+    calculate_rope,
+    prob_lift_exceeds,
+)
+from ab_test.bayesian_binomial.utils import sample_beta
+
+sample_a = sample_beta(s=100, n=1_000, alpha=1.0, beta=1.0, n_samples=10_000)
+sample_b = sample_beta(s=130, n=1_000, alpha=1.0, beta=1.0, n_samples=10_000)
+
+probability_b_greater_than_a(sample_a, sample_b)       # P(B > A)
+expected_loss_b(sample_a, sample_b)                    # E[max(A - B, 0)]
+prob_lift_exceeds(sample_a, sample_b, threshold=0.05)  # P(relative lift > 5%)
+calculate_rope(sample_a, sample_b)                     # full ROPE breakdown
+```
+
 ## API Reference
 
 ### `ContingencyTable`
@@ -148,6 +188,17 @@ lb, ub = confidence_interval(
 ### Colorblind-friendly color palettes (`.plot`)
 
 `"ibm"`, `"wong"`, `"ito"`, `"tol"`, `"tol_bright"`, `"tol_vibrant"`, `"tol_muted"`, `"tol_light"`
+
+### Bayesian stats (`ab_test.bayesian_binomial`)
+
+| Function | Description |
+|---|---|
+| `calculate_metrics(successes, trials, alphas, betas, n_samples, lift, low_threshold, high_threshold)` | Draws posteriors and returns P(B > A), expected loss, and ROPE metrics in one call |
+| `probability_b_greater_than_a(sample_a, sample_b)` | Proportion of posterior samples where B exceeds A |
+| `expected_loss_b(sample_a, sample_b)` | E[max(A − B, 0)]: expected loss from choosing B |
+| `calculate_rope(sample_a, sample_b, lift, low, high)` | Probability that lift falls within, above, or below the ROPE |
+| `prob_lift_exceeds(sample_a, sample_b, lift, threshold)` | Probability that lift exceeds a given threshold |
+| `sample_beta(s, n, alpha, beta, n_samples)` | Draw posterior samples from Beta(alpha + s, beta + n − s) |
 
 ## Contributing
 

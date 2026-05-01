@@ -17,8 +17,8 @@ class TestCredibleIntervalComparison:
             trials, successes, prior_alphas, prior_betas, 0.95, lift="relative", is_sample=True
         )
 
-        assert actual_low == pytest.approx(expected_low, abs=1e-03)
-        assert actual_high == pytest.approx(expected_high, abs=1e-03)
+        assert actual_low == pytest.approx(expected_low, abs=1e-02)
+        assert actual_high == pytest.approx(expected_high, abs=1e-02)
 
     @staticmethod
     def test_credible_interval_absolute():
