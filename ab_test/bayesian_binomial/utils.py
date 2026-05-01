@@ -1,6 +1,7 @@
 import numpy as np
 
-def sample_beta(s: int, n: int, alpha: float, beta: float, n_samples: int) -> np.array:
+
+def sample_beta(s: int, n: int, alpha: float, beta: float, n_samples: int) -> np.ndarray:
     """Draw samples from the Beta posterior given observed binomial data.
 
     Combines the observed data with the Beta prior to form the posterior

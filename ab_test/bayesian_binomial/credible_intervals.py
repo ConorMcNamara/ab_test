@@ -94,7 +94,7 @@ def credible_interval(
 
         if lift == "relative":
             lift_mu = mu_2 / mu_1 - 1
-            lift_std = sqrt((mu_2 ** 2 / mu_1 ** 4) * var_1 + (1 / mu_1 ** 2) * var_2)
+            lift_std = sqrt((mu_2**2 / mu_1**4) * var_1 + (1 / mu_1**2) * var_2)
         else:
             lift_mu = mu_2 - mu_1
             lift_std = sqrt(var_2 + var_1)
