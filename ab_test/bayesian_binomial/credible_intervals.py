@@ -1,11 +1,19 @@
-from typing import Any
 from math import sqrt
+from typing import Any, Literal
 
 import numpy as np
-
 from scipy.stats import beta, norm
 
 from ab_test.bayesian_binomial.utils import sample_beta
+
+__all__: list[str] = [
+    "credible_interval",
+    "individual_credible_interval",
+    "calculate_interval",
+    "calculate_hdi",
+    "calculate_hdi_from_samples",
+]
+
 
 def credible_interval(
     trials: np.ndarray[Any, Any] | list[Any],
@@ -13,11 +21,11 @@ def credible_interval(
     prior_alphas: np.ndarray[Any, Any] | list[Any],
     prior_betas: np.ndarray[Any, Any] | list[Any],
     confidence_level: float = 0.95,
-    lift: str = "relative",
+    lift: Literal["relative", "absolute"] = "relative",
     is_sample: bool = True,
     n_samples: int = 100_000,
-    method: str = "credible",
-) -> tuple[Any, ...]:
+    method: Literal["credible", "hdi"] = "credible",
+) -> tuple[float, float]:
     """Compute the credible interval for the lift between two binomial variants.
 
     Either samples from the Beta posterior of each variant and derives the
@@ -38,25 +46,31 @@ def credible_interval(
         Beta parameters of the Beta prior for each variant.
     confidence_level : float, optional
         Desired probability mass within the interval, by default 0.95.
-    lift : str, optional
+    lift : {"relative", "absolute"}, optional
         Type of lift to compute. ``"relative"`` returns ``(theta_2 - theta_1)
         / theta_1``; ``"absolute"`` returns ``theta_2 - theta_1``, by default
         ``"relative"``.
     is_sample : bool, optional
         Whether to use Monte Carlo sampling to derive the posterior. If False,
-        relies on the Normal approximation.
+        relies on the normal approximation, by default True.
     n_samples : int, optional
         Number of posterior samples to draw per variant, by default 100_000.
-    method : str, optional
+    method : {"credible", "hdi"}, optional
         Method used to compute the interval. ``"credible"`` uses equal-tailed
-        percentiles; ``"hdi"`` uses the Highest Density Interval, by default
-        ``"credible"``.
+        percentiles; ``"hdi"`` uses the Highest Density Interval. Note that if_sample = False
+        creates a symmetric interval, thereby both ``"credible"`` and ``"hdi"``
+        return the same interval. By default, ``"credible"``.
 
     Returns
     -------
     tuple[float, float]
         A ``(lower_bound, upper_bound)`` pair representing the credible interval
         of the lift between the two variants.
+
+    Raises
+    ------
+    NotImplementedError
+        If ``method`` is not ``"credible"`` or ``"hdi"``.
     """
     lower_bound = (1 - confidence_level) / 2
     upper_bound = 1 - lower_bound
@@ -75,7 +89,6 @@ def credible_interval(
         mu_1 = (successes[0] + prior_alphas[0]) / (trials[0] + prior_alphas[0] + prior_betas[0])
         var_1 = (mu_1 * (1 - mu_1)) / (trials[0] + prior_alphas[0] + prior_betas[0] + 1)
 
-        # Mean and Variance for Test
         mu_2 = (successes[1] + prior_alphas[1]) / (trials[1] + prior_alphas[1] + prior_betas[1])
         var_2 = (mu_2 * (1 - mu_2)) / (trials[1] + prior_alphas[1] + prior_betas[1] + 1)
 
@@ -86,12 +99,20 @@ def credible_interval(
             lift_mu = mu_2 - mu_1
             lift_std = sqrt(var_2 + var_1)
 
-        # Calculate bounds
-        z = norm.ppf(1 - (1 - confidence_level) / 2)
+        z = norm.ppf(upper_bound)
         lb, ub = lift_mu - z * lift_std, lift_mu + z * lift_std
     return lb, ub
 
-def individual_credible_interval(s: int, n: int, confidence_level: float = 0.95, prior_alpha: int = 1, prior_beta: int = 1, n_samples: int = 100_000, method: str = "credible") -> tuple[Any, ...]:
+
+def individual_credible_interval(
+    s: int,
+    n: int,
+    confidence_level: float = 0.95,
+    prior_alpha: int = 1,
+    prior_beta: int = 1,
+    n_samples: int = 100_000,
+    method: Literal["credible", "hdi"] = "credible",
+) -> tuple[float, float]:
     """Compute the credible interval for a single binomial proportion.
 
     Parameters
@@ -108,14 +129,14 @@ def individual_credible_interval(s: int, n: int, confidence_level: float = 0.95,
         Beta parameter of the Beta prior distribution, by default 1.
     n_samples : int, optional
         Number of samples to draw when using the HDI method, by default 100_000.
-    method : str, optional
+    method : {"credible", "hdi"}, optional
         Method used to compute the interval. ``"credible"`` uses equal-tailed
         quantiles; ``"hdi"`` uses the Highest Density Interval, by default
         ``"credible"``.
 
     Returns
     -------
-    tuple[Any, ...]
+    tuple[float, float]
         A ``(lower_bound, upper_bound)`` pair representing the credible interval.
 
     Raises
@@ -123,17 +144,22 @@ def individual_credible_interval(s: int, n: int, confidence_level: float = 0.95,
     NotImplementedError
         If ``method`` is not ``"credible"`` or ``"hdi"``.
     """
-    if method in ["credible", "hdi"]:
-        if method == "credible":
-            lb, ub = calculate_interval(s, n, prior_alpha, prior_beta, confidence_level)
-        else:
-            lb, ub = calculate_hdi(s, n, prior_alpha, prior_beta, confidence_level, n_samples)
+    if method == "credible":
+        lb, ub = calculate_interval(s, n, prior_alpha, prior_beta, confidence_level)
+    elif method == "hdi":
+        lb, ub = calculate_hdi(s, n, prior_alpha, prior_beta, confidence_level, n_samples)
     else:
         raise NotImplementedError(f"No support for {method} method of generating confidence intervals")
     return lb, ub
 
 
-def calculate_interval(s: int, n: int,  prior_alpha: int = 1, prior_beta: int = 1, confidence_level: float = 0.95):
+def calculate_interval(
+    s: int,
+    n: int,
+    prior_alpha: int = 1,
+    prior_beta: int = 1,
+    confidence_level: float = 0.95,
+) -> tuple[float, float]:
     """Calculate the equal-tailed credible interval using the Beta posterior.
 
     Parameters
@@ -155,7 +181,6 @@ def calculate_interval(s: int, n: int,  prior_alpha: int = 1, prior_beta: int = 
         A ``(lower_bound, upper_bound)`` pair derived from the posterior
         Beta distribution quantiles.
     """
-    # Calculate the lower and upper bounds
     lower_bound = (1 - confidence_level) / 2
     upper_bound = 1 - lower_bound
 
@@ -164,7 +189,15 @@ def calculate_interval(s: int, n: int,  prior_alpha: int = 1, prior_beta: int = 
 
     return ci_lower, ci_upper
 
-def calculate_hdi(s:int, n: int, prior_alpha: int = 1, prior_beta: int = 1, confidence_level: float = 0.95, n_samples: int = 100_000):
+
+def calculate_hdi(
+    s: int,
+    n: int,
+    prior_alpha: int = 1,
+    prior_beta: int = 1,
+    confidence_level: float = 0.95,
+    n_samples: int = 100_000,
+) -> tuple[float, float]:
     """Calculate the Highest Density Interval (HDI) via Monte Carlo sampling.
 
     Draws samples from the Beta posterior and finds the shortest interval
@@ -201,7 +234,10 @@ def calculate_hdi(s:int, n: int, prior_alpha: int = 1, prior_beta: int = 1, conf
     return samples[min_idx], samples[min_idx + interval_idx_inc]
 
 
-def calculate_hdi_from_samples(samples: np.ndarray[Any, Any] | list[Any], confidence_level: float = 0.95):
+def calculate_hdi_from_samples(
+    samples: np.ndarray[Any, Any] | list[Any],
+    confidence_level: float = 0.95,
+) -> tuple[float, float]:
     """Calculate the Highest Density Interval (HDI) from an array of samples.
 
     Finds the shortest contiguous interval that contains the specified
@@ -224,8 +260,6 @@ def calculate_hdi_from_samples(samples: np.ndarray[Any, Any] | list[Any], confid
 
     interval_idx_inc = int(np.floor(confidence_level * n_samples))
     n_intervals = n_samples - interval_idx_inc
-
-    # Calculate widths of all possible intervals containing 'confidence_level' mass
     interval_widths = samples[interval_idx_inc:] - samples[:n_intervals]
     min_idx = np.argmin(interval_widths)
 

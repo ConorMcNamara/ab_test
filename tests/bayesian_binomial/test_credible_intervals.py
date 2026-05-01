@@ -30,6 +30,74 @@ class TestCredibleIntervalComparison:
 
 
     @staticmethod
+    def test_credible_interval_absolute():
+        trials = [1000, 1000]
+        successes = [100, 110]
+        prior_alphas = [0.5, 0.5]
+        prior_betas = [0.5, 0.5]
+        expected_low = -0.016966857910156258
+        expected_high = 0.037053527832031245
+
+        actual_low, actual_high = credible_interval(
+            trials,
+            successes,
+            prior_alphas,
+            prior_betas,
+            0.95,
+            lift="absolute",
+            is_sample=True
+        )
+
+        assert actual_low == pytest.approx(expected_low, abs=1e-03)
+        assert actual_high == pytest.approx(expected_high, abs=1e-03)
+
+
+    @staticmethod
+    def test_credible_interval_relative_z():
+        trials = [1000, 1000]
+        successes = [100, 110]
+        prior_alphas = [0.5, 0.5]
+        prior_betas = [0.5, 0.5]
+        expected_low = -0.181
+        expected_high = 0.380
+
+        actual_low, actual_high = credible_interval(
+            trials,
+            successes,
+            prior_alphas,
+            prior_betas,
+            0.95,
+            lift="relative",
+            is_sample=False
+        )
+
+        assert actual_low == pytest.approx(expected_low, abs=1e-03)
+        assert actual_high == pytest.approx(expected_high, abs=1e-03)
+
+
+    @staticmethod
+    def test_credible_interval_absolute_z():
+        trials = [1000, 1000]
+        successes = [100, 110]
+        prior_alphas = [0.5, 0.5]
+        prior_betas = [0.5, 0.5]
+        expected_low = -0.016966857910156258
+        expected_high = 0.037053527832031245
+
+        actual_low, actual_high = credible_interval(
+            trials,
+            successes,
+            prior_alphas,
+            prior_betas,
+            0.95,
+            lift="absolute",
+            is_sample=False
+        )
+
+        assert actual_low == pytest.approx(expected_low, abs=1e-03)
+        assert actual_high == pytest.approx(expected_high, abs=1e-03)
+
+    @staticmethod
     def test_credible_interval_single():
         s = 110
         n = 1_000
@@ -66,3 +134,7 @@ class TestCredibleIntervalComparison:
         )
         assert actual_low == pytest.approx(expected_low, abs=1e-03)
         assert actual_high == pytest.approx(expected_high, abs=1e-03)
+
+
+if __name__ == "__main__":
+    pytest.main()

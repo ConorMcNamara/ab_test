@@ -2,9 +2,9 @@
 
 __version__ = "0.1.0"
 
-from ab_test import frequentist_binomial
+from ab_test import bayesian_binomial, frequentist_binomial
 
-__all__: list[str] = ["frequentist_binomial"]
+__all__: list[str] = ["bayesian_binomial", "frequentist_binomial",]
 
 
 def __dir__() -> list[str]:
