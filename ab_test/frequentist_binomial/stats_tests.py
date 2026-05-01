@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import scipy.stats as ss
 
-from ab_test.binomial.utils import mle_under_null, mle_under_alternative
+from ab_test.frequentist_binomial.utils import mle_under_null, mle_under_alternative
 
 __all__ = [
     "ab_test",

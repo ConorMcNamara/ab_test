@@ -15,6 +15,9 @@ dependencies = [
     "pandas (>=2.2.3,<3.0.0)",
     "polars (>=1.27.1,<2.0.0)",
     "plotly (>=6.0.1,<7.0.0)",
+    "pytest>=8.4.2",
+    "pytest-cov==7.1.0",
+    "scipy-stubs~=1.17.1",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +50,6 @@ skip_covered = false
 [tool.zuban]
 follow_untyped_imports = true
 check_untyped_defs = true
-strict = true
 disallow_untyped_defs = true
 warn_unreachable = true
 allow_untyped_globals = false

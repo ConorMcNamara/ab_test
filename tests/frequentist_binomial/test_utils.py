@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from ab_test.binomial.utils import (
+from ab_test.frequentist_binomial.utils import (
     observed_lift,
     simple_hypothesis_from_composite,
     wilson_significance,

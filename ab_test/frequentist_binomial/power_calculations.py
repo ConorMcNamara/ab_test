@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import scipy.stats as ss
 
-from ab_test.binomial.utils import simple_hypothesis_from_composite
+from ab_test.frequentist_binomial.utils import simple_hypothesis_from_composite
 
 __all__ = [
     "score_power",

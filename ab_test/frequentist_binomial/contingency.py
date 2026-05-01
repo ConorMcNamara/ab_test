@@ -9,9 +9,9 @@ import plotly.graph_objects as go
 import polars as pl
 from tabulate import tabulate
 
-from ab_test.binomial.confidence_intervals import confidence_interval, individual_confidence_interval
-from ab_test.binomial.stats_tests import ab_test, score_test, likelihood_ratio_test, z_test, cressie_read_test
-from ab_test.binomial.utils import observed_lift
+from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
+from ab_test.frequentist_binomial.stats_tests import ab_test, score_test, likelihood_ratio_test, z_test, cressie_read_test
+from ab_test.frequentist_binomial.utils import observed_lift
 
 
 class ContingencyTable:

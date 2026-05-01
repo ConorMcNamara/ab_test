@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 import scipy.stats as ss
 
-from ab_test.binomial.confidence_intervals import wilson_interval
-from ab_test.binomial.stats_tests import (
+from ab_test.frequentist_binomial.confidence_intervals import wilson_interval
+from ab_test.frequentist_binomial.stats_tests import (
     score_test,
     likelihood_ratio_test,
     z_test,

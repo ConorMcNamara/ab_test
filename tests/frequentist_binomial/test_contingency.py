@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
-from ab_test.binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.contingency import ContingencyTable
 
 
 class TestContingencyTable:

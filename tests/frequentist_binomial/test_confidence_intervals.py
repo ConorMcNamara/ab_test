@@ -2,7 +2,7 @@
 
 import pytest
 
-from ab_test.binomial.confidence_intervals import (
+from ab_test.frequentist_binomial.confidence_intervals import (
     confidence_interval,
     wilson_interval,
     agresti_coull_interval,
@@ -10,7 +10,7 @@ from ab_test.binomial.confidence_intervals import (
     clopper_pearson_interval,
     wald_interval,
 )
-from ab_test.binomial.stats_tests import likelihood_ratio_test, z_test
+from ab_test.frequentist_binomial.stats_tests import likelihood_ratio_test, z_test
 
 
 class TestConfidenceIntervalComparison:

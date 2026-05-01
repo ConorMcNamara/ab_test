@@ -35,7 +35,7 @@ poetry install --extras dev
 ### Analyzing an experiment
 
 ```python
-from ab_test.binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.contingency import ContingencyTable
 
 ct = (
     ContingencyTable(name="Homepage Redesign", metric_name="purchases")
@@ -71,7 +71,7 @@ ct.plot(is_individual=False)
 ### Power and sample size
 
 ```python
-from ab_test.binomial.power_calculations import abtest_power, minimum_detectable_lift, required_sample_size
+from ab_test.frequentist_binomial.power_calculations import abtest_power, minimum_detectable_lift, required_sample_size
 
 # Power for a given experiment design
 power = abtest_power(group_sizes=[1_000, 1_000], baseline=0.10, alt_lift=0.20, lift="relative")
@@ -89,7 +89,7 @@ print(f"Required n: {n:,}")
 ### Using a different statistical test
 
 ```python
-from ab_test.binomial.stats_tests import ab_test
+from ab_test.frequentist_binomial.stats_tests import ab_test
 
 p_value = ab_test(trials=[1_000, 1_000], successes=[100, 130], method="likelihood")
 ```
@@ -97,7 +97,7 @@ p_value = ab_test(trials=[1_000, 1_000], successes=[100, 130], method="likelihoo
 ### Confidence interval methods
 
 ```python
-from ab_test.binomial.confidence_intervals import wilson_interval, confidence_interval
+from ab_test.frequentist_binomial.confidence_intervals import wilson_interval, confidence_interval
 
 # Individual proportion CI
 lb, ub = wilson_interval(s=100, n=1_000, alpha=0.05)

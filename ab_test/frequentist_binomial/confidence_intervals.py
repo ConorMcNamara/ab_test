@@ -6,8 +6,8 @@ from typing import Any
 import numpy as np
 import scipy.stats as ss
 
-from ab_test.binomial.stats_tests import score_test
-from ab_test.binomial.utils import observed_lift
+from ab_test.frequentist_binomial.stats_tests import score_test
+from ab_test.frequentist_binomial.utils import observed_lift
 
 __all__ = [
     "confidence_interval",
@@ -229,7 +229,7 @@ def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: 
 
 
 def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
-    """Agresti-Coull Interval on binomial proportions
+    """Agresti-Coull Interval on Binomial Proportions
 
     Parameters
     ----------
@@ -401,7 +401,7 @@ def delta_interval(
 
 
 def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
-    """Wilson Confidence Interval on binomial proportion
+    """Wilson Confidence Interval on Binomial Proportion
 
     Parameters
     ----------
