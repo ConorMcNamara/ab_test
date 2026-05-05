@@ -1,6 +1,7 @@
 """Calculates confidence intervals for AB Tests."""
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
@@ -18,6 +19,84 @@ __all__ = [
     "clopper_pearson_interval",
     "wald_interval",
 ]
+
+
+def _search_lower_bound(
+    test: Any,
+    trials: Any,
+    successes: Any,
+    lb_lb: float,
+    lb_ub: float,
+    alpha: float,
+    lift: str,
+    pa: float,
+    tol: float,
+) -> float | str:
+    eps = 0.01
+    lower_bound_exists = True
+    while True:
+        if (lift == "relative" and lb_lb < -1) or (lift == "absolute" and lb_lb < -pa):
+            lower_bound_exists = False
+            break
+        pval = test(trials, successes, null_lift=lb_lb, lift=lift)
+        if pval >= alpha:
+            lb_ub = lb_lb
+            lb_lb -= eps
+            eps *= 2
+        else:
+            break
+    if lower_bound_exists:
+        while (lb_ub - lb_lb) > tol:
+            lb = 0.5 * (lb_lb + lb_ub)
+            pval = test(trials, successes, null_lift=lb, lift=lift)
+            if pval >= alpha:
+                lb_ub = lb
+            else:
+                lb_lb = lb
+        return 0.5 * (lb_lb + lb_ub)
+    elif successes[0] > 0:
+        return -1.0
+    else:
+        return "-Infinity"
+
+
+def _search_upper_bound(
+    test: Any,
+    trials: Any,
+    successes: Any,
+    ub_lb: float,
+    ub_ub: float,
+    alpha: float,
+    lift: str,
+    tol: float,
+    upper_bound_exists: bool,
+) -> float | str:
+    if upper_bound_exists:
+        eps = 0.01
+        while True:
+            if ub_ub > 100:
+                upper_bound_exists = False
+                break
+            pval = test(trials, successes, null_lift=ub_ub, lift=lift)
+            if pval >= alpha:
+                ub_lb = ub_ub
+                ub_ub += eps
+                eps *= 2
+            else:
+                break
+    if upper_bound_exists:
+        while (ub_ub - ub_lb) > tol:
+            ub = 0.5 * (ub_lb + ub_ub)
+            pval = test(trials, successes, null_lift=ub, lift=lift)
+            if pval >= alpha:
+                ub_lb = ub
+            else:
+                ub_ub = ub
+        return 0.5 * (ub_lb + ub_ub)
+    elif lift == "relative":
+        return "Infinity"
+    else:
+        return 1.0
 
 
 def confidence_interval(
@@ -78,6 +157,7 @@ def confidence_interval(
                 lb_ub = ote
                 ub_lb = ote
                 ub_ub = ote + 0.01
+                pa = 0.0
             else:
                 pa = successes[0] / trials[0]
                 lb_lb = max(ote - 0.01, -pa)
@@ -85,100 +165,37 @@ def confidence_interval(
                 ub_lb = ote
                 ub_ub = min(ote + 0.01, 1.0 - pa)
 
-            # Initial search for a lower bound on the lower bound of the
-            # confidence interval.
-            eps = 0.01
-            lower_bound_exists = True
-            while True:
-                if (lift == "relative" and lb_lb < -1) or (lift == "absolute" and lb_lb < -pa):
-                    lower_bound_exists = False
-                    break
-
-                pval = test(trials, successes, null_lift=lb_lb, lift=lift)
-                if pval >= alpha:
-                    # lb_lb is consistent with data; decrease it
-                    lb_ub = lb_lb
-                    lb_lb -= eps
-                    eps *= 2
-                else:
-                    break
-
-            if lower_bound_exists:
-                # (lb_lb, lb_ub) is a bound on the lower bound of the confidence interval
-                while (lb_ub - lb_lb) > tol:
-                    lb = 0.5 * (lb_lb + lb_ub)
-                    pval = test(trials, successes, null_lift=lb, lift=lift)
-                    if pval >= alpha:
-                        # lb is consistent with data; expand the interval by
-                        # decreasing lb.
-                        lb_ub = lb
-                    else:
-                        # lb is rejected by the test; shrink the interval by
-                        # increasing lb.
-                        lb_lb = lb
-
-                lb = 0.5 * (lb_lb + lb_ub)
-            elif successes[0] > 0:
-                lb = -1.0
-            else:
-                lb = "-Infinity"
-
-            # Initial search for an upper bound on the upper bound of the
-            # confidence interval.
-            if upper_bound_exists:
-                eps = 0.01
-                while True:
-                    if ub_ub > 100:
-                        upper_bound_exists = False
-                        break
-
-                    pval = test(trials, successes, null_lift=ub_ub, lift=lift)
-                    if pval >= alpha:
-                        # ub_ub is consistent with data; increase it
-                        ub_lb = ub_ub
-                        ub_ub += eps
-                        eps *= 2
-                    else:
-                        break
-
-            if upper_bound_exists:
-                # (ub_lb, ub_ub) is a bound on the upper bound of the confidence interval
-                while (ub_ub - ub_lb) > tol:
-                    ub = 0.5 * (ub_lb + ub_ub)
-                    pval = test(trials, successes, null_lift=ub, lift=lift)
-                    if pval >= alpha:
-                        # ub is consistent with data; expand the interval by
-                        # increasing ub.
-                        ub_lb = ub
-                    else:
-                        # ub is rejected by the test; shrink the interval by
-                        # decreasing ub.
-                        ub_ub = ub
-
-                ub = 0.5 * (ub_lb + ub_ub)
-            elif lift == "relative":
-                ub = "Infinity"
-            else:
-                ub = 1.0
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                lb_future = executor.submit(
+                    _search_lower_bound, test, trials, successes, lb_lb, lb_ub, alpha, lift, pa, tol
+                )
+                ub_future = executor.submit(
+                    _search_upper_bound, test, trials, successes, ub_lb, ub_ub, alpha, lift, tol, upper_bound_exists
+                )
+                lb = lb_future.result()
+                ub = ub_future.result()
         else:
             raise NotImplementedError(f"binary_search is not implemented for {test}")
     else:
         if method in ["wilson", "jeffrey", "agresti-coull", "clopper-pearson", "wald"]:
             if method == "wilson":
-                lower1, upper1 = wilson_interval(successes[0], trials[0], alpha)
-                lower2, upper2 = wilson_interval(successes[1], trials[1], alpha)
+                z_critical = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
+                lower1, upper1 = wilson_interval(successes[0], trials[0], alpha, z_critical)
+                lower2, upper2 = wilson_interval(successes[1], trials[1], alpha, z_critical)
             elif method == "jeffrey":
                 lower1, upper1 = jeffrey_interval(successes[0], trials[0], alpha)
                 lower2, upper2 = jeffrey_interval(successes[1], trials[1], alpha)
             elif method == "agresti-coull":
-                lower1, upper1 = agresti_coull_interval(successes[0], trials[0], alpha)
-                lower2, upper2 = agresti_coull_interval(successes[1], trials[1], alpha)
+                z_critical = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
+                lower1, upper1 = agresti_coull_interval(successes[0], trials[0], alpha, z_critical)
+                lower2, upper2 = agresti_coull_interval(successes[1], trials[1], alpha, z_critical)
             elif method == "clopper-pearson":
                 lower1, upper1 = clopper_pearson_interval(successes[0], trials[0], alpha)
                 lower2, upper2 = clopper_pearson_interval(successes[1], trials[1], alpha)
             else:
-                lower1, upper1 = wald_interval(successes[0], trials[0], alpha)
-                lower2, upper2 = wald_interval(successes[1], trials[1], alpha)
+                z_critical = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
+                lower1, upper1 = wald_interval(successes[0], trials[0], alpha, z_critical)
+                lower2, upper2 = wald_interval(successes[1], trials[1], alpha, z_critical)
             if lift == "relative" and method != "delta":
                 lower1 /= successes[0] / trials[0]
                 lower2 /= successes[0] / trials[0]
@@ -228,7 +245,7 @@ def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: 
     return lb, ub
 
 
-def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
+def agresti_coull_interval(s: int, n: int, alpha: float = 0.05, z: float | None = None) -> tuple[Any, ...]:
     """Agresti-Coull Interval on Binomial Proportions
 
     Parameters
@@ -249,8 +266,9 @@ def agresti_coull_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ..
     -----
     This returns a confidence interval on `p_tilde`
     """
-    z = ss.norm.isf(alpha / 2)  # type: ignore[no-untyped-call]
-    z_squared = math.pow(z, 2)
+    if z is None:
+        z = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
+    z_squared = z * z
     n_tilde = n + z_squared
     p_tilde = (s + z_squared / 2) / n_tilde
     return p_tilde - z * math.sqrt(p_tilde * (1 - p_tilde) / n_tilde), p_tilde + z * math.sqrt(
@@ -311,7 +329,7 @@ def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, 
     return lb, ub
 
 
-def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
+def wald_interval(s: int, n: int, alpha: float = 0.05, z: float | None = None) -> tuple[Any, ...]:
     """The Wald Interval on Binomial Proportions
 
     Parameters
@@ -333,7 +351,8 @@ def wald_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
     This is based off the Wald formula. Note that this formula is fragile to proportions near 0 or 1.
     """
     p_hat = s / n
-    z = ss.norm.isf(alpha / 2)  # type: ignore[no-untyped-call]
+    if z is None:
+        z = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
     lb = p_hat - z * math.sqrt(p_hat * (1 - p_hat) / n)
     ub = p_hat + z * math.sqrt(p_hat * (1 - p_hat) / n)
     return lb, ub
@@ -400,7 +419,7 @@ def delta_interval(
     return lb, ub
 
 
-def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
+def wilson_interval(s: int, n: int, alpha: float = 0.05, z: float | None = None) -> tuple[Any, ...]:
     """Wilson Confidence Interval on Binomial Proportion
 
     Parameters
@@ -421,8 +440,9 @@ def wilson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
     -----
     Assuming s ~ Binom(n, p), this function returns a confidence interval on p.
     """
-    z = ss.norm.isf(alpha / 2)  # type: ignore[no-untyped-call]
-    z_squared = math.pow(z, 2)
+    if z is None:
+        z = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
+    z_squared = z * z
     p_hat = s / n
     ctr = p_hat + z_squared / (2 * n)
     inner_width = (p_hat * (1 - p_hat) + z_squared / (4 * n)) / n

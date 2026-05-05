@@ -215,7 +215,12 @@ def likelihood_ratio_test(
         return 1.0
 
     def log_likelihood(p: list[Any] | np.ndarray[Any, Any]) -> float:
-        return sum([si * np.log(pi) + (ti - si) * np.log(1 - pi) for (si, ti, pi) in zip(successes, trials, p)])
+        return (
+            successes[0] * math.log(p[0])
+            + (trials[0] - successes[0]) * math.log(1 - p[0])
+            + successes[1] * math.log(p[1])
+            + (trials[1] - successes[1]) * math.log(1 - p[1])
+        )
 
     ts = 2 * (log_likelihood(p1) - log_likelihood(p0))
     if crit is None:
@@ -276,7 +281,8 @@ def z_test(
     p0 = mle_under_null(trials, successes, null_lift=null_lift, lift=lift)
     p1 = mle_under_alternative(trials, successes)
 
-    sigma2 = sum([p_i * (1 - p_i) / t_i for (p_i, t_i) in zip(p0, trials)])
+    p0_arr = np.asarray(p0)
+    sigma2 = float(np.sum(p0_arr * (1 - p0_arr) / np.asarray(trials)))
     z = (p1[1] - p1[0] - null_lift) / math.sqrt(sigma2)
     if crit is None:
         return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]
@@ -287,7 +293,7 @@ def _contingency_table(
     trials: np.ndarray[Any, Any] | list[Any],
     successes: np.ndarray[Any, Any] | list[Any],
 ) -> list[Any]:
-    non_successes = [n_i - s_i for n_i, s_i in zip(trials, successes)]
+    non_successes = np.asarray(trials) - np.asarray(successes)
     return [successes, non_successes]
 
 

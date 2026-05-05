@@ -1,16 +1,11 @@
 """Our wrapper for analyzing experiment results"""
 
-import math
 from typing import Any, overload
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import polars as pl
-from tabulate import tabulate
 
-from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
-from ab_test.bayesian_binomial.stats_tests import calculate_metrics
 
 class BayesianContingencyTable:
     """A class for analyzing experiment results using Bayesian approaches"""
@@ -62,7 +57,7 @@ class BayesianContingencyTable:
 
         Returns
         -------
-        ContingencyTable, to be chained with other methods
+        BayesianContingencyTable, to be chained with other methods
         """
         cell_dict = {"successes": successes, "trials": trials, "alpha": alpha, "beta": beta}
         self.cells["table"][cell_name] = cell_dict
@@ -73,7 +68,13 @@ class BayesianContingencyTable:
         self.betas.append(beta)
         return self
 
-    def to_df(self, method: str = "pandas", include_total: bool = False, spark_session: Any | None = None, ibis_backend: Any | None = None) -> pd.DataFrame | pl.DataFrame | Any:
+    def to_df(
+        self,
+        method: str = "pandas",
+        include_total: bool = False,
+        spark_session: Any | None = None,
+        ibis_backend: Any | None = None,
+    ) -> pd.DataFrame | pl.DataFrame | Any:
         """Returns our BayesianContingencyTable as a DataFrame
 
         Parameters
@@ -90,12 +91,13 @@ class BayesianContingencyTable:
 
         Returns
         -------
-        Our ContingencyTable as a DataFrame
+        Our BayesianContingencyTable as a DataFrame
         """
         method = method.casefold()
         if method == "pandas":
             return_df = pd.DataFrame(
-                self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
+                self.to_list(include_total),
+                columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
             )
         elif method == "polars":
             return_df = pl.DataFrame(
@@ -104,43 +106,51 @@ class BayesianContingencyTable:
         elif method == "pyspark":
             from pyspark.sql import SparkSession
             from pyspark.sql.types import DoubleType, IntegerType, StringType, StructField, StructType
+
             if spark_session is None:
                 spark_session = SparkSession.getActiveSession()
             if spark_session is None:
                 raise ValueError("No active SparkSession found. Please provide a spark_session argument.")
-            schema = StructType([
-                StructField("cell_name", StringType(), True),
-                StructField("successes", IntegerType(), True),
-                StructField("trials", IntegerType(), True),
-                StructField("alpha", DoubleType(), True),
-                StructField("beta", DoubleType(), True),
-            ])
+            schema = StructType(
+                [
+                    StructField("cell_name", StringType(), True),
+                    StructField("successes", IntegerType(), True),
+                    StructField("trials", IntegerType(), True),
+                    StructField("alpha", DoubleType(), True),
+                    StructField("beta", DoubleType(), True),
+                ]
+            )
             return_df = spark_session.createDataFrame(self.to_list(include_total), schema=schema)
         elif method == "data.table":
             raise NotImplementedError("Have not implemented data.table yet")
         elif method == "modin":
-            import modin.pandas as mpd
+            import modin.pandas as mpd  # type: ignore[import-not-found]
+
             return_df = mpd.DataFrame(
-                self.to_list(include_total), columns=mpd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
+                self.to_list(include_total),
+                columns=mpd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
             )
         elif method == "ibis":
-            import ibis
+            import ibis  # type: ignore[import-not-found]
+
             if ibis_backend is not None:
                 ibis.set_backend(ibis_backend)
             pandas_df = pd.DataFrame(
-                self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
+                self.to_list(include_total),
+                columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
             )
             return_df = ibis.memtable(pandas_df)
         elif method == "narwhals":
             import narwhals as nw
+
             pandas_df = pd.DataFrame(
-                self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
+                self.to_list(include_total),
+                columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
             )
             return_df = nw.from_native(pandas_df)
         else:
             raise ValueError(f"Method {method} not supported for creating DataFrames")
         return return_df
-
 
     def to_list(self, include_total: bool = False) -> list[Any]:
         """Returns our BayesianContingencyTable as a list
@@ -152,7 +162,7 @@ class BayesianContingencyTable:
 
         Returns
         -------
-        Our ContingencyTable as a list
+        Our BayesianContingencyTable as a list
         """
         return_list = []
         for key, value in self.cells.items():
@@ -168,7 +178,7 @@ class BayesianContingencyTable:
         return return_list
 
     def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
-        """Returns our ContingencyTable as a numpy array
+        """Returns our BayesianContingencyTable as a numpy array
 
         Parameters
         ----------
@@ -177,12 +187,12 @@ class BayesianContingencyTable:
 
         Returns
         -------
-        Our ContingencyTable as a numpy array
+        Our BayesianContingencyTable as a numpy array
         """
         return np.array(self.to_list(include_total))
 
     def serialize(self, include_total: bool = False) -> dict[str, Any]:
-        """Returns our ContingencyTable as a JSON, with all information
+        """Returns our BayesianContingencyTable as a JSON, with all information
 
         Parameters
         ----------
@@ -191,7 +201,7 @@ class BayesianContingencyTable:
 
         Returns
         -------
-        Our ContingencyTable as a JSON
+        Our BayesianContingencyTable as a JSON
         """
         if include_total:
             total_dict = {"successes": self.successes, "trials": self.trials, "alpha": np.nan, "beta": np.nan}
@@ -199,8 +209,8 @@ class BayesianContingencyTable:
         return self.cells
 
     def deserialize(self, serial: dict[str, Any]) -> "BayesianContingencyTable":
-        """Takes in a serialized version of our ContingencyTable. Used when we want to populate our
-        ContingencyTable with results from a prior campaign.
+        """Takes in a serialized version of our BayesianContingencyTable. Used when we want to populate our
+        BayesianContingencyTable with results from a prior campaign.
 
         Parameters
         ----------
@@ -222,13 +232,11 @@ class BayesianContingencyTable:
 
     @overload
     @staticmethod
-    def _convert_to_tabulate_str(value: float, lift: str) -> str | float:
-        ...
+    def _convert_to_tabulate_str(value: float, lift: str) -> str | float: ...
 
     @overload
     @staticmethod
-    def _convert_to_tabulate_str(value: list[Any], lift: str) -> list[Any]:
-        ...
+    def _convert_to_tabulate_str(value: list[Any], lift: str) -> list[Any]: ...
 
     @staticmethod
     def _convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[Any] | float:

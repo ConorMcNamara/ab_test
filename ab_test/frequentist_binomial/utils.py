@@ -196,11 +196,11 @@ def mle_under_null(
     Newton's method for this.
     """
     if null_lift == 0:
-        # MLE of parameters under null hypothesis
-        p = [sum(successes) / sum(trials) for _ in range(2)]
+        p_hat = (successes[0] + successes[1]) / (trials[0] + trials[1])
+        p = [p_hat, p_hat]
     elif lift == "relative":
-        S = sum(successes)
-        T = sum(trials)
+        S = np.sum(successes)
+        T = np.sum(trials)
         neg_b = T + S + null_lift * (S + trials[1] - successes[1])
         a = T * (1 + null_lift)
         c = S
@@ -243,8 +243,8 @@ def mle_under_null(
 
         x0 = 0.5 * (pcrit_minus + pcrit_plus)
         for _ in range(50):
-            fn = A * x0 * x0 * x0 + B * x0 * x0 + C * x0 + D
-            fpn = 3 * A * x0 * x0 + 2 * B * x0 + C
+            fn = D + x0 * (C + x0 * (B + x0 * A))
+            fpn = C + x0 * (2 * B + x0 * 3 * A)
             x0 -= fn / fpn
 
             if abs(fn) < val_tol and abs(fn / fpn) < step_tol:
@@ -293,9 +293,7 @@ def mle_under_alternative(
     alternative hypothesis of the same form as H0, in case we ever want that.
     """
     if alt_lift is None:
-        successes = np.array(successes)
-        trials = np.array(trials)
-        return successes / trials
+        return np.asarray(successes) / np.asarray(trials)
     return mle_under_null(trials, successes, null_lift=alt_lift, lift=lift)
 
 
