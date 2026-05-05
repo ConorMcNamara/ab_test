@@ -183,7 +183,7 @@ def calculate_metrics(
     """
     sample_a = sample_beta(successes[0], trials[0], alphas[0], betas[0], n_samples)
     sample_b = sample_beta(successes[1], trials[1], alphas[1], betas[1], n_samples)
-    prob_b_greater_a = probability_b_greater_than_a(sample_a, sample_b)
+    prob_b_greater_a = float(np.mean(sample_b > sample_a))
     expected_loss = expected_loss_b(sample_a, sample_b)
     rope = calculate_rope(sample_a, sample_b, lift=lift, low=low_threshold, high=high_threshold)
     return {

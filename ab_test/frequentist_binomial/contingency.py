@@ -77,15 +77,20 @@ class ContingencyTable:
         self.trials.append(trials)
         return self
 
-    def to_df(self, method: str = "pandas", include_total: bool = False) -> pd.DataFrame | pl.DataFrame:
+    def to_df(self, method: str = "pandas", include_total: bool = False, spark_session: Any | None = None, ibis_backend: Any | None = None) -> pd.DataFrame | pl.DataFrame | Any:
         """Returns our ContingencyTable as a DataFrame
 
         Parameters
         ----------
-        method : {"pandas", "polars"}
-            Whether we want our DataFrame as a pandas or polars DataFrame
+        method : {"pandas", "polars", "pyspark", "modin", "ibis", "narwhals"}
+            Whether we want our DataFrame as a pandas, polars, pyspark, modin, ibis, or narwhals DataFrame
         include_total : bool, default=False
             Whether we want to include another section with the total amount
+        spark_session : SparkSession, optional
+            An active SparkSession, required when method="pyspark"
+        ibis_backend : ibis backend, optional
+            An Ibis backend connection. When provided, it is set as the active backend before
+            creating the memtable. When omitted, the existing default backend is used.
 
         Returns
         -------
@@ -101,11 +106,39 @@ class ContingencyTable:
                 self.to_list(include_total), schema=["cell_name", "successes", "trials"], orient="row"
             )
         elif method == "pyspark":
-            raise NotImplementedError("Have not implemented Pyspark yet")
+            from pyspark.sql import SparkSession
+            from pyspark.sql.types import IntegerType, StringType, StructField, StructType
+            if spark_session is None:
+                spark_session = SparkSession.getActiveSession()
+            if spark_session is None:
+                raise ValueError("No active SparkSession found. Please provide a spark_session argument.")
+            schema = StructType([
+                StructField("cell_name", StringType(), True),
+                StructField("successes", IntegerType(), True),
+                StructField("trials", IntegerType(), True),
+            ])
+            return_df = spark_session.createDataFrame(self.to_list(include_total), schema=schema)
         elif method == "data.table":
             raise NotImplementedError("Have not implemented data.table yet")
         elif method == "modin":
-            raise NotImplementedError("Have not implemented modin yet")
+            import modin.pandas as mpd
+            return_df = mpd.DataFrame(
+                self.to_list(include_total), columns=mpd.Index(["cell_name", "successes", "trials"]),
+            )
+        elif method == "ibis":
+            import ibis
+            if ibis_backend is not None:
+                ibis.set_backend(ibis_backend)
+            pandas_df = pd.DataFrame(
+                self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials"]),
+            )
+            return_df = ibis.memtable(pandas_df)
+        elif method == "narwhals":
+            import narwhals as nw
+            pandas_df = pd.DataFrame(
+                self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials"]),
+            )
+            return_df = nw.from_native(pandas_df)
         else:
             raise ValueError(f"Method {method} not supported for creating DataFrames")
         return return_df

@@ -16,6 +16,7 @@ dependencies = [
     { name = "pandas-stubs" },
     { name = "plotly" },
     { name = "polars" },
+    { name = "pyspark-stubs" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "scipy" },
@@ -41,6 +42,7 @@ requires-dist = [
     { name = "pandas-stubs", marker = "extra == 'dev'" },
     { name = "plotly", specifier = ">=6.0.1,<7.0.0" },
     { name = "polars", specifier = ">=1.27.1,<2.0.0" },
+    { name = "pyspark-stubs", specifier = ">=3.0.0.post3" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.5,<9.0.0" },
     { name = "pytest-cov", specifier = "==7.1.0" },
@@ -421,12 +423,42 @@ wheels = [
 ]
 
 [[package]]
+name = "py4j"
+version = "0.10.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/10/ed/9dad8808c34bc5b0b1a44b13c0bddeea0c8df59956eb20ac2fecc373f322/py4j-0.10.9.tar.gz", hash = "sha256:36ec57f43ff8ced260a18aa9a4e46c3500a730cac8860e259cbaa546c2b9db2f", size = 740715, upload-time = "2020-01-25T14:40:34.608Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9e/b6/6a4fb90cd235dc8e265a6a2067f2a2c99f0d91787f06aca4bcf7c23f3f80/py4j-0.10.9-py2.py3-none-any.whl", hash = "sha256:859ba728a7bb43e9c2bf058832759fb97a598bb28cc12f34f5fc4abdec08ede6", size = 198601, upload-time = "2020-01-25T14:40:31.996Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+]
+
+[[package]]
+name = "pyspark"
+version = "3.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "py4j" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d7/15/4ee019bfbf9e3e7af2c8e94a900f17c079bc39eafe0868b1b50bcade77de/pyspark-3.0.3.tar.gz", hash = "sha256:c4499903e3d7289cf2b4bf7755fb32cf17922598f3b85a1c230860dec020eec4", size = 209058181, upload-time = "2021-06-23T07:36:16.109Z" }
+
+[[package]]
+name = "pyspark-stubs"
+version = "3.0.0.post3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyspark" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9e/5e/61249b2acdcf50fa657dabdb5af5751d5d2654cc39c45a787dd46775368e/pyspark-stubs-3.0.0.post3.tar.gz", hash = "sha256:bea8b6ed8a77fac06d8df99d80b9d017bf4de632583d7eef829b4e65653f9d03", size = 73061, upload-time = "2022-01-05T20:19:46.793Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/36/a3/3823bda6f453b0cc79fc506732ae632ebe7bacbacfd2f09a9c7326325945/pyspark_stubs-3.0.0.post3-py3-none-any.whl", hash = "sha256:687b0c1cc4b3b3cbe9cf002b4d1b44bfacb3487921ec8c76aecf71b59c5fe4ad", size = 110141, upload-time = "2022-01-05T20:19:44.321Z" },
 ]
 
 [[package]]

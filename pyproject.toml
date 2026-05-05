@@ -19,6 +19,7 @@ dependencies = [
     "pytest-cov==7.1.0",
     "scipy-stubs~=1.17.1",
     "pandas-stubs~=2.3.3",
+    "pyspark-stubs>=3.0.0.post3",
 ]
 
 [project.optional-dependencies]

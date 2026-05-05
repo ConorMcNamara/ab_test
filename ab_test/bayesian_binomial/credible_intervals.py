@@ -224,14 +224,7 @@ def calculate_hdi(
         A ``(lower_bound, upper_bound)`` pair representing the HDI.
     """
     samples = sample_beta(s, n, prior_alpha, prior_beta, n_samples)
-
-    samples = np.sort(samples)
-    interval_idx_inc = int(np.floor(confidence_level * n_samples))
-    n_intervals = n_samples - interval_idx_inc
-    interval_widths = samples[interval_idx_inc:] - samples[:n_intervals]
-    min_idx = np.argmin(interval_widths)
-
-    return samples[min_idx], samples[min_idx + interval_idx_inc]
+    return calculate_hdi_from_samples(samples, confidence_level)
 
 
 def calculate_hdi_from_samples(

@@ -2,8 +2,8 @@ import pytest
 
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics
 
-class TestStatsTests:
 
+class TestStatsTests:
     @staticmethod
     def test_probability_b_greater_than_a():
         # from bayesian_testing.experiments import BinaryDataTest
@@ -33,7 +33,9 @@ class TestStatsTests:
         prior_alphas = [0.5, 0.5]
         prior_betas = [0.5, 0.5]
         expected_prob = 0.768
-        actual_prob = calculate_metrics(successes, trials, prior_alphas, prior_betas, n_samples=100_000)["Proportion of samples where B exceeds A"]
+        actual_prob = calculate_metrics(successes, trials, prior_alphas, prior_betas, n_samples=100_000)[
+            "Proportion of samples where B exceeds A"
+        ]
         assert actual_prob == pytest.approx(expected_prob, abs=1e-02)
 
     @staticmethod
@@ -44,7 +46,8 @@ class TestStatsTests:
         prior_betas = [0.5, 0.5]
         expected_prob = 0.0018725
         actual_prob = calculate_metrics(successes, trials, prior_alphas, prior_betas, n_samples=100_000)[
-            "Expected loss"]
+            "Expected loss"
+        ]
         assert actual_prob == pytest.approx(expected_prob, abs=1e-02)
 
 
