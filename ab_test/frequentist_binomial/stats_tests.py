@@ -292,9 +292,9 @@ def z_test(
 def _contingency_table(
     trials: np.ndarray[Any, Any] | list[Any],
     successes: np.ndarray[Any, Any] | list[Any],
-) -> list[Any]:
+) -> np.ndarray[Any, Any]:
     non_successes = np.asarray(trials) - np.asarray(successes)
-    return [successes, non_successes]
+    return np.array([successes, non_successes])
 
 
 def fisher_test(
@@ -347,7 +347,7 @@ def fisher_test(
         raise NotImplementedError("Only supports relative lift with a null of 0%")
 
     contingency_table = _contingency_table(trials, successes)
-    statistic, pval = ss.fisher_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
+    statistic, pval = ss.fisher_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined, arg-type]
 
     if crit is None:
         return float(pval)
