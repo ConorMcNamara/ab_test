@@ -115,12 +115,29 @@ lb, ub = confidence_interval(
 
 ### Bayesian analysis
 
-Use `calculate_metrics` for an all-in-one result, or call the lower-level functions directly for more control.
+Use `BayesianContingencyTable` for a chainable high-level interface, `calculate_metrics` for an all-in-one result, or call the lower-level functions directly for more control.
+
+```python
+from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
+
+bct = (
+    BayesianContingencyTable(name="Homepage Redesign", metric_name="purchases", spend=50_000, msrp=120.0)
+    .add("Control",   successes=100, trials=1_000, alpha=1.0, beta=1.0)
+    .add("Treatment", successes=130, trials=1_000, alpha=1.0, beta=1.0)
+)
+
+print(bct)                                  # grid table
+print(bct.analyze(lift="relative"))         # relative lift + ROPE
+print(bct.analyze(lift="revenue"))          # incremental revenue + ROPE
+print(bct.analyze(lift="roas"))             # cost-per-acquisition + ROPE
+bct.plot_individually()                     # posterior PDF chart
+```
 
 ```python
 import numpy as np
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics
 
+# Relative / absolute lift
 metrics = calculate_metrics(
     successes=np.array([100, 130]),
     trials=np.array([1_000, 1_000]),
@@ -131,7 +148,19 @@ metrics = calculate_metrics(
     low_threshold=-0.01,
     high_threshold=0.01,
 )
-print(metrics)
+
+# Incremental / revenue / ROAS — pass spend and msrp as needed
+metrics = calculate_metrics(
+    successes=np.array([100, 130]),
+    trials=np.array([1_000, 1_000]),
+    alphas=np.array([1.0, 1.0]),
+    betas=np.array([1.0, 1.0]),
+    n_samples=10_000,
+    lift="revenue",
+    low_threshold=-5_000,
+    high_threshold=5_000,
+    msrp=120.0,
+)
 ```
 
 ```python
@@ -149,7 +178,16 @@ sample_b = sample_beta(s=130, n=1_000, alpha=1.0, beta=1.0, n_samples=10_000)
 probability_b_greater_than_a(sample_a, sample_b)       # P(B > A)
 expected_loss_b(sample_a, sample_b)                    # E[max(A - B, 0)]
 prob_lift_exceeds(sample_a, sample_b, threshold=0.05)  # P(relative lift > 5%)
-calculate_rope(sample_a, sample_b)                     # full ROPE breakdown
+calculate_rope(sample_a, sample_b)                     # relative ROPE breakdown
+
+# Incremental count ROPE (within ±500 conversions is negligible)
+calculate_rope(sample_a, sample_b, lift="incremental", low=-500, high=500, trials=(1_000, 1_000))
+
+# Revenue ROPE (within ±$5 000 is negligible)
+calculate_rope(sample_a, sample_b, lift="revenue", low=-5_000, high=5_000, trials=(1_000, 1_000), msrp=120.0)
+
+# ROAS / CPA ROPE (within ±$1 cost-per-acquisition is negligible)
+calculate_rope(sample_a, sample_b, lift="roas", low=-1, high=1, trials=(1_000, 1_000), spend=50_000.0)
 ```
 
 ## API Reference
@@ -189,16 +227,40 @@ calculate_rope(sample_a, sample_b)                     # full ROPE breakdown
 
 `"ibm"`, `"wong"`, `"ito"`, `"tol"`, `"tol_bright"`, `"tol_vibrant"`, `"tol_muted"`, `"tol_light"`
 
+### `BayesianContingencyTable`
+
+| Method | Description |
+|---|---|
+| `.add(cell_name, successes, trials, alpha, beta)` | Add a cell; returns `self` for chaining |
+| `.analyze(lift, cred_int_method, confidence_level, is_sample, n_samples, low_threshold, high_threshold)` | Run Bayesian analysis and return a formatted summary with ROPE metrics |
+| `.plot_individually(confidence_level, n_samples)` | Posterior PDF chart with HDI bars and P(B > A) title |
+| `.to_df(method, include_total)` | Export to pandas, polars, PySpark, modin, ibis, or narwhals DataFrame |
+| `.to_list(include_total)` | Export to a plain list |
+| `.to_numpy(include_total)` | Export to a NumPy array |
+| `.serialize()` / `.deserialize(serial)` | JSON-compatible dict round-trip |
+
+Constructor: `BayesianContingencyTable(name, metric_name, spend=None, msrp=None)` — `spend` and `msrp` are required for `lift="roas"` and `lift="revenue"` respectively.
+
 ### Bayesian stats (`ab_test.bayesian_binomial`)
 
 | Function | Description |
 |---|---|
-| `calculate_metrics(successes, trials, alphas, betas, n_samples, lift, low_threshold, high_threshold)` | Draws posteriors and returns P(B > A), expected loss, and ROPE metrics in one call |
+| `calculate_metrics(successes, trials, alphas, betas, n_samples, lift, low_threshold, high_threshold, spend, msrp)` | Draws posteriors and returns P(B > A), expected loss, and ROPE metrics in one call |
 | `probability_b_greater_than_a(sample_a, sample_b)` | Proportion of posterior samples where B exceeds A |
 | `expected_loss_b(sample_a, sample_b)` | E[max(A − B, 0)]: expected loss from choosing B |
-| `calculate_rope(sample_a, sample_b, lift, low, high)` | Probability that lift falls within, above, or below the ROPE |
+| `calculate_rope(sample_a, sample_b, lift, low, high, trials, spend, msrp)` | Probability that lift falls within, above, or below the ROPE; supports all five lift types |
 | `prob_lift_exceeds(sample_a, sample_b, lift, threshold)` | Probability that lift exceeds a given threshold |
 | `sample_beta(s, n, alpha, beta, n_samples)` | Draw posterior samples from Beta(alpha + s, beta + n − s) |
+
+### Bayesian `lift` options
+
+| Value | Unit | Extra args required |
+|---|---|---|
+| `"relative"` | rate ratio `(B − A) / A` | — |
+| `"absolute"` | rate difference `B − A` | — |
+| `"incremental"` | count difference `(B − A) × max(trials)` | `trials` |
+| `"revenue"` | incremental revenue `(B − A) × max(trials) × msrp` | `trials`, `msrp` |
+| `"roas"` | CPA difference `spend/A_count − spend/B_count`; positive = B cheaper | `trials`, `spend` |
 
 ## Contributing
 
