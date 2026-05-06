@@ -1,11 +1,16 @@
 """Our wrapper for analyzing experiment results"""
 
+import math
 from typing import Any, overload
 
 import numpy as np
 import pandas as pd
 import polars as pl
+from tabulate import tabulate
 
+from ab_test.bayesian_binomial.credible_intervals import credible_interval
+from ab_test.bayesian_binomial.stats_tests import calculate_metrics
+from ab_test.bayesian_binomial.utils import posterior_mean
 
 class BayesianContingencyTable:
     """A class for analyzing experiment results using Bayesian approaches"""
@@ -54,6 +59,10 @@ class BayesianContingencyTable:
             The number of successes in our cell_name
         trials : int
             The number of trials in our cell_name
+        alpha : float
+            Alpha parameter of the Beta prior for this cell.
+        beta : float
+            Beta parameter of the Beta prior for this cell.
 
         Returns
         -------
@@ -165,16 +174,10 @@ class BayesianContingencyTable:
         Our BayesianContingencyTable as a list
         """
         return_list = []
-        for key, value in self.cells.items():
-            if key == "table":
-                for name in self.names:
-                    loop_list = [name] + list(value[f"{name}"].values())
-                    return_list.append(loop_list)
-                if include_total:
-                    total_list = ["Total", np.sum(self.successes), np.sum(self.trials), np.nan, np.nan]
-                    return_list.append(total_list)
-            else:
-                pass
+        for name in self.names:
+            return_list.append([name] + list(self.cells["table"][name].values()))
+        if include_total:
+            return_list.append(["Total", np.sum(self.successes), np.sum(self.trials), np.nan, np.nan])
         return return_list
 
     def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
@@ -203,10 +206,16 @@ class BayesianContingencyTable:
         -------
         Our BayesianContingencyTable as a JSON
         """
+        table = dict(self.cells["table"])
         if include_total:
-            total_dict = {"successes": self.successes, "trials": self.trials, "alpha": np.nan, "beta": np.nan}
-            self.cells["table"]["Total"] = total_dict
-        return self.cells
+            table["Total"] = {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials)), "alpha": np.nan, "beta": np.nan}
+        return {
+            "experiment_name": self.experiment_name,
+            "metric_name": self.metric_name,
+            "spend": self.spend,
+            "msrp": self.msrp,
+            "table": table,
+        }
 
     def deserialize(self, serial: dict[str, Any]) -> "BayesianContingencyTable":
         """Takes in a serialized version of our BayesianContingencyTable. Used when we want to populate our
@@ -222,13 +231,151 @@ class BayesianContingencyTable:
         Itself, to be chained with other methods
         """
         self.experiment_name = serial["experiment_name"]
+        self.metric_name = serial["metric_name"]
         self.spend = serial["spend"]
         self.msrp = serial["msrp"]
         self.cells = serial
-        self.metric_name = serial["metric_name"]
-        self.alphas = serial["alphas"]
-        self.betas = serial["betas"]
+        self.names = list(serial["table"].keys())
+        self.successes = [v["successes"] for v in serial["table"].values()]
+        self.trials = [v["trials"] for v in serial["table"].values()]
+        self.alphas = [v["alpha"] for v in serial["table"].values()]
+        self.betas = [v["beta"] for v in serial["table"].values()]
         return self
+
+    def analyze(
+            self,
+            lift: str = "relative",
+            cred_int_method: str = "credible",
+            confidence_level: float = 0.95,
+            is_sample: bool = False,
+            n_samples: int = 100_000,
+            low_threshold: float = -0.1,
+            high_threshold: float = 0.1,
+    ) -> str:
+        """Analyze the experiment and return a formatted summary table.
+
+        Computes Bayesian metrics for the two variants — posterior means, credible
+        interval, probability B exceeds A, expected loss, and ROPE probabilities —
+        then formats them into a grid table string. Results are also stored on
+        ``self.incremental_results`` for programmatic access.
+
+        Parameters
+        ----------
+        lift : {"relative", "absolute", "incremental", "roas", "revenue"}, optional
+            Type of lift to compute, by default ``"relative"``.
+        cred_int_method : {"credible", "hdi"}, optional
+            Method used to compute the credible interval, by default ``"credible"``.
+        confidence_level : float, optional
+            Probability mass for the credible interval and significance threshold,
+            by default 0.95.
+        is_sample : bool, optional
+            Whether to use Monte Carlo sampling for the credible interval. If
+            ``False``, uses the normal approximation, by default ``False``.
+        n_samples : int, optional
+            Number of posterior samples to draw, by default 100_000.
+        low_threshold : float, optional
+            Lower bound of the Region of Practical Equivalence (ROPE),
+            by default -0.1.
+        high_threshold : float, optional
+            Upper bound of the Region of Practical Equivalence (ROPE),
+            by default 0.1.
+
+        Returns
+        -------
+        str
+            A grid-formatted table summarising the lift, credible interval,
+            probability B is best, expected loss, and ROPE probability, with
+            footnotes explaining annotated values.
+
+        Raises
+        ------
+        ValueError
+            If ``lift="roas"`` and ``spend`` was not set on the table.
+        ValueError
+            If ``lift="revenue"`` and ``msrp`` was not set on the table.
+        ValueError
+            If ``lift`` is not one of the supported types.
+        """
+        if len(self.names) != 2:
+            raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
+        lift = lift.casefold()
+        results = calculate_metrics(self.successes, self.trials, self.alphas, self.betas, n_samples, lift, low_threshold, high_threshold)
+        lb, ub = credible_interval(self.successes, self.trials, self.alphas, self.betas, confidence_level, lift, is_sample, n_samples, cred_int_method)
+        pa = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
+        pb = posterior_mean(self.successes[1], self.trials[1], self.alphas[1], self.betas[1])
+        success_rate: list[int | float]
+        if lift in ["incremental", "roas", "revenue"]:
+            if self.trials[0] > self.trials[1]:
+                pb = math.ceil(pb * (self.trials[0] / self.trials[1]))
+                pa = math.ceil(pa * self.trials[0])
+                lb = math.ceil(lb * self.trials[0])
+                ub = math.ceil(ub * self.trials[0])
+            else:
+                pa = math.ceil(pa * (self.trials[1] / self.trials[0]))
+                pb = math.ceil(pb * self.trials[1])
+                lb = math.ceil(lb * self.trials[1])
+                ub = math.ceil(ub * self.trials[1])
+            test_lift = pb - pa
+            if lift == "roas":
+                if self.spend is None:
+                    raise ValueError("spend must be set for ROAS calculations")
+                test_lift = self.spend / test_lift
+                pa = self.spend / pa if pa > 0 else np.inf
+                pb = self.spend / pb if pb > 0 else np.inf
+                lb = self.spend / lb if lb > 0 else np.inf
+                ub = self.spend / ub if ub > 0 else np.inf
+            if lift == "revenue":
+                if self.msrp is None:
+                    raise ValueError("msrp must be set for revenue calculations")
+                test_lift *= self.msrp
+                pa *= self.msrp
+                pb *= self.msrp
+                lb *= self.msrp
+                ub *= self.msrp
+        elif lift == "relative":
+            test_lift = (pb - pa) / pa
+        elif lift == "absolute":
+            test_lift = pb - pa
+        else:
+            raise ValueError(f"lift type {lift} not supported")
+        success_rate = [pa, pb]
+        self.incremental_results = {
+            "lift_type": lift,
+            "lift": test_lift,
+            f"{self.names[0]}": success_rate[0],
+            f"{self.names[1]}": success_rate[1],
+            "prob_b_greater_a": results["Proportion of samples where B exceeds A"],
+            "ci_lower": lb,
+            "ci_upper": ub,
+            "expected_loss": results["Expected loss"],
+            "prob_rope": results["Probability of ROPE"],
+            "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
+            "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
+        }
+        prob_b_exceeds_a = results["Proportion of samples where B exceeds A"]
+        str_pvalue = f"{self._convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}*" if prob_b_exceeds_a >= confidence_level else f"{self._convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}"
+        table_headers = (
+                ["Metric", "Metric Name"] + self.names + ["Lift", "Cred. Int. Lower **", "Cred. Int. Upper **",
+                                                          f"Prob {self.names[1]} Is Best", f"Expected Loss of {self.names[1]}",
+                                                          "Probability Lift is in ROPE ***"]
+        )
+        table_list = [
+            [lift]
+            + [self.metric_name]
+            + self._convert_to_tabulate_str(success_rate, lift)
+            + self._convert_to_tabulate_str([test_lift, lb, ub], lift)
+            + [str_pvalue]
+            + [self._convert_to_tabulate_str(results["Expected loss"], "relative")]
+            + [self._convert_to_tabulate_str(results["Probability of ROPE"], "relative")]
+        ]
+        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
+        return_string += (
+            f"\n* next to the prob means it exceeds our confidence level at {round(confidence_level * 100)}% level"
+        )
+        return_string += f"\n** {round(confidence_level * 100)}% Confidence Interval"
+        return_string += f"\n*** Region of Practical Equivalence"
+        return return_string
+
 
     @overload
     @staticmethod
@@ -254,7 +401,7 @@ class BayesianContingencyTable:
         Our new str_value, as either a percentage or dollar sign
         """
         str_value: str | list[str] | float
-        if isinstance(value, float):
+        if isinstance(value, (int, float)):
             if lift in ["revenue", "roas"]:
                 str_value = f"${round(value, 2):,}"
             elif lift in ["absolute", "relative"]:

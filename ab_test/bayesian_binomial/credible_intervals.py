@@ -16,8 +16,8 @@ __all__: list[str] = [
 
 
 def credible_interval(
-    trials: np.ndarray[Any, Any] | list[Any],
     successes: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
     prior_alphas: np.ndarray[Any, Any] | list[Any],
     prior_betas: np.ndarray[Any, Any] | list[Any],
     confidence_level: float = 0.95,
@@ -34,11 +34,11 @@ def credible_interval(
 
     Parameters
     ----------
-    trials : np.ndarray or list
-        Total number of trials for each variant. Index 0 is the control,
-        index 1 is the treatment.
     successes : np.ndarray or list
         Number of successes for each variant. Index 0 is the control,
+        index 1 is the treatment.
+    trials : np.ndarray or list
+        Total number of trials for each variant. Index 0 is the control,
         index 1 is the treatment.
     prior_alphas : np.ndarray or list
         Alpha parameters of the Beta prior for each variant.

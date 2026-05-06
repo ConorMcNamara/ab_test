@@ -171,16 +171,10 @@ class ContingencyTable:
         Our ContingencyTable as a list
         """
         return_list = []
-        for key, value in self.cells.items():
-            if key == "table":
-                for name in self.names:
-                    loop_list = [name] + list(value[f"{name}"].values())
-                    return_list.append(loop_list)
-                if include_total:
-                    total_list = ["Total", np.sum(self.successes), np.sum(self.trials)]
-                    return_list.append(total_list)
-            else:
-                pass
+        for name in self.names:
+            return_list.append([name] + list(self.cells["table"][name].values()))
+        if include_total:
+            return_list.append(["Total", np.sum(self.successes), np.sum(self.trials)])
         return return_list
 
     def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
@@ -209,10 +203,16 @@ class ContingencyTable:
         -------
         Our ContingencyTable as a JSON
         """
+        table = dict(self.cells["table"])
         if include_total:
-            total_dict = {"successes": self.successes, "trials": self.trials}
-            self.cells["table"]["Total"] = total_dict
-        return self.cells
+            table["Total"] = {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials))}
+        return {
+            "experiment_name": self.experiment_name,
+            "metric_name": self.metric_name,
+            "spend": self.spend,
+            "msrp": self.msrp,
+            "table": table,
+        }
 
     def deserialize(self, serial: dict[str, Any]) -> "ContingencyTable":
         """Takes in a serialized version of our ContingencyTable. Used when we want to populate our
@@ -228,10 +228,13 @@ class ContingencyTable:
         Itself, to be chained with other methods
         """
         self.experiment_name = serial["experiment_name"]
+        self.metric_name = serial["metric_name"]
         self.spend = serial["spend"]
         self.msrp = serial["msrp"]
         self.cells = serial
-        self.metric_name = serial["metric_name"]
+        self.names = list(serial["table"].keys())
+        self.successes = [v["successes"] for v in serial["table"].values()]
+        self.trials = [v["trials"] for v in serial["table"].values()]
         return self
 
     def analyze(
@@ -262,6 +265,8 @@ class ContingencyTable:
         -------
         The results (lift as well as confidence intervals) of our experiment in string format, to be printed
         """
+        if len(self.names) != 2:
+            raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
         lift = lift.casefold()
         p_value = ab_test(self.trials, self.successes, null_lift, lift, method=test_method)
         test_lift = observed_lift(self.trials, self.successes, lift)
@@ -375,7 +380,7 @@ class ContingencyTable:
         self.individual_results["Total"] = {"lift": total_success_rate, "ci_lower": lb_total, "ci_upper": ub_total}
         table_list.append(total_list)
         table_headers = ["Cell Name", "Successes", "Trials", "Success Rate", "Conf. Int. Lower**", "Conf. Int. Upper**"]
-        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", intfmt=",")
+        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
         return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
         return return_string
 
@@ -403,7 +408,7 @@ class ContingencyTable:
         Our new str_value, as either a percentage or dollar sign
         """
         str_value: str | list[str] | float
-        if isinstance(value, float):
+        if isinstance(value, (int, float)):
             if lift in ["revenue", "roas"]:
                 str_value = f"${round(value, 2):,}"
             elif lift in ["absolute", "relative"]:
@@ -576,8 +581,7 @@ class ContingencyTable:
     def __str__(self) -> str:
         result: str = tabulate(
             self.to_list(include_total=True),
-            headers=["cell_name", "successes", "trials", "90% CI Lower", "90% CI Upper"],
+            headers=["cell_name", "successes", "trials"],
             tablefmt="grid",
-            intfmt=",",
         )
         return result
