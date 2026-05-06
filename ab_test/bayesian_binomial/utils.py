@@ -27,6 +27,7 @@ def sample_beta(s: int, n: int, alpha: float, beta: float, n_samples: int) -> np
     """
     return np.random.beta(alpha + s, beta + n - s, n_samples)
 
+
 def posterior_mean(s: int, n: int, alpha: float, beta: float) -> float:
     """Compute the mean of the Beta posterior given observed binomial data.
 

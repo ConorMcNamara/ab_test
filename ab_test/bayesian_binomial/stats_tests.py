@@ -11,6 +11,9 @@ def calculate_rope(
     lift: str = "relative",
     low: float = -0.01,
     high: float = 0.01,
+    trials: tuple[int, int] | None = None,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> dict:
     """Calculate the probability that the lift between B and A falls within the ROPE.
 
@@ -23,13 +26,31 @@ def calculate_rope(
         Posterior samples for variant A.
     sample_b : np.ndarray
         Posterior samples for variant B.
-    lift : {"relative", "absolute"}, optional
-        How to compute the lift between variants. "relative" computes
-        (B - A) / A; "absolute" computes B - A. Default is "relative".
+    lift : {"relative", "absolute", "incremental", "revenue", "roas"}, optional
+        How to compute the lift between variants:
+
+        - ``"relative"``: ``(B - A) / A``
+        - ``"absolute"``: ``B - A``
+        - ``"incremental"``: ``(B - A) * max(trials)`` — count difference at scale.
+          Requires ``trials``.
+        - ``"revenue"``: ``(B - A) * max(trials) * msrp`` — incremental revenue.
+          Requires ``trials`` and ``msrp``.
+        - ``"roas"``: ``spend / (A * max_n) - spend / (B * max_n)`` — difference
+          in cost-per-acquisition; positive means B is cheaper. Requires ``trials``
+          and ``spend``.
+
+        Default is ``"relative"``.
     low : float, optional
-        Lower bound of the ROPE. Default is -0.01 (-1% lift).
+        Lower bound of the ROPE. Default is -0.01.
     high : float, optional
-        Upper bound of the ROPE. Default is 0.01 (+1% lift).
+        Upper bound of the ROPE. Default is 0.01.
+    trials : tuple[int, int], optional
+        ``(trials_a, trials_b)`` — required for ``"incremental"``, ``"revenue"``,
+        and ``"roas"``.
+    spend : float, optional
+        Total ad spend — required for ``"roas"``.
+    msrp : float, optional
+        Average product price — required for ``"revenue"``.
 
     Returns
     -------
@@ -46,7 +67,10 @@ def calculate_rope(
     Raises
     ------
     NotImplementedError
-        If ``lift`` is not "relative" or "absolute".
+        If ``lift`` is not one of the supported types.
+    ValueError
+        If a required parameter (``trials``, ``spend``, or ``msrp``) is missing
+        for the chosen lift type.
     """
     a = np.asarray(sample_a)
     b = np.asarray(sample_b)
@@ -54,6 +78,21 @@ def calculate_rope(
         lift_arr = (b - a) / a
     elif lift == "absolute":
         lift_arr = b - a
+    elif lift in ("incremental", "revenue", "roas"):
+        if trials is None:
+            raise ValueError(f"trials must be provided for lift='{lift}'")
+        max_n = max(trials)
+        if lift == "incremental":
+            lift_arr = (b - a) * max_n
+        elif lift == "revenue":
+            if msrp is None:
+                raise ValueError("msrp must be provided for lift='revenue'")
+            lift_arr = (b - a) * max_n * msrp
+        else:  # roas
+            if spend is None:
+                raise ValueError("spend must be provided for lift='roas'")
+            # CPA_A - CPA_B: positive means B has lower cost-per-conversion (better)
+            lift_arr = spend / (a * max_n) - spend / (b * max_n)
     else:
         raise NotImplementedError(f"lift {lift} not implemented")
 
@@ -136,14 +175,16 @@ def prob_lift_exceeds(
 
 
 def calculate_metrics(
-    successes: np.ndarray[Any, Any],
-    trials: np.ndarray[Any, Any],
-    alphas: np.ndarray[Any, Any],
-    betas: np.ndarray[Any, Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+    alphas: np.ndarray[Any, Any] | list[Any],
+    betas: np.ndarray[Any, Any] | list[Any],
     n_samples: int,
     lift: str = "relative",
     low_threshold: float = -0.01,
     high_threshold: float = 0.01,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> dict[str, float]:
     """Compute a suite of Bayesian metrics comparing variant B against variant A.
 
@@ -162,13 +203,17 @@ def calculate_metrics(
         Array of length 2 containing the beta prior parameters for variants A and B.
     n_samples : int
         Number of posterior samples to draw for each variant.
-    lift : {"relative", "absolute"}, optional
-        How to compute the lift between variants. "relative" computes
-        (B - A) / A; "absolute" computes B - A. Default is "relative".
+    lift : {"relative", "absolute", "incremental", "revenue", "roas"}, optional
+        How to compute the lift between variants. Default is ``"relative"``.
+        See :func:`calculate_rope` for full semantics of each mode.
     low_threshold : float, optional
-        Lower bound of the ROPE. Default is -0.01 (-1% lift).
+        Lower bound of the ROPE. Default is -0.01.
     high_threshold : float, optional
-        Upper bound of the ROPE. Default is 0.01 (+1% lift).
+        Upper bound of the ROPE. Default is 0.01.
+    spend : float, optional
+        Total ad spend — required when ``lift="roas"``.
+    msrp : float, optional
+        Average product price — required when ``lift="revenue"``.
 
     Returns
     -------
@@ -185,7 +230,16 @@ def calculate_metrics(
     sample_b = sample_beta(successes[1], trials[1], alphas[1], betas[1], n_samples)
     prob_b_greater_a = float(np.mean(sample_b > sample_a))
     expected_loss = expected_loss_b(sample_a, sample_b)
-    rope = calculate_rope(sample_a, sample_b, lift=lift, low=low_threshold, high=high_threshold)
+    rope = calculate_rope(
+        sample_a,
+        sample_b,
+        lift=lift,
+        low=low_threshold,
+        high=high_threshold,
+        trials=(int(trials[0]), int(trials[1])),
+        spend=spend,
+        msrp=msrp,
+    )
     return {
         "Proportion of samples where B exceeds A": prob_b_greater_a,
         "Expected loss": expected_loss,

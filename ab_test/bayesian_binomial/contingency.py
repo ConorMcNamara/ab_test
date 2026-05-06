@@ -1,16 +1,19 @@
 """Our wrapper for analyzing experiment results"""
 
 import math
-from typing import Any, overload
+from typing import Any, Literal, cast, overload
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import polars as pl
+from scipy.stats import beta
 from tabulate import tabulate
 
-from ab_test.bayesian_binomial.credible_intervals import credible_interval
-from ab_test.bayesian_binomial.stats_tests import calculate_metrics
-from ab_test.bayesian_binomial.utils import posterior_mean
+from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
+from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
+from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
+
 
 class BayesianContingencyTable:
     """A class for analyzing experiment results using Bayesian approaches"""
@@ -208,7 +211,12 @@ class BayesianContingencyTable:
         """
         table = dict(self.cells["table"])
         if include_total:
-            table["Total"] = {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials)), "alpha": np.nan, "beta": np.nan}
+            table["Total"] = {
+                "successes": int(np.sum(self.successes)),
+                "trials": int(np.sum(self.trials)),
+                "alpha": np.nan,
+                "beta": np.nan,
+            }
         return {
             "experiment_name": self.experiment_name,
             "metric_name": self.metric_name,
@@ -243,14 +251,14 @@ class BayesianContingencyTable:
         return self
 
     def analyze(
-            self,
-            lift: str = "relative",
-            cred_int_method: str = "credible",
-            confidence_level: float = 0.95,
-            is_sample: bool = False,
-            n_samples: int = 100_000,
-            low_threshold: float = -0.1,
-            high_threshold: float = 0.1,
+        self,
+        lift: str = "relative",
+        cred_int_method: Literal["credible", "hdi"] = "credible",
+        confidence_level: float = 0.95,
+        is_sample: bool = False,
+        n_samples: int = 100_000,
+        low_threshold: float = -0.1,
+        high_threshold: float = 0.1,
     ) -> str:
         """Analyze the experiment and return a formatted summary table.
 
@@ -299,22 +307,63 @@ class BayesianContingencyTable:
         if len(self.names) != 2:
             raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
         lift = lift.casefold()
-        results = calculate_metrics(self.successes, self.trials, self.alphas, self.betas, n_samples, lift, low_threshold, high_threshold)
-        lb, ub = credible_interval(self.successes, self.trials, self.alphas, self.betas, confidence_level, lift, is_sample, n_samples, cred_int_method)
+        if lift in ["relative", "absolute"]:
+            results = calculate_metrics(
+                self.successes, self.trials, self.alphas, self.betas, n_samples, lift, low_threshold, high_threshold
+            )
+            lb, ub = credible_interval(
+                self.successes,
+                self.trials,
+                self.alphas,
+                self.betas,
+                confidence_level,
+                cast(Literal["relative", "absolute"], lift),
+                is_sample,
+                n_samples,
+                cred_int_method,
+            )
+        elif lift in ["incremental", "roas", "revenue"]:
+            results = calculate_metrics(
+                self.successes,
+                self.trials,
+                self.alphas,
+                self.betas,
+                n_samples,
+                lift,
+                low_threshold,
+                high_threshold,
+                spend=self.spend,
+                msrp=self.msrp,
+            )
+            lb, ub = credible_interval(
+                self.successes,
+                self.trials,
+                self.alphas,
+                self.betas,
+                confidence_level,
+                "absolute",
+                is_sample,
+                n_samples,
+                cred_int_method,
+            )
+        else:
+            raise ValueError(f"No support for lift type {lift}")
         pa = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
         pb = posterior_mean(self.successes[1], self.trials[1], self.alphas[1], self.betas[1])
         success_rate: list[int | float]
         if lift in ["incremental", "roas", "revenue"]:
             if self.trials[0] > self.trials[1]:
-                pb = math.ceil(pb * (self.trials[0] / self.trials[1]))
+                pb = math.ceil(pb * self.trials[0])
                 pa = math.ceil(pa * self.trials[0])
                 lb = math.ceil(lb * self.trials[0])
                 ub = math.ceil(ub * self.trials[0])
             else:
-                pa = math.ceil(pa * (self.trials[1] / self.trials[0]))
+                pa = math.ceil(pa * self.trials[1])
                 pb = math.ceil(pb * self.trials[1])
                 lb = math.ceil(lb * self.trials[1])
                 ub = math.ceil(ub * self.trials[1])
+            print(pb)
+            print(pa)
             test_lift = pb - pa
             if lift == "roas":
                 if self.spend is None:
@@ -339,25 +388,51 @@ class BayesianContingencyTable:
         else:
             raise ValueError(f"lift type {lift} not supported")
         success_rate = [pa, pb]
-        self.incremental_results = {
-            "lift_type": lift,
-            "lift": test_lift,
-            f"{self.names[0]}": success_rate[0],
-            f"{self.names[1]}": success_rate[1],
-            "prob_b_greater_a": results["Proportion of samples where B exceeds A"],
-            "ci_lower": lb,
-            "ci_upper": ub,
-            "expected_loss": results["Expected loss"],
-            "prob_rope": results["Probability of ROPE"],
-            "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
-            "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
-        }
+        if lift in ["relative", "absolute"]:
+            self.incremental_results = {
+                "lift_type": lift,
+                "lift": test_lift,
+                f"{self.names[0]}": success_rate[0],
+                f"{self.names[1]}": success_rate[1],
+                "prob_b_greater_a": results["Proportion of samples where B exceeds A"],
+                "ci_lower": lb,
+                "ci_upper": ub,
+                "expected_loss": results["Expected loss"],
+                "prob_rope": results["Probability of ROPE"],
+                "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
+                "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
+            }
+        else:
+            self.incremental_results = {
+                "lift_type": lift,
+                "lift": test_lift,
+                f"{self.names[0]}": success_rate[0],
+                f"{self.names[1]}": success_rate[1],
+                "prob_b_greater_a": results["Proportion of samples where B exceeds A"],
+                "ci_lower": lb,
+                "ci_upper": ub,
+                "expected_loss": results["Expected loss"],
+                "prob_rope": results["Probability of ROPE"],
+                "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
+                "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
+            }
         prob_b_exceeds_a = results["Proportion of samples where B exceeds A"]
-        str_pvalue = f"{self._convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}*" if prob_b_exceeds_a >= confidence_level else f"{self._convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}"
+        str_pvalue = (
+            f"{self._convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}*"
+            if prob_b_exceeds_a >= confidence_level
+            else f"{self._convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}"
+        )
         table_headers = (
-                ["Metric", "Metric Name"] + self.names + ["Lift", "Cred. Int. Lower **", "Cred. Int. Upper **",
-                                                          f"Prob {self.names[1]} Is Best", f"Expected Loss of {self.names[1]}",
-                                                          "Probability Lift is in ROPE ***"]
+            ["Metric", "Metric Name"]
+            + self.names
+            + [
+                "Lift",
+                "Cred. Int. Lower **",
+                "Cred. Int. Upper **",
+                f"Prob {self.names[1]} Is Best",
+                f"Expected Loss of {self.names[1]}",
+                "Probability Lift is in ROPE ***",
+            ]
         )
         table_list = [
             [lift]
@@ -373,9 +448,8 @@ class BayesianContingencyTable:
             f"\n* next to the prob means it exceeds our confidence level at {round(confidence_level * 100)}% level"
         )
         return_string += f"\n** {round(confidence_level * 100)}% Confidence Interval"
-        return_string += f"\n*** Region of Practical Equivalence"
+        return_string += "\n*** Region of Practical Equivalence"
         return return_string
-
 
     @overload
     @staticmethod
@@ -422,3 +496,101 @@ class BayesianContingencyTable:
         else:
             raise TypeError(f"No support for converting {value} to string")
         return str_value
+
+    def plot_individually(self, confidence_level: float = 0.95, n_samples: int = 100_000) -> go.Figure:
+        """Plot the posterior Beta distributions for each variant as an interactive figure.
+
+        Renders overlapping PDF curves for both variants, annotates each with its
+        Highest Density Interval, and titles the chart with the probability that
+        variant B's conversion rate exceeds variant A's.
+
+        Parameters
+        ----------
+        confidence_level : float, optional
+            Probability mass used to compute each variant's HDI, by default 0.95.
+        n_samples : int, optional
+            Number of posterior samples drawn to estimate the win probability,
+            by default 100_000.
+
+        Returns
+        -------
+        go.Figure
+            An interactive Plotly figure showing the posterior PDFs, HDI bars,
+            and a title containing P(B > A).
+        """
+        # 1. Define X-axis range (0 to 1, but zoomed to relevant area)
+        x_min = max(
+            0, min(beta.ppf(0.001, self.alphas[0], self.betas[0]), beta.ppf(0.001, self.alphas[1], self.betas[1])) * 0.8
+        )
+        x_max = min(
+            1, max(beta.ppf(0.999, self.alphas[0], self.betas[0]), beta.ppf(0.999, self.alphas[1], self.betas[1])) * 1.2
+        )
+        x = np.linspace(x_min, x_max, 500)
+
+        # 2. PDF Curves
+        pdf_a = beta.pdf(x, self.alphas[0], self.betas[0])
+        pdf_b = beta.pdf(x, self.alphas[1], self.betas[1])
+
+        # 3. HDI Lines
+        hdi_a = individual_credible_interval(
+            self.successes[0], self.trials[0], confidence_level, self.alphas[0], self.betas[0], method="hdi"
+        )
+        hdi_b = individual_credible_interval(
+            self.successes[1], self.trials[1], confidence_level, self.alphas[1], self.betas[1], method="hdi"
+        )
+
+        # 4. Win Probability for Title
+        _sample_a = sample_beta(self.successes[0], self.trials[0], self.alphas[0], self.betas[0], n_samples)
+        _sample_b = sample_beta(self.successes[1], self.trials[1], self.alphas[1], self.betas[1], n_samples)
+        p_b_better = prob_lift_exceeds(_sample_a, _sample_b, threshold=0.0)
+
+        fig = go.Figure()
+
+        # Trace A (Control)
+        fig.add_trace(
+            go.Scatter(
+                x=x, y=pdf_a, name=f"{self.names[0]}", fill="tozeroy", line=dict(color="#636EFA", width=2), opacity=0.4
+            )
+        )
+        # Trace B (Variant)
+        fig.add_trace(
+            go.Scatter(
+                x=x, y=pdf_b, name=f"{self.names[1]}", fill="tozeroy", line=dict(color="#EF553B", width=2), opacity=0.4
+            )
+        )
+
+        # Add HDI indicators as horizontal bars at the bottom
+        # We calculate the max height to position the bars relatively
+        max_y = max(np.max(pdf_a), np.max(pdf_b))
+        y_pos_a = -max_y * 0.05
+        y_pos_b = -max_y * 0.10
+
+        for hdi, color, y_pos, label in [(hdi_a, "#636EFA", y_pos_a, "A"), (hdi_b, "#EF553B", y_pos_b, "B")]:
+            fig.add_shape(type="line", x0=hdi[0], y0=y_pos, x1=hdi[1], y1=y_pos, line=dict(color=color, width=5))
+        fig.update_layout(
+            title=f"Bayesian Binary Test: P({self.names[1]} > {self.names[0]}) = {p_b_better:.1%}",
+            xaxis_title="Conversion Rate (%)",
+            xaxis_tickformat=".1%",
+            yaxis_title="Probability Density",
+            template="plotly_white",
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+
+        return fig
+
+    def __str__(self) -> str:
+        """Return a grid-formatted string representation of the contingency table.
+
+        Returns
+        -------
+        str
+            A tabulated grid showing each cell's name, successes, trials, alpha,
+            and beta, plus a totals row.
+        """
+        result: str = tabulate(
+            self.to_list(include_total=True),
+            headers=["cell_name", "successes", "trials", "alpha", "beta"],
+            tablefmt="grid",
+        )
+        return result

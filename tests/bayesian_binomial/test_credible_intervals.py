@@ -66,9 +66,7 @@ class TestCredibleIntervalComparison:
         prior_alpha = 1
         prior_beta = 1
 
-        actual_low, actual_high = individual_credible_interval(
-            s, n, 0.95, prior_alpha, prior_beta, 100_000, method
-        )
+        actual_low, actual_high = individual_credible_interval(s, n, 0.95, prior_alpha, prior_beta, 100_000, method)
 
         assert actual_low == pytest.approx(expected_low, abs=1e-03)
         assert actual_high == pytest.approx(expected_high, abs=1e-03)

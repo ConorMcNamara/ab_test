@@ -108,8 +108,8 @@ def individual_credible_interval(
     s: int,
     n: int,
     confidence_level: float = 0.95,
-    prior_alpha: int = 1,
-    prior_beta: int = 1,
+    prior_alpha: float = 1,
+    prior_beta: float = 1,
     n_samples: int = 100_000,
     method: Literal["credible", "hdi"] = "credible",
 ) -> tuple[float, float]:
@@ -156,8 +156,8 @@ def individual_credible_interval(
 def calculate_interval(
     s: int,
     n: int,
-    prior_alpha: int = 1,
-    prior_beta: int = 1,
+    prior_alpha: float = 1,
+    prior_beta: float = 1,
     confidence_level: float = 0.95,
 ) -> tuple[float, float]:
     """Calculate the equal-tailed credible interval using the Beta posterior.
@@ -193,8 +193,8 @@ def calculate_interval(
 def calculate_hdi(
     s: int,
     n: int,
-    prior_alpha: int = 1,
-    prior_beta: int = 1,
+    prior_alpha: float = 1,
+    prior_beta: float = 1,
     confidence_level: float = 0.95,
     n_samples: int = 100_000,
 ) -> tuple[float, float]:
