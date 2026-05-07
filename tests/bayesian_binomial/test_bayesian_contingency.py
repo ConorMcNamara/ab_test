@@ -8,6 +8,25 @@ from polars.testing import assert_frame_equal
 
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 
+_pyspark_available = False
+try:
+    from pyspark.sql import SparkSession as _SparkSession  # noqa: F401
+
+    _pyspark_available = True
+except Exception:
+    pass
+
+
+@pytest.fixture(scope="session")
+def spark_session():
+    if not _pyspark_available:
+        pytest.skip("pyspark not available or incompatible with current Python version")
+    from pyspark.sql import SparkSession
+
+    spark = SparkSession.builder.master("local").appName("ab_test_tests").getOrCreate()
+    yield spark
+    spark.stop()
+
 
 class TestBayesianContingencyTable:
     @pytest.mark.parametrize(
@@ -283,6 +302,128 @@ class TestBayesianContingencyTable:
             assert expected["ci_upper"] == pytest.approx(bct.incremental_results["ci_upper"], abs=1e-02)
         assert expected["expected_loss"] == pytest.approx(bct.incremental_results["expected_loss"], abs=1e-03)
         assert expected["prob_rope"] == pytest.approx(bct.incremental_results["prob_rope"], abs=1e-02)
+
+
+class TestBayesianContingencyTableModin:
+    @pytest.mark.parametrize(
+        "include_total, expected",
+        [
+            (
+                False,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test"],
+                        "successes": [100, 110],
+                        "trials": [1_000, 1_000],
+                        "alpha": [1, 1],
+                        "beta": [1, 1],
+                    }
+                ),
+            ),
+            (
+                True,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test", "Total"],
+                        "successes": [100, 110, 210],
+                        "trials": [1_000, 1_000, 2_000],
+                        "alpha": [1, 1, np.nan],
+                        "beta": [1, 1, np.nan],
+                    }
+                ),
+            ),
+        ],
+    )
+    def test_contingency_to_df_modin(self, include_total, expected):
+        mpd = pytest.importorskip("modin.pandas")
+        ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
+        ct.add("Holdout", 100, 1_000, 1, 1)
+        ct.add("Test", 110, 1_000, 1, 1)
+        ct_df = ct.to_df(method="modin", include_total=include_total)
+        assert isinstance(ct_df, mpd.DataFrame)
+        pd.testing.assert_frame_equal(ct_df.to_pandas(), expected)
+
+
+@pytest.mark.skipif(not _pyspark_available, reason="pyspark not available or incompatible with current Python version")
+class TestBayesianContingencyTablePySpark:
+    @pytest.mark.parametrize(
+        "include_total, expected",
+        [
+            (
+                False,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test"],
+                        "successes": [100, 110],
+                        "trials": [1_000, 1_000],
+                        "alpha": [1.0, 1.0],
+                        "beta": [1.0, 1.0],
+                    }
+                ),
+            ),
+            (
+                True,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test", "Total"],
+                        "successes": [100, 110, 210],
+                        "trials": [1_000, 1_000, 2_000],
+                        "alpha": [1.0, 1.0, np.nan],
+                        "beta": [1.0, 1.0, np.nan],
+                    }
+                ),
+            ),
+        ],
+    )
+    def test_contingency_to_df_pyspark(self, spark_session, include_total, expected):
+        from pyspark.sql import DataFrame as SparkDataFrame
+
+        ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
+        ct.add("Holdout", 100, 1_000, 1, 1)
+        ct.add("Test", 110, 1_000, 1, 1)
+        ct_df = ct.to_df(method="pyspark", include_total=include_total, spark_session=spark_session)
+        assert isinstance(ct_df, SparkDataFrame)
+        pd.testing.assert_frame_equal(ct_df.toPandas(), expected, check_dtype=False)
+
+
+class TestBayesianContingencyTableNarwhals:
+    @pytest.mark.parametrize(
+        "include_total, expected",
+        [
+            (
+                False,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test"],
+                        "successes": [100, 110],
+                        "trials": [1_000, 1_000],
+                        "alpha": [1, 1],
+                        "beta": [1, 1],
+                    }
+                ),
+            ),
+            (
+                True,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test", "Total"],
+                        "successes": [100, 110, 210],
+                        "trials": [1_000, 1_000, 2_000],
+                        "alpha": [1, 1, np.nan],
+                        "beta": [1, 1, np.nan],
+                    }
+                ),
+            ),
+        ],
+    )
+    def test_contingency_to_df_narwhals(self, include_total, expected):
+        nw = pytest.importorskip("narwhals")
+        ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
+        ct.add("Holdout", 100, 1_000, 1, 1)
+        ct.add("Test", 110, 1_000, 1, 1)
+        ct_df = ct.to_df(method="narwhals", include_total=include_total)
+        assert isinstance(ct_df, nw.DataFrame)
+        pd.testing.assert_frame_equal(nw.to_native(ct_df), expected)
 
 
 if __name__ == "__main__":

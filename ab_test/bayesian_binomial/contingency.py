@@ -497,7 +497,7 @@ class BayesianContingencyTable:
             raise TypeError(f"No support for converting {value} to string")
         return str_value
 
-    def plot_individually(self, confidence_level: float = 0.95, n_samples: int = 100_000) -> go.Figure:
+    def plot_pdf(self, confidence_level: float = 0.95, n_samples: int = 100_000) -> go.Figure:
         """Plot the posterior Beta distributions for each variant as an interactive figure.
 
         Renders overlapping PDF curves for both variants, annotates each with its
