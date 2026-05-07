@@ -1,7 +1,14 @@
 import numpy as np
 import pytest
 
-from ab_test.bayesian_binomial.power_calculations import bayes_minimum_sample_size, bayes_power_lift, bayes_power_loss
+from ab_test.bayesian_binomial.power_calculations import (
+    bayes_minimum_detectable_lift,
+    bayes_minimum_detectable_lift_loss,
+    bayes_minimum_sample_size,
+    bayes_minimum_sample_size_loss,
+    bayes_power_lift,
+    bayes_power_loss,
+)
 
 
 class TestBayesPowerLift:
@@ -187,6 +194,191 @@ class TestBayesPowerLoss:
                 alphas=[1.0, 1.0],
                 betas=[1.0, 1.0],
                 baseline=0.10,
+            )
+
+
+class TestBayesMinimumSampleSizeLoss:
+    @staticmethod
+    def test_returns_plausible_n_via_lift():
+        # baseline=10%, 20% relative lift, loss_threshold=0.001 → true minimum is
+        # ~1_600 per group for 80% power; allow a generous range for MC variance
+        np.random.seed(0)
+        n = bayes_minimum_sample_size_loss(
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            alt_lift=0.20,
+            lift="relative",
+            target_power=0.80,
+            loss_threshold=0.001,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        assert 1_000 <= n <= 2_500
+
+    @staticmethod
+    def test_returns_plausible_n_via_alt_rate():
+        # alt_rate=0.12 is equivalent to baseline=0.10 + 20% relative lift
+        np.random.seed(0)
+        n = bayes_minimum_sample_size_loss(
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            alt_rate=0.12,
+            target_power=0.80,
+            loss_threshold=0.001,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        assert 1_000 <= n <= 2_500
+
+    @staticmethod
+    def test_larger_lift_requires_fewer_samples():
+        np.random.seed(0)
+        n_small_lift = bayes_minimum_sample_size_loss(
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            alt_lift=0.20,
+            target_power=0.80,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        np.random.seed(0)
+        n_large_lift = bayes_minimum_sample_size_loss(
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            alt_lift=0.40,
+            target_power=0.80,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        assert n_large_lift < n_small_lift
+
+    @staticmethod
+    def test_raises_when_no_alternative_provided():
+        with pytest.raises(ValueError, match="alt_lift or alt_rate"):
+            bayes_minimum_sample_size_loss(
+                alphas=[1.0, 1.0],
+                betas=[1.0, 1.0],
+                baseline=0.10,
+            )
+
+
+class TestBayesMinimumDetectableLift:
+    @staticmethod
+    def test_returns_plausible_lift():
+        # baseline=10%, n=3_000 per group → MDL should be ~20% relative lift
+        # for 80% power at 95% confidence (mirror of TestBayesPowerLift reference)
+        np.random.seed(0)
+        mdl = bayes_minimum_detectable_lift(
+            group_size=3_000,
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            lift="relative",
+            target_power=0.80,
+            confidence_level=0.95,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        assert 0.12 <= mdl <= 0.30
+
+    @staticmethod
+    def test_larger_group_requires_smaller_lift():
+        np.random.seed(0)
+        mdl_small = bayes_minimum_detectable_lift(
+            group_size=1_000,
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            target_power=0.80,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        np.random.seed(0)
+        mdl_large = bayes_minimum_detectable_lift(
+            group_size=5_000,
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            target_power=0.80,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        assert mdl_large < mdl_small
+
+    @staticmethod
+    def test_raises_when_max_lift_too_small():
+        with pytest.raises(ValueError, match="lift of"):
+            bayes_minimum_detectable_lift(
+                group_size=100,
+                alphas=[1.0, 1.0],
+                betas=[1.0, 1.0],
+                baseline=0.10,
+                target_power=0.80,
+                max_lift=0.001,
+                n_samples=1_000,
+                mc_samples=100,
+            )
+
+
+class TestBayesMinimumDetectableLiftLoss:
+    @staticmethod
+    def test_returns_plausible_lift():
+        # baseline=10%, n=1_600 per group → MDL should be ~20% relative lift
+        # for 80% power at loss_threshold=0.001 (mirror of TestBayesPowerLoss reference)
+        np.random.seed(0)
+        mdl = bayes_minimum_detectable_lift_loss(
+            group_size=1_600,
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            lift="relative",
+            target_power=0.80,
+            loss_threshold=0.001,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        assert 0.12 <= mdl <= 0.30
+
+    @staticmethod
+    def test_larger_group_requires_smaller_lift():
+        np.random.seed(0)
+        mdl_small = bayes_minimum_detectable_lift_loss(
+            group_size=500,
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            target_power=0.80,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        np.random.seed(0)
+        mdl_large = bayes_minimum_detectable_lift_loss(
+            group_size=3_000,
+            alphas=[1.0, 1.0],
+            betas=[1.0, 1.0],
+            baseline=0.10,
+            target_power=0.80,
+            n_samples=5_000,
+            mc_samples=300,
+        )
+        assert mdl_large < mdl_small
+
+    @staticmethod
+    def test_raises_when_max_lift_too_small():
+        with pytest.raises(ValueError, match="lift of"):
+            bayes_minimum_detectable_lift_loss(
+                group_size=100,
+                alphas=[1.0, 1.0],
+                betas=[1.0, 1.0],
+                baseline=0.10,
+                target_power=0.80,
+                max_lift=0.001,
+                n_samples=1_000,
+                mc_samples=100,
             )
 
 

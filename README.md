@@ -17,6 +17,7 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 - **Lift types** — Relative, absolute, incremental, ROAS, and revenue lift
 - **`ContingencyTable`** — A chainable class that ties everything together, with DataFrame export, serialization, and plotting
 - **Bayesian inference** — Posterior sampling, P(B > A), expected loss, ROPE analysis, and lift probability thresholds
+- **Bayesian power & sample size** — Power calculations, minimum sample size, and minimum detectable lift via P(B > A) or expected loss criterion
 
 ## Requirements
 
@@ -111,6 +112,65 @@ lb, ub = confidence_interval(
     method="binary_search",
     alpha=0.05,
 )
+```
+
+### Bayesian power and sample size
+
+```python
+from ab_test.bayesian_binomial.power_calculations import (
+    bayes_power_lift,
+    bayes_power_loss,
+    bayes_minimum_sample_size,
+    bayes_minimum_sample_size_loss,
+    bayes_minimum_detectable_lift,
+    bayes_minimum_detectable_lift_loss,
+)
+
+# Power for a given design — P(B > A) criterion
+power = bayes_power_lift(
+    group_sizes=[3_000, 3_000],
+    alphas=[1.0, 1.0],
+    betas=[1.0, 1.0],
+    baseline=0.10,
+    alt_lift=0.20,
+    lift="relative",
+    confidence_level=0.95,
+)
+print(f"Power: {power:.1%}")  # → ~80%
+
+# Power — expected loss criterion
+power = bayes_power_loss(
+    group_sizes=[1_600, 1_600],
+    alphas=[1.0, 1.0],
+    betas=[1.0, 1.0],
+    baseline=0.10,
+    alt_lift=0.20,
+    lift="relative",
+    loss_threshold=0.001,
+)
+print(f"Power: {power:.1%}")  # → ~80%
+
+# Minimum per-group sample size to detect a 20% relative lift at 80% power
+n = bayes_minimum_sample_size(
+    alphas=[1.0, 1.0], betas=[1.0, 1.0], baseline=0.10, alt_lift=0.20
+)
+print(f"Required n (lift): {n:,}")  # → ~3,000
+
+n = bayes_minimum_sample_size_loss(
+    alphas=[1.0, 1.0], betas=[1.0, 1.0], baseline=0.10, alt_lift=0.20
+)
+print(f"Required n (loss): {n:,}")  # → ~1,600
+
+# Minimum detectable lift for a fixed group size
+mdl = bayes_minimum_detectable_lift(
+    group_size=3_000, alphas=[1.0, 1.0], betas=[1.0, 1.0], baseline=0.10
+)
+print(f"MDL (lift): {mdl:.1%}")  # → ~20%
+
+mdl = bayes_minimum_detectable_lift_loss(
+    group_size=1_600, alphas=[1.0, 1.0], betas=[1.0, 1.0], baseline=0.10
+)
+print(f"MDL (loss): {mdl:.1%}")  # → ~20%
 ```
 
 ### Bayesian analysis
@@ -240,6 +300,19 @@ calculate_rope(sample_a, sample_b, lift="roas", low=-1, high=1, trials=(1_000, 1
 | `.serialize()` / `.deserialize(serial)` | JSON-compatible dict round-trip |
 
 Constructor: `BayesianContingencyTable(name, metric_name, spend=None, msrp=None)` — `spend` and `msrp` are required for `lift="roas"` and `lift="revenue"` respectively.
+
+### Bayesian power & sample size (`ab_test.bayesian_binomial.power_calculations`)
+
+| Function | Criterion | Description |
+|---|---|---|
+| `bayes_power_lift(group_sizes, alphas, betas, baseline, ...)` | P(B > A) | Estimated power given group sizes and a confidence level threshold |
+| `bayes_power_loss(group_sizes, alphas, betas, baseline, ...)` | Expected loss | Estimated power given group sizes and a loss threshold |
+| `bayes_minimum_sample_size(alphas, betas, baseline, ...)` | P(B > A) | Minimum per-group n to achieve a target power |
+| `bayes_minimum_sample_size_loss(alphas, betas, baseline, ...)` | Expected loss | Minimum per-group n to achieve a target power |
+| `bayes_minimum_detectable_lift(group_size, alphas, betas, baseline, ...)` | P(B > A) | Minimum lift detectable at a target power for a fixed group size |
+| `bayes_minimum_detectable_lift_loss(group_size, alphas, betas, baseline, ...)` | Expected loss | Minimum lift detectable at a target power for a fixed group size |
+
+All functions accept `alt_lift` + `lift` (`"relative"` or `"absolute"`) or `alt_rate` directly (power functions only). Sample size and MDL functions use a two-phase doubling + binary search.
 
 ### Bayesian stats (`ab_test.bayesian_binomial`)
 
