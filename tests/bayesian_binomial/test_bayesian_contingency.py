@@ -124,6 +124,82 @@ class TestBayesianContingencyTable:
     @pytest.mark.parametrize(
         "include_total, expected",
         [
+            (
+                    False,
+                    pd.DataFrame(
+                        {
+                            "cell_name": ["Holdout", "Test"],
+                            "successes": [100, 110],
+                            "trials": [1_000, 1_000],
+                            "alpha": [1, 1],
+                            "beta": [1, 1],
+                        }
+                    ),
+            ),
+            (
+                    True,
+                    pd.DataFrame(
+                        {
+                            "cell_name": ["Holdout", "Test", "Total"],
+                            "successes": [100, 110, 210],
+                            "trials": [1_000, 1_000, 2_000],
+                            "alpha": [1, 1, np.nan],
+                            "beta": [1, 1, np.nan],
+                        }
+                    ),
+            ),
+        ],
+    )
+    def test_contingency_to_df_modin(self, include_total, expected):
+        mpd = pytest.importorskip("modin.pandas")
+        ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
+        ct.add("Holdout", 100, 1_000, 1, 1)
+        ct.add("Test", 110, 1_000, 1, 1)
+        ct_df = ct.to_df(method="modin", include_total=include_total)
+        assert isinstance(ct_df, mpd.DataFrame)
+        pd.testing.assert_frame_equal(ct_df.to_pandas(), expected)
+
+    @pytest.mark.parametrize(
+        "include_total, expected",
+        [
+            (
+                    False,
+                    pd.DataFrame(
+                        {
+                            "cell_name": ["Holdout", "Test"],
+                            "successes": [100, 110],
+                            "trials": [1_000, 1_000],
+                            "alpha": [1, 1],
+                            "beta": [1, 1],
+                        }
+                    ),
+            ),
+            (
+                    True,
+                    pd.DataFrame(
+                        {
+                            "cell_name": ["Holdout", "Test", "Total"],
+                            "successes": [100, 110, 210],
+                            "trials": [1_000, 1_000, 2_000],
+                            "alpha": [1, 1, np.nan],
+                            "beta": [1, 1, np.nan],
+                        }
+                    ),
+            ),
+        ],
+    )
+    def test_contingency_to_df_narwhals(self, include_total, expected):
+        nw = pytest.importorskip("narwhals")
+        ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
+        ct.add("Holdout", 100, 1_000, 1, 1)
+        ct.add("Test", 110, 1_000, 1, 1)
+        ct_df = ct.to_df(method="narwhals", include_total=include_total)
+        assert isinstance(ct_df, nw.DataFrame)
+        pd.testing.assert_frame_equal(nw.to_native(ct_df), expected)
+
+    @pytest.mark.parametrize(
+        "include_total, expected",
+        [
             (False, np.array([["Holdout", 100, 1_000, 1, 1], ["Test", 110, 1_000, 1, 1]])),
             (
                 True,
@@ -304,44 +380,26 @@ class TestBayesianContingencyTable:
         assert expected["prob_rope"] == pytest.approx(bct.incremental_results["prob_rope"], abs=1e-02)
 
 
-class TestBayesianContingencyTableModin:
-    @pytest.mark.parametrize(
-        "include_total, expected",
-        [
-            (
-                False,
-                pd.DataFrame(
-                    {
-                        "cell_name": ["Holdout", "Test"],
-                        "successes": [100, 110],
-                        "trials": [1_000, 1_000],
-                        "alpha": [1, 1],
-                        "beta": [1, 1],
-                    }
-                ),
-            ),
-            (
-                True,
-                pd.DataFrame(
-                    {
-                        "cell_name": ["Holdout", "Test", "Total"],
-                        "successes": [100, 110, 210],
-                        "trials": [1_000, 1_000, 2_000],
-                        "alpha": [1, 1, np.nan],
-                        "beta": [1, 1, np.nan],
-                    }
-                ),
-            ),
-        ],
-    )
-    def test_contingency_to_df_modin(self, include_total, expected):
-        mpd = pytest.importorskip("modin.pandas")
+    @staticmethod
+    def test_contingency_analyze_individual_results():
         ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000, 1, 1)
         ct.add("Test", 110, 1_000, 1, 1)
-        ct_df = ct.to_df(method="modin", include_total=include_total)
-        assert isinstance(ct_df, mpd.DataFrame)
-        pd.testing.assert_frame_equal(ct_df.to_pandas(), expected)
+        expected = "\n".join(
+            [
+                "+-------------+-------------+----------+---------------+--------------+------------------+----------------------+----------------------+",  # noqa: E501
+                "| Cell Name   |   Successes |   Trials |   Prior Alpha |   Prior Beta | Posterior Mean   | Cred. Int. Lower**   | Cred. Int. Upper**   |",  # noqa: E501
+                "+=============+=============+==========+===============+==============+==================+======================+======================+",  # noqa: E501
+                "| Holdout     |         100 |     1000 |             1 |            1 | 10.08%           | 8.29%                | 12.02%               |",  # noqa: E501
+                "+-------------+-------------+----------+---------------+--------------+------------------+----------------------+----------------------+",  # noqa: E501
+                "| Test        |         110 |     1000 |             1 |            1 | 11.08%           | 9.21%                | 13.09%               |",  # noqa: E501
+                "+-------------+-------------+----------+---------------+--------------+------------------+----------------------+----------------------+",  # noqa: E501
+                "| Total       |         210 |     2000 |             2 |            2 | 10.58%           | 9.27%                | 11.96%               |",  # noqa: E501
+                "+-------------+-------------+----------+---------------+--------------+------------------+----------------------+----------------------+",  # noqa: E501
+                "** 95% Credible Interval",
+            ]
+        )
+        assert expected == ct.analyze_individually()
 
 
 @pytest.mark.skipif(not _pyspark_available, reason="pyspark not available or incompatible with current Python version")
@@ -384,46 +442,6 @@ class TestBayesianContingencyTablePySpark:
         ct_df = ct.to_df(method="pyspark", include_total=include_total, spark_session=spark_session)
         assert isinstance(ct_df, SparkDataFrame)
         pd.testing.assert_frame_equal(ct_df.toPandas(), expected, check_dtype=False)
-
-
-class TestBayesianContingencyTableNarwhals:
-    @pytest.mark.parametrize(
-        "include_total, expected",
-        [
-            (
-                False,
-                pd.DataFrame(
-                    {
-                        "cell_name": ["Holdout", "Test"],
-                        "successes": [100, 110],
-                        "trials": [1_000, 1_000],
-                        "alpha": [1, 1],
-                        "beta": [1, 1],
-                    }
-                ),
-            ),
-            (
-                True,
-                pd.DataFrame(
-                    {
-                        "cell_name": ["Holdout", "Test", "Total"],
-                        "successes": [100, 110, 210],
-                        "trials": [1_000, 1_000, 2_000],
-                        "alpha": [1, 1, np.nan],
-                        "beta": [1, 1, np.nan],
-                    }
-                ),
-            ),
-        ],
-    )
-    def test_contingency_to_df_narwhals(self, include_total, expected):
-        nw = pytest.importorskip("narwhals")
-        ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
-        ct.add("Holdout", 100, 1_000, 1, 1)
-        ct.add("Test", 110, 1_000, 1, 1)
-        ct_df = ct.to_df(method="narwhals", include_total=include_total)
-        assert isinstance(ct_df, nw.DataFrame)
-        pd.testing.assert_frame_equal(nw.to_native(ct_df), expected)
 
 
 if __name__ == "__main__":

@@ -459,8 +459,10 @@ class ContingencyTable:
         -----
         This function is intended to be run _after_ either .analyze() or .analyze_individually()
         """
-        plot_color: list[str] | dict[str, str]
-        if isinstance(color, str):
+        plot_color: list[str] | dict[str, str] | None
+        if color is None:
+            plot_color = None
+        elif isinstance(color, str):
             if color == "ibm":
                 plot_color = ["#648fff", "#785ef0", "#dc267f", "#fe6100", "#ffb000"]
             elif color in ["wong", "ito"]:
@@ -492,52 +494,51 @@ class ContingencyTable:
         elif isinstance(color, dict):
             plot_color = color
         else:
-            raise TypeError("Color can be a string, list or dict")
+            raise TypeError("Color can be a string, list, dict, or None")
         fig = go.Figure()  # type: ignore[attr-defined]
         if is_individual:
             for index, name in enumerate(self.names):
                 ind_results = self.individual_results[name]
+                c = (plot_color[index] if isinstance(plot_color, list) else plot_color[name]) if plot_color is not None else None
+                marker: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+                error_x: dict[str, Any] = {
+                    "type": "data",
+                    "symmetric": False,
+                    "array": [ind_results["ci_upper"] - ind_results["lift"]],
+                    "arrayminus": [ind_results["lift"] - ind_results["ci_lower"]],
+                    "visible": True,
+                }
+                if c is not None:
+                    marker["color"] = c
+                    error_x["color"] = c
                 fig.add_trace(
                     go.Scatter(  # type: ignore[attr-defined]
                         x=[ind_results["lift"]],
                         y=[name],
-                        marker={
-                            "color": plot_color[index] if isinstance(plot_color, list) else plot_color[name],
-                            "symbol": "diamond",
-                            "size": 12.5,
-                        },
-                        error_x={
-                            "type": "data",
-                            "symmetric": False,
-                            "array": [ind_results["ci_upper"] - ind_results["lift"]],
-                            "arrayminus": [ind_results["lift"] - ind_results["ci_lower"]],
-                            "visible": True,
-                            "color": plot_color[index] if isinstance(plot_color, list) else plot_color[name],
-                        },
+                        marker=marker,
+                        error_x=error_x,
                         name=name,
                     )
                 )
+            total_results = self.individual_results["Total"]
+            c_total = (plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"]) if plot_color is not None else None
+            marker_total: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+            error_x_total: dict[str, Any] = {
+                "type": "data",
+                "symmetric": False,
+                "array": [total_results["ci_upper"] - total_results["lift"]],
+                "arrayminus": [total_results["lift"] - total_results["ci_lower"]],
+                "visible": True,
+            }
+            if c_total is not None:
+                marker_total["color"] = c_total
+                error_x_total["color"] = c_total
             fig.add_trace(
                 go.Scatter(  # type: ignore[attr-defined]
-                    x=[self.individual_results["Total"]["lift"]],
+                    x=[total_results["lift"]],
                     y=["Total"],
-                    marker={
-                        "color": plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"],
-                        "symbol": "diamond",
-                        "size": 12.5,
-                    },
-                    error_x={
-                        "type": "data",
-                        "symmetric": False,
-                        "array": [
-                            self.individual_results["Total"]["ci_upper"] - self.individual_results["Total"]["lift"]
-                        ],
-                        "arrayminus": [
-                            self.individual_results["Total"]["lift"] - self.individual_results["Total"]["ci_lower"]
-                        ],
-                        "visible": True,
-                        "color": plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"],
-                    },
+                    marker=marker_total,
+                    error_x=error_x_total,
                     name="Total",
                 )
             )
@@ -545,23 +546,24 @@ class ContingencyTable:
         else:
             if self.incremental_results is None:
                 raise ValueError("Call .analyze() before plotting incremental results.")
+            c_inc = (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0]) if plot_color is not None else None
+            marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+            error_x_inc: dict[str, Any] = {
+                "type": "data",
+                "symmetric": False,
+                "array": [self.incremental_results["ci_upper"] - self.incremental_results["lift"]],
+                "arrayminus": [self.incremental_results["lift"] - self.incremental_results["ci_lower"]],
+                "visible": True,
+            }
+            if c_inc is not None:
+                marker_inc["color"] = c_inc
+                error_x_inc["color"] = c_inc
             fig.add_trace(
                 go.Scatter(  # type: ignore[attr-defined]
                     x=[self.incremental_results["lift"]],
                     y=["Total"],
-                    marker={
-                        "color": plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0],
-                        "symbol": "diamond",
-                        "size": 12.5,
-                    },
-                    error_x={
-                        "type": "data",
-                        "symmetric": False,
-                        "array": [self.incremental_results["ci_upper"] - self.incremental_results["lift"]],
-                        "arrayminus": [self.incremental_results["lift"] - self.incremental_results["ci_lower"]],
-                        "visible": True,
-                        "color": plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0],
-                    },
+                    marker=marker_inc,
+                    error_x=error_x_inc,
                     name="Total",
                 )
             )

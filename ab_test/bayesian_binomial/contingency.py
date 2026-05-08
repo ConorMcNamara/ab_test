@@ -317,7 +317,7 @@ class BayesianContingencyTable:
                 self.alphas,
                 self.betas,
                 confidence_level,
-                cast(Literal["relative", "absolute"], lift),
+                lift,
                 is_sample,
                 n_samples,
                 cred_int_method,
@@ -362,8 +362,6 @@ class BayesianContingencyTable:
                 pb = math.ceil(pb * self.trials[1])
                 lb = math.ceil(lb * self.trials[1])
                 ub = math.ceil(ub * self.trials[1])
-            print(pb)
-            print(pa)
             test_lift = pb - pa
             if lift == "roas":
                 if self.spend is None:
@@ -451,6 +449,53 @@ class BayesianContingencyTable:
         return_string += "\n*** Region of Practical Equivalence"
         return return_string
 
+    def analyze_individually(
+        self,
+        cred_int_method: Literal["credible", "hdi"] = "credible",
+        confidence_level: float = 0.95,
+    ) -> str:
+        """Analyzes the individual cells using Bayesian credible intervals.
+
+        Parameters
+        ----------
+        cred_int_method : {"credible", "hdi"}
+            Method for calculating individual credible intervals.
+        confidence_level : float
+            Probability mass for the credible interval. Defaults to 0.95.
+
+        Returns
+        -------
+        The results (posterior mean and credible intervals) of each cell in string format.
+
+        Notes
+        -----
+        The Total row uses a pooled Beta prior — Beta(Σα_i, Σβ_i) — which aggregates
+        the individual cell priors. This assumes all observations come from the same
+        underlying process; if cells have meaningfully different true conversion rates,
+        the true aggregate is a mixture of Beta distributions, not a single Beta.
+        """
+        table_list: list[list] = []
+        for name_i, s_i, n_i, alpha_i, beta_i in zip(self.names, self.successes, self.trials, self.alphas, self.betas):
+            success_rate = posterior_mean(s_i, n_i, alpha_i, beta_i)
+            lb, ub = individual_credible_interval(s_i, n_i, confidence_level, alpha_i, beta_i, method=cred_int_method)
+            name_list = [name_i, s_i, n_i, alpha_i, beta_i] + self._convert_to_tabulate_str([success_rate, lb, ub], "absolute")
+            self.individual_results[name_i] = {"lift": success_rate, "ci_lower": lb, "ci_upper": ub}
+            table_list.append(name_list)
+        total_success, total_trials = int(np.sum(self.successes)), int(np.sum(self.trials))
+        total_alpha, total_beta = float(np.sum(self.alphas)), float(np.sum(self.betas))
+        total_success_rate = posterior_mean(total_success, total_trials, total_alpha, total_beta)
+        lb_total, ub_total = individual_credible_interval(total_success, total_trials, confidence_level, total_alpha, total_beta, method=cred_int_method)
+        total_list = ["Total", total_success, total_trials, total_alpha, total_beta] + self._convert_to_tabulate_str(
+            [total_success_rate, lb_total, ub_total], "absolute"
+        )
+        self.individual_results["Total"] = {"lift": total_success_rate, "ci_lower": lb_total, "ci_upper": ub_total}
+        table_list.append(total_list)
+        table_headers = ["Cell Name", "Successes", "Trials", "Prior Alpha", "Prior Beta", "Posterior Mean", "Cred. Int. Lower**", "Cred. Int. Upper**"]
+        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
+        return_string += f"\n** {round(confidence_level * 100)}% Credible Interval"
+        return return_string
+
+
     @overload
     @staticmethod
     def _convert_to_tabulate_str(value: float, lift: str) -> str | float: ...
@@ -497,7 +542,161 @@ class BayesianContingencyTable:
             raise TypeError(f"No support for converting {value} to string")
         return str_value
 
-    def plot_pdf(self, confidence_level: float = 0.95, n_samples: int = 100_000) -> go.Figure:
+    def plot(
+        self,
+        is_individual: bool = True,
+        reverse_plot: bool = True,
+        color: str | dict[str, Any] | list[Any] | None = None,
+    ) -> None:
+        """Plots the posterior means and credible intervals as a forest plot.
+
+        Parameters
+        ----------
+        is_individual : bool, default=True
+            Whether we are looking at the individual performance of each cell or
+            the comparative performance between variants.
+        reverse_plot : bool, default=True
+            Whether we are reversing the order of our plot or not.
+        color : str, list, dict, or None, default=None
+            If None, uses Plotly's default color scheme.
+            If a string, one of the colorblind-friendly palette names: ``"ibm"``,
+            ``"wong"``, ``"ito"``, ``"tol"``, ``"tol_bright"``, ``"tol_vibrant"``,
+            ``"tol_muted"``, ``"tol_light"``.
+            If a list, each item corresponds to a color for the relevant group.
+            If a dict, keys are group names and values are colors.
+
+        Notes
+        -----
+        This function is intended to be run after either .analyze() or
+        .analyze_individually().
+        """
+        plot_color: list[str] | dict[str, str] | None
+        if color is None:
+            plot_color = None
+        elif isinstance(color, str):
+            if color == "ibm":
+                plot_color = ["#648fff", "#785ef0", "#dc267f", "#fe6100", "#ffb000"]
+            elif color in ["wong", "ito"]:
+                plot_color = ["#e69f00", "#56b4e9", "#009e73", "#f0e442", "#0072b2", "#d55e00", "#cc79a7"]
+            elif color == "tol":
+                plot_color = ["#332288", "#117733", "#44aa99", "#88ccee", "#ddcc77", "#cc6677", "#aa4499", "#882255"]
+            elif color == "tol_bright":
+                plot_color = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377"]
+            elif color == "tol_vibrant":
+                plot_color = ["#ee7733", "#0077bb", "#33bbee", "#ee3377", "#cc3311", "#009988"]
+            elif color == "tol_muted":
+                plot_color = [
+                    "#cc6677",
+                    "#332288",
+                    "#ddcc77",
+                    "#117733",
+                    "#88ccee",
+                    "#882255",
+                    "#44aa99",
+                    "#999933",
+                    "#aa4499",
+                ]
+            elif color == "tol_light":
+                plot_color = ["#77aadd", "#ee8866", "#eedd88", "#ffaabb", "#99ddff", "#44bb99", "#bbcc33", "#bbcc33"]
+            else:
+                raise ValueError(f"No support for color scheme {color}")
+        elif isinstance(color, list):
+            plot_color = color
+        elif isinstance(color, dict):
+            plot_color = color
+        else:
+            raise TypeError("Color can be a string, list, dict, or None")
+        fig = go.Figure()  # type: ignore[attr-defined]
+        if is_individual:
+            for index, name in enumerate(self.names):
+                ind_results = self.individual_results[name]
+                c = (plot_color[index] if isinstance(plot_color, list) else plot_color[name]) if plot_color is not None else None
+                marker: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+                error_x: dict[str, Any] = {
+                    "type": "data",
+                    "symmetric": False,
+                    "array": [ind_results["ci_upper"] - ind_results["lift"]],
+                    "arrayminus": [ind_results["lift"] - ind_results["ci_lower"]],
+                    "visible": True,
+                }
+                if c is not None:
+                    marker["color"] = c
+                    error_x["color"] = c
+                fig.add_trace(
+                    go.Scatter(  # type: ignore[attr-defined]
+                        x=[ind_results["lift"]],
+                        y=[name],
+                        marker=marker,
+                        error_x=error_x,
+                        name=name,
+                    )
+                )
+            total_results = self.individual_results["Total"]
+            c_total = (plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"]) if plot_color is not None else None
+            marker_total: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+            error_x_total: dict[str, Any] = {
+                "type": "data",
+                "symmetric": False,
+                "array": [total_results["ci_upper"] - total_results["lift"]],
+                "arrayminus": [total_results["lift"] - total_results["ci_lower"]],
+                "visible": True,
+            }
+            if c_total is not None:
+                marker_total["color"] = c_total
+                error_x_total["color"] = c_total
+            fig.add_trace(
+                go.Scatter(  # type: ignore[attr-defined]
+                    x=[total_results["lift"]],
+                    y=["Total"],
+                    marker=marker_total,
+                    error_x=error_x_total,
+                    name="Total",
+                )
+            )
+            fig.update_layout(xaxis_tickformat=",.0%")
+        else:
+            if self.incremental_results is None:
+                raise ValueError("Call .analyze() before plotting incremental results.")
+            c_inc = (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0]) if plot_color is not None else None
+            marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+            error_x_inc: dict[str, Any] = {
+                "type": "data",
+                "symmetric": False,
+                "array": [self.incremental_results["ci_upper"] - self.incremental_results["lift"]],
+                "arrayminus": [self.incremental_results["lift"] - self.incremental_results["ci_lower"]],
+                "visible": True,
+            }
+            if c_inc is not None:
+                marker_inc["color"] = c_inc
+                error_x_inc["color"] = c_inc
+            fig.add_trace(
+                go.Scatter(  # type: ignore[attr-defined]
+                    x=[self.incremental_results["lift"]],
+                    y=["Total"],
+                    marker=marker_inc,
+                    error_x=error_x_inc,
+                    name="Total",
+                )
+            )
+            if self.incremental_results["lift_type"] in ["relative", "absolute"]:
+                fig.update_layout(xaxis_tickformat=",.0%")
+            elif self.incremental_results["lift_type"] in ["revenue", "roas"]:
+                if self.incremental_results["lift_type"] == "revenue":
+                    fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="~s")
+                else:
+                    fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="0.2")
+            else:
+                fig.update_layout(xaxis_tickformat="~s")
+        if reverse_plot:
+            fig.update_layout(yaxis={"autorange": "reversed"})
+        fig.show()  # type: ignore[no-untyped-call]
+
+    def plot_pdf(
+        self,
+        confidence_level: float = 0.95,
+        n_samples: int = 100_000,
+        color: str | dict[str, Any] | list[Any] | None = None,
+    ) -> go.Figure:
         """Plot the posterior Beta distributions for each variant as an interactive figure.
 
         Renders overlapping PDF curves for both variants, annotates each with its
@@ -511,6 +710,13 @@ class BayesianContingencyTable:
         n_samples : int, optional
             Number of posterior samples drawn to estimate the win probability,
             by default 100_000.
+        color : str, list, dict, or None, optional
+            Controls the colors used for each variant. If None, uses Plotly's
+            default color scheme. If a string, one of the colorblind-friendly
+            palette names: ``"ibm"``, ``"wong"``, ``"ito"``, ``"tol"``,
+            ``"tol_bright"``, ``"tol_vibrant"``, ``"tol_muted"``, ``"tol_light"``.
+            If a list, each item corresponds to a variant in order. If a dict,
+            keys are variant names and values are colors.
 
         Returns
         -------
@@ -518,6 +724,44 @@ class BayesianContingencyTable:
             An interactive Plotly figure showing the posterior PDFs, HDI bars,
             and a title containing P(B > A).
         """
+        plot_color: list[str] | dict[str, str]
+        if color is None:
+            plot_color = ["#636EFA", "#EF553B"]
+        elif isinstance(color, str):
+            if color == "ibm":
+                plot_color = ["#648fff", "#785ef0", "#dc267f", "#fe6100", "#ffb000"]
+            elif color in ["wong", "ito"]:
+                plot_color = ["#e69f00", "#56b4e9", "#009e73", "#f0e442", "#0072b2", "#d55e00", "#cc79a7"]
+            elif color == "tol":
+                plot_color = ["#332288", "#117733", "#44aa99", "#88ccee", "#ddcc77", "#cc6677", "#aa4499", "#882255"]
+            elif color == "tol_bright":
+                plot_color = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377"]
+            elif color == "tol_vibrant":
+                plot_color = ["#ee7733", "#0077bb", "#33bbee", "#ee3377", "#cc3311", "#009988"]
+            elif color == "tol_muted":
+                plot_color = [
+                    "#cc6677",
+                    "#332288",
+                    "#ddcc77",
+                    "#117733",
+                    "#88ccee",
+                    "#882255",
+                    "#44aa99",
+                    "#999933",
+                    "#aa4499",
+                ]
+            elif color == "tol_light":
+                plot_color = ["#77aadd", "#ee8866", "#eedd88", "#ffaabb", "#99ddff", "#44bb99", "#bbcc33", "#bbcc33"]
+            else:
+                raise ValueError(f"No support for color scheme {color}")
+        elif isinstance(color, list):
+            plot_color = color
+        elif isinstance(color, dict):
+            plot_color = color
+        else:
+            raise TypeError("Color can be a string, list, dict, or None")
+        color_a = plot_color[0] if isinstance(plot_color, list) else plot_color[self.names[0]]
+        color_b = plot_color[1] if isinstance(plot_color, list) else plot_color[self.names[1]]
         # 1. Define X-axis range (0 to 1, but zoomed to relevant area)
         x_min = max(
             0, min(beta.ppf(0.001, self.alphas[0], self.betas[0]), beta.ppf(0.001, self.alphas[1], self.betas[1])) * 0.8
@@ -549,13 +793,13 @@ class BayesianContingencyTable:
         # Trace A (Control)
         fig.add_trace(
             go.Scatter(
-                x=x, y=pdf_a, name=f"{self.names[0]}", fill="tozeroy", line=dict(color="#636EFA", width=2), opacity=0.4
+                x=x, y=pdf_a, name=f"{self.names[0]}", fill="tozeroy", line=dict(color=color_a, width=2), opacity=0.4
             )
         )
         # Trace B (Variant)
         fig.add_trace(
             go.Scatter(
-                x=x, y=pdf_b, name=f"{self.names[1]}", fill="tozeroy", line=dict(color="#EF553B", width=2), opacity=0.4
+                x=x, y=pdf_b, name=f"{self.names[1]}", fill="tozeroy", line=dict(color=color_b, width=2), opacity=0.4
             )
         )
 
@@ -565,8 +809,8 @@ class BayesianContingencyTable:
         y_pos_a = -max_y * 0.05
         y_pos_b = -max_y * 0.10
 
-        for hdi, color, y_pos, label in [(hdi_a, "#636EFA", y_pos_a, "A"), (hdi_b, "#EF553B", y_pos_b, "B")]:
-            fig.add_shape(type="line", x0=hdi[0], y0=y_pos, x1=hdi[1], y1=y_pos, line=dict(color=color, width=5))
+        for hdi, hdi_color, y_pos in [(hdi_a, color_a, y_pos_a), (hdi_b, color_b, y_pos_b)]:
+            fig.add_shape(type="line", x0=hdi[0], y0=y_pos, x1=hdi[1], y1=y_pos, line=dict(color=hdi_color, width=5))
         fig.update_layout(
             title=f"Bayesian Binary Test: P({self.names[1]} > {self.names[0]}) = {p_b_better:.1%}",
             xaxis_title="Conversion Rate (%)",

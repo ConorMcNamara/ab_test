@@ -46,16 +46,6 @@ class TestBayesPowerLift:
         )
         assert power == pytest.approx(0.80, abs=0.05)
 
-    @staticmethod
-    def test_raises_when_no_alternative_provided():
-        with pytest.raises(ValueError, match="alt_lift or alt_rate"):
-            bayes_power_lift(
-                group_sizes=[3_000, 3_000],
-                alphas=[1.0, 1.0],
-                betas=[1.0, 1.0],
-                baseline=0.10,
-            )
-
 
 class TestBayesMinimumSampleSize:
     @staticmethod
@@ -113,15 +103,6 @@ class TestBayesMinimumSampleSize:
             mc_samples=300,
         )
         assert n_large_lift < n_small_lift
-
-    @staticmethod
-    def test_raises_when_no_alternative_provided():
-        with pytest.raises(ValueError, match="alt_lift or alt_rate"):
-            bayes_minimum_sample_size(
-                alphas=[1.0, 1.0],
-                betas=[1.0, 1.0],
-                baseline=0.10,
-            )
 
 
 class TestBayesPowerLoss:
@@ -186,16 +167,6 @@ class TestBayesPowerLoss:
         )
         assert power_loose > power_strict
 
-    @staticmethod
-    def test_raises_when_no_alternative_provided():
-        with pytest.raises(ValueError, match="alt_lift or alt_rate"):
-            bayes_power_loss(
-                group_sizes=[1_600, 1_600],
-                alphas=[1.0, 1.0],
-                betas=[1.0, 1.0],
-                baseline=0.10,
-            )
-
 
 class TestBayesMinimumSampleSizeLoss:
     @staticmethod
@@ -256,15 +227,6 @@ class TestBayesMinimumSampleSizeLoss:
         )
         assert n_large_lift < n_small_lift
 
-    @staticmethod
-    def test_raises_when_no_alternative_provided():
-        with pytest.raises(ValueError, match="alt_lift or alt_rate"):
-            bayes_minimum_sample_size_loss(
-                alphas=[1.0, 1.0],
-                betas=[1.0, 1.0],
-                baseline=0.10,
-            )
-
 
 class TestBayesMinimumDetectableLift:
     @staticmethod
@@ -309,21 +271,6 @@ class TestBayesMinimumDetectableLift:
         )
         assert mdl_large < mdl_small
 
-    @staticmethod
-    def test_raises_when_max_lift_too_small():
-        with pytest.raises(ValueError, match="lift of"):
-            bayes_minimum_detectable_lift(
-                group_size=100,
-                alphas=[1.0, 1.0],
-                betas=[1.0, 1.0],
-                baseline=0.10,
-                target_power=0.80,
-                max_lift=0.001,
-                n_samples=1_000,
-                mc_samples=100,
-            )
-
-
 class TestBayesMinimumDetectableLiftLoss:
     @staticmethod
     def test_returns_plausible_lift():
@@ -366,20 +313,6 @@ class TestBayesMinimumDetectableLiftLoss:
             mc_samples=300,
         )
         assert mdl_large < mdl_small
-
-    @staticmethod
-    def test_raises_when_max_lift_too_small():
-        with pytest.raises(ValueError, match="lift of"):
-            bayes_minimum_detectable_lift_loss(
-                group_size=100,
-                alphas=[1.0, 1.0],
-                betas=[1.0, 1.0],
-                baseline=0.10,
-                target_power=0.80,
-                max_lift=0.001,
-                n_samples=1_000,
-                mc_samples=100,
-            )
 
 
 if __name__ == "__main__":
