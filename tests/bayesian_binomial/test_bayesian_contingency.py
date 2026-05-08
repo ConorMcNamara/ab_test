@@ -125,28 +125,28 @@ class TestBayesianContingencyTable:
         "include_total, expected",
         [
             (
-                    False,
-                    pd.DataFrame(
-                        {
-                            "cell_name": ["Holdout", "Test"],
-                            "successes": [100, 110],
-                            "trials": [1_000, 1_000],
-                            "alpha": [1, 1],
-                            "beta": [1, 1],
-                        }
-                    ),
+                False,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test"],
+                        "successes": [100, 110],
+                        "trials": [1_000, 1_000],
+                        "alpha": [1, 1],
+                        "beta": [1, 1],
+                    }
+                ),
             ),
             (
-                    True,
-                    pd.DataFrame(
-                        {
-                            "cell_name": ["Holdout", "Test", "Total"],
-                            "successes": [100, 110, 210],
-                            "trials": [1_000, 1_000, 2_000],
-                            "alpha": [1, 1, np.nan],
-                            "beta": [1, 1, np.nan],
-                        }
-                    ),
+                True,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test", "Total"],
+                        "successes": [100, 110, 210],
+                        "trials": [1_000, 1_000, 2_000],
+                        "alpha": [1, 1, np.nan],
+                        "beta": [1, 1, np.nan],
+                    }
+                ),
             ),
         ],
     )
@@ -163,28 +163,28 @@ class TestBayesianContingencyTable:
         "include_total, expected",
         [
             (
-                    False,
-                    pd.DataFrame(
-                        {
-                            "cell_name": ["Holdout", "Test"],
-                            "successes": [100, 110],
-                            "trials": [1_000, 1_000],
-                            "alpha": [1, 1],
-                            "beta": [1, 1],
-                        }
-                    ),
+                False,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test"],
+                        "successes": [100, 110],
+                        "trials": [1_000, 1_000],
+                        "alpha": [1, 1],
+                        "beta": [1, 1],
+                    }
+                ),
             ),
             (
-                    True,
-                    pd.DataFrame(
-                        {
-                            "cell_name": ["Holdout", "Test", "Total"],
-                            "successes": [100, 110, 210],
-                            "trials": [1_000, 1_000, 2_000],
-                            "alpha": [1, 1, np.nan],
-                            "beta": [1, 1, np.nan],
-                        }
-                    ),
+                True,
+                pd.DataFrame(
+                    {
+                        "cell_name": ["Holdout", "Test", "Total"],
+                        "successes": [100, 110, 210],
+                        "trials": [1_000, 1_000, 2_000],
+                        "alpha": [1, 1, np.nan],
+                        "beta": [1, 1, np.nan],
+                    }
+                ),
             ),
         ],
     )
@@ -378,7 +378,6 @@ class TestBayesianContingencyTable:
             assert expected["ci_upper"] == pytest.approx(bct.incremental_results["ci_upper"], abs=1e-02)
         assert expected["expected_loss"] == pytest.approx(bct.incremental_results["expected_loss"], abs=1e-03)
         assert expected["prob_rope"] == pytest.approx(bct.incremental_results["prob_rope"], abs=1e-02)
-
 
     @staticmethod
     def test_contingency_analyze_individual_results():

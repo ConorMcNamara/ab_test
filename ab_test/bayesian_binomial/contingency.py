@@ -317,7 +317,7 @@ class BayesianContingencyTable:
                 self.alphas,
                 self.betas,
                 confidence_level,
-                lift,
+                cast(Literal["relative", "absolute"], lift),
                 is_sample,
                 n_samples,
                 cred_int_method,
@@ -478,23 +478,35 @@ class BayesianContingencyTable:
         for name_i, s_i, n_i, alpha_i, beta_i in zip(self.names, self.successes, self.trials, self.alphas, self.betas):
             success_rate = posterior_mean(s_i, n_i, alpha_i, beta_i)
             lb, ub = individual_credible_interval(s_i, n_i, confidence_level, alpha_i, beta_i, method=cred_int_method)
-            name_list = [name_i, s_i, n_i, alpha_i, beta_i] + self._convert_to_tabulate_str([success_rate, lb, ub], "absolute")
+            name_list = [name_i, s_i, n_i, alpha_i, beta_i] + self._convert_to_tabulate_str(
+                [success_rate, lb, ub], "absolute"
+            )
             self.individual_results[name_i] = {"lift": success_rate, "ci_lower": lb, "ci_upper": ub}
             table_list.append(name_list)
         total_success, total_trials = int(np.sum(self.successes)), int(np.sum(self.trials))
         total_alpha, total_beta = float(np.sum(self.alphas)), float(np.sum(self.betas))
         total_success_rate = posterior_mean(total_success, total_trials, total_alpha, total_beta)
-        lb_total, ub_total = individual_credible_interval(total_success, total_trials, confidence_level, total_alpha, total_beta, method=cred_int_method)
+        lb_total, ub_total = individual_credible_interval(
+            total_success, total_trials, confidence_level, total_alpha, total_beta, method=cred_int_method
+        )
         total_list = ["Total", total_success, total_trials, total_alpha, total_beta] + self._convert_to_tabulate_str(
             [total_success_rate, lb_total, ub_total], "absolute"
         )
         self.individual_results["Total"] = {"lift": total_success_rate, "ci_lower": lb_total, "ci_upper": ub_total}
         table_list.append(total_list)
-        table_headers = ["Cell Name", "Successes", "Trials", "Prior Alpha", "Prior Beta", "Posterior Mean", "Cred. Int. Lower**", "Cred. Int. Upper**"]
+        table_headers = [
+            "Cell Name",
+            "Successes",
+            "Trials",
+            "Prior Alpha",
+            "Prior Beta",
+            "Posterior Mean",
+            "Cred. Int. Lower**",
+            "Cred. Int. Upper**",
+        ]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
         return_string += f"\n** {round(confidence_level * 100)}% Credible Interval"
         return return_string
-
 
     @overload
     @staticmethod
@@ -610,7 +622,11 @@ class BayesianContingencyTable:
         if is_individual:
             for index, name in enumerate(self.names):
                 ind_results = self.individual_results[name]
-                c = (plot_color[index] if isinstance(plot_color, list) else plot_color[name]) if plot_color is not None else None
+                c = (
+                    (plot_color[index] if isinstance(plot_color, list) else plot_color[name])
+                    if plot_color is not None
+                    else None
+                )
                 marker: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
                 error_x: dict[str, Any] = {
                     "type": "data",
@@ -632,7 +648,11 @@ class BayesianContingencyTable:
                     )
                 )
             total_results = self.individual_results["Total"]
-            c_total = (plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"]) if plot_color is not None else None
+            c_total = (
+                (plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"])
+                if plot_color is not None
+                else None
+            )
             marker_total: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
             error_x_total: dict[str, Any] = {
                 "type": "data",
@@ -657,7 +677,11 @@ class BayesianContingencyTable:
         else:
             if self.incremental_results is None:
                 raise ValueError("Call .analyze() before plotting incremental results.")
-            c_inc = (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0]) if plot_color is not None else None
+            c_inc = (
+                (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0])
+                if plot_color is not None
+                else None
+            )
             marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
             error_x_inc: dict[str, Any] = {
                 "type": "data",

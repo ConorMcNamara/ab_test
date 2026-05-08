@@ -499,7 +499,11 @@ class ContingencyTable:
         if is_individual:
             for index, name in enumerate(self.names):
                 ind_results = self.individual_results[name]
-                c = (plot_color[index] if isinstance(plot_color, list) else plot_color[name]) if plot_color is not None else None
+                c = (
+                    (plot_color[index] if isinstance(plot_color, list) else plot_color[name])
+                    if plot_color is not None
+                    else None
+                )
                 marker: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
                 error_x: dict[str, Any] = {
                     "type": "data",
@@ -521,7 +525,11 @@ class ContingencyTable:
                     )
                 )
             total_results = self.individual_results["Total"]
-            c_total = (plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"]) if plot_color is not None else None
+            c_total = (
+                (plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"])
+                if plot_color is not None
+                else None
+            )
             marker_total: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
             error_x_total: dict[str, Any] = {
                 "type": "data",
@@ -546,7 +554,11 @@ class ContingencyTable:
         else:
             if self.incremental_results is None:
                 raise ValueError("Call .analyze() before plotting incremental results.")
-            c_inc = (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0]) if plot_color is not None else None
+            c_inc = (
+                (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0])
+                if plot_color is not None
+                else None
+            )
             marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
             error_x_inc: dict[str, Any] = {
                 "type": "data",

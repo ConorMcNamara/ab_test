@@ -271,6 +271,7 @@ class TestBayesMinimumDetectableLift:
         )
         assert mdl_large < mdl_small
 
+
 class TestBayesMinimumDetectableLiftLoss:
     @staticmethod
     def test_returns_plausible_lift():
