@@ -1,4 +1,4 @@
-"""Statistical tests to determine significance"""
+"""Statistical tests to determine significance."""
 
 import math
 from typing import Any
@@ -31,7 +31,7 @@ def ab_test(
     crit: float | None = None,
     method: str = "score_test",
 ) -> float | bool:
-    """A wrapper for our different statistical tests
+    """Dispatch to our different statistical tests.
 
     Parameters
     ----------
@@ -304,7 +304,7 @@ def fisher_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Fisher's Exact Test for a 2x2 Contingency Table
+    """Fisher's Exact Test for a 2x2 Contingency Table.
 
     Parameters
     ----------
@@ -361,7 +361,7 @@ def barnard_exact_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Barnard's Exact Test for a 2x2 Contingency Table
+    """Barnard's Exact Test for a 2x2 Contingency Table.
 
     Parameters
     ----------
@@ -419,7 +419,7 @@ def boschloo_exact_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Boschloo's Exact Test for a 2x2 Contingency Table
+    """Boschloo's Exact Test for a 2x2 Contingency Table.
 
     Parameters
     ----------
@@ -477,7 +477,7 @@ def modified_log_likelihood_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Modified Log Likelihood Ratio Test for a 2x2 Contingency Table
+    """Compute the Modified Log Likelihood Ratio Test for a 2x2 Contingency Table.
 
     Parameters
     ----------
@@ -535,7 +535,7 @@ def freeman_tukey_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Freeman-Tukey's Test for a 2x2 Contingency Table
+    """Freeman-Tukey's Test for a 2x2 Contingency Table.
 
     Parameters
     ----------
@@ -593,7 +593,7 @@ def neyman_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Neyman's Test for a 2x2 Contingency Table
+    """Neyman's Test for a 2x2 Contingency Table.
 
     Parameters
     ----------
@@ -651,7 +651,7 @@ def cressie_read_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Cressie-Read's Test for a 2x2 Contingency Table
+    """Cressie-Read's Test for a 2x2 Contingency Table.
 
     Parameters
     ----------

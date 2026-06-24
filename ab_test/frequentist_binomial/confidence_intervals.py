@@ -108,7 +108,7 @@ def confidence_interval(
     method: str = "binary_search",
     tol: float = 1e-06,
 ) -> tuple[Any, ...]:
-    """Wrapper for calculating confidence intervals
+    """Calculate confidence intervals using the chosen method.
 
     Parameters
     ----------
@@ -213,7 +213,7 @@ def confidence_interval(
 
 
 def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: str = "wilson") -> tuple[Any, ...]:
-    """A wrapper for calculating confidence intervals for individual cells
+    """Calculate confidence intervals for individual cells.
 
     Parameters
     ----------
@@ -246,7 +246,7 @@ def individual_confidence_interval(s: int, n: int, alpha: float = 0.05, method: 
 
 
 def agresti_coull_interval(s: int, n: int, alpha: float = 0.05, z: float | None = None) -> tuple[Any, ...]:
-    """Agresti-Coull Interval on Binomial Proportions
+    """Agresti-Coull Interval on Binomial Proportions.
 
     Parameters
     ----------
@@ -277,7 +277,7 @@ def agresti_coull_interval(s: int, n: int, alpha: float = 0.05, z: float | None 
 
 
 def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
-    """Jeffrey's Interval on Binomial Proportions
+    """Jeffrey's Interval on Binomial Proportions.
 
     Parameters
     ----------
@@ -303,7 +303,7 @@ def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
 
 
 def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
-    """Clopper-Pearson's Interval on Binomial Proportions
+    """Clopper-Pearson's Interval on Binomial Proportions.
 
     Parameters
     ----------
@@ -330,7 +330,7 @@ def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, 
 
 
 def wald_interval(s: int, n: int, alpha: float = 0.05, z: float | None = None) -> tuple[Any, ...]:
-    """The Wald Interval on Binomial Proportions
+    """Compute the Wald Interval on Binomial Proportions.
 
     Parameters
     ----------
@@ -364,7 +364,7 @@ def delta_interval(
     alpha: float,
     lift: str = "relative",
 ) -> tuple[Any, ...]:
-    """The confidence interval for Binomial Proportions using the Delta Method
+    """Compute the confidence interval for Binomial Proportions using the Delta Method.
 
     Parameters
     ----------
@@ -420,7 +420,7 @@ def delta_interval(
 
 
 def wilson_interval(s: int, n: int, alpha: float = 0.05, z: float | None = None) -> tuple[Any, ...]:
-    """Wilson Confidence Interval on Binomial Proportion
+    """Wilson Confidence Interval on Binomial Proportion.
 
     Parameters
     ----------

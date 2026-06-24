@@ -1,3 +1,5 @@
+"""Statistical tests to determine significance."""
+
 from typing import Any
 
 import numpy as np

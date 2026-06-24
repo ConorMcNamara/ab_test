@@ -1,4 +1,4 @@
-"""Our wrapper for analyzing experiment results"""
+"""Our wrapper for analyzing experiment results."""
 
 import math
 from typing import Any, Literal, cast, overload
@@ -16,10 +16,10 @@ from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
 
 
 class BayesianContingencyTable:
-    """A class for analyzing experiment results using Bayesian approaches"""
+    """A class for analyzing experiment results using Bayesian approaches."""
 
     def __init__(self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None) -> None:
-        """BayesianContingencyTable is our class for creating and analyzing experiment results
+        """BayesianContingencyTable is our class for creating and analyzing experiment results.
 
         Parameters
         ----------
@@ -52,7 +52,7 @@ class BayesianContingencyTable:
         self.individual_results: dict[str, dict[str, float]] = {}
 
     def add(self, cell_name: str, successes: int, trials: int, alpha: float, beta: float) -> "BayesianContingencyTable":
-        """A method to add cells to our contingency table
+        """Add cells to our contingency table.
 
         Parameters
         ----------
@@ -87,7 +87,7 @@ class BayesianContingencyTable:
         spark_session: Any | None = None,
         ibis_backend: Any | None = None,
     ) -> pd.DataFrame | pl.DataFrame | Any:
-        """Returns our BayesianContingencyTable as a DataFrame
+        """Return our BayesianContingencyTable as a DataFrame.
 
         Parameters
         ----------
@@ -165,7 +165,7 @@ class BayesianContingencyTable:
         return return_df
 
     def to_list(self, include_total: bool = False) -> list[Any]:
-        """Returns our BayesianContingencyTable as a list
+        """Return our BayesianContingencyTable as a list.
 
         Parameters
         ----------
@@ -184,7 +184,7 @@ class BayesianContingencyTable:
         return return_list
 
     def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
-        """Returns our BayesianContingencyTable as a numpy array
+        """Return our BayesianContingencyTable as a numpy array.
 
         Parameters
         ----------
@@ -198,7 +198,7 @@ class BayesianContingencyTable:
         return np.array(self.to_list(include_total))
 
     def serialize(self, include_total: bool = False) -> dict[str, Any]:
-        """Returns our BayesianContingencyTable as a JSON, with all information
+        """Return our BayesianContingencyTable as a JSON, with all information.
 
         Parameters
         ----------
@@ -226,8 +226,9 @@ class BayesianContingencyTable:
         }
 
     def deserialize(self, serial: dict[str, Any]) -> "BayesianContingencyTable":
-        """Takes in a serialized version of our BayesianContingencyTable. Used when we want to populate our
-        BayesianContingencyTable with results from a prior campaign.
+        """Populate our BayesianContingencyTable from a serialized version.
+
+        Used when we want to populate our BayesianContingencyTable with results from a prior campaign.
 
         Parameters
         ----------
@@ -518,7 +519,7 @@ class BayesianContingencyTable:
 
     @staticmethod
     def _convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[Any] | float:
-        """Converts our lift values to either percentages or dollar signs
+        """Convert our lift values to either percentages or dollar signs.
 
         Parameters
         ----------
@@ -560,7 +561,7 @@ class BayesianContingencyTable:
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
     ) -> None:
-        """Plots the posterior means and credible intervals as a forest plot.
+        """Plot the posterior means and credible intervals as a forest plot.
 
         Parameters
         ----------
