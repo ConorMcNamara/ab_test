@@ -1,4 +1,4 @@
-"""Methods to calculate the power of a test"""
+"""Methods to calculate the power of a test."""
 
 from collections.abc import Callable
 from typing import Any
@@ -22,7 +22,7 @@ def score_power(
     p_alt: np.ndarray[Any, Any] | list[Any],
     alpha: float = 0.05,
 ) -> float:
-    """Power of Rao's Score Test
+    """Power of Rao's Score Test.
 
     Parameters
     ----------
@@ -62,7 +62,7 @@ def abtest_power(
     power: Callable[..., float] = score_power,
     lift: str = "relative",
 ) -> float:
-    """Power associated with an A/B Test
+    """Power associated with an A/B Test.
 
     Parameters
     ----------
@@ -142,7 +142,6 @@ def minimum_detectable_lift(
     Uses binary search to compute the smallest lift/drop with adequate
     power.
     """
-
     tol = 1e-6
 
     # Find an extremum bound on the MDL
@@ -219,7 +218,7 @@ def required_sample_size(
     power: Callable[..., float] = score_power,
     lift: str = "relative",
 ) -> int:
-    """Required sample size.
+    """Calculate the required sample size.
 
     Parameters
     ----------
@@ -256,7 +255,6 @@ def required_sample_size(
     Uses binary search to compute the smallest sample size with
     adequate power.
     """
-
     tol = 0.01
 
     if group_proportions is None:

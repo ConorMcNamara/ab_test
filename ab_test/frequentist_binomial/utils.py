@@ -112,7 +112,7 @@ def simple_hypothesis_from_composite(
 def observed_lift(
     trials: np.ndarray[Any, Any] | list[Any], successes: np.ndarray[Any, Any] | list[Any], lift: str = "relative"
 ) -> float:
-    """Calculates the lift from our experiment
+    """Calculate the lift from our experiment.
 
     Parameters
     ----------
@@ -150,7 +150,7 @@ def mle_under_null(
     null_lift: float = 0.0,
     lift: str = "relative",
 ) -> list[Any]:
-    """Maximum Likelihood Estimation under H0
+    """Maximum Likelihood Estimation under H0.
 
     Parameters
     ----------
@@ -265,7 +265,7 @@ def mle_under_alternative(
     alt_lift: float | None = None,
     lift: str = "relative",
 ) -> np.ndarray[Any, Any] | list[Any]:
-    """Maximum Likelihood Estimation under H1
+    """Maximum Likelihood Estimation under H1.
 
     Parameters
     ----------
@@ -298,7 +298,7 @@ def mle_under_alternative(
 
 
 def wilson_significance(pval: float, alpha: float) -> float:
-    """Wilson significance
+    """Wilson significance.
 
     Parameters
     ----------

@@ -1,3 +1,5 @@
+"""Calculates credible intervals for AB Tests."""
+
 from math import sqrt
 from typing import Any, Literal
 

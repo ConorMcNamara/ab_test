@@ -1,4 +1,4 @@
-"""Evaluating the Performance of AB Tests for Binomial Distributions in Python"""
+"""Evaluating the Performance of AB Tests for Binomial Distributions in Python."""
 
 __version__ = "0.1.0"
 

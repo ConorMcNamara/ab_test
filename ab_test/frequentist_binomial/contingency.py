@@ -1,4 +1,4 @@
-"""Our wrapper for analyzing experiment results"""
+"""Our wrapper for analyzing experiment results."""
 
 import math
 from typing import Any, overload
@@ -21,10 +21,10 @@ from ab_test.frequentist_binomial.utils import observed_lift
 
 
 class ContingencyTable:
-    """A class for analyzing experiment results"""
+    """A class for analyzing experiment results."""
 
     def __init__(self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None) -> None:
-        """ContingencyTable is our class for creating and analyzing experiment results
+        """ContingencyTable is our class for creating and analyzing experiment results.
 
         Parameters
         ----------
@@ -55,7 +55,7 @@ class ContingencyTable:
         self.individual_results: dict[str, dict[str, float]] = {}
 
     def add(self, cell_name: str, successes: int, trials: int) -> "ContingencyTable":
-        """A method to add cells to our contingency table
+        """Add cells to our contingency table.
 
         Parameters
         ----------
@@ -84,7 +84,7 @@ class ContingencyTable:
         spark_session: Any | None = None,
         ibis_backend: Any | None = None,
     ) -> pd.DataFrame | pl.DataFrame | Any:
-        """Returns our ContingencyTable as a DataFrame
+        """Return our ContingencyTable as a DataFrame.
 
         Parameters
         ----------
@@ -159,7 +159,7 @@ class ContingencyTable:
         return return_df
 
     def to_list(self, include_total: bool = False) -> list[Any]:
-        """Returns our ContingencyTable as a list
+        """Return our ContingencyTable as a list.
 
         Parameters
         ----------
@@ -178,7 +178,7 @@ class ContingencyTable:
         return return_list
 
     def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
-        """Returns our ContingencyTable as a numpy array
+        """Return our ContingencyTable as a numpy array.
 
         Parameters
         ----------
@@ -192,7 +192,7 @@ class ContingencyTable:
         return np.array(self.to_list(include_total))
 
     def serialize(self, include_total: bool = False) -> dict[str, Any]:
-        """Returns our ContingencyTable as a JSON, with all information
+        """Return our ContingencyTable as a JSON, with all information.
 
         Parameters
         ----------
@@ -215,8 +215,9 @@ class ContingencyTable:
         }
 
     def deserialize(self, serial: dict[str, Any]) -> "ContingencyTable":
-        """Takes in a serialized version of our ContingencyTable. Used when we want to populate our
-        ContingencyTable with results from a prior campaign.
+        """Populate our ContingencyTable from a serialized version.
+
+        Used when we want to populate our ContingencyTable with results from a prior campaign.
 
         Parameters
         ----------
@@ -245,7 +246,7 @@ class ContingencyTable:
         alpha: float = 0.05,
         null_lift: float = 0.0,
     ) -> str:
-        """Analyzes the effect of our experiments through the ContingencyTable
+        """Analyzes the effect of our experiments through the ContingencyTable.
 
         Parameters
         ----------
@@ -350,7 +351,7 @@ class ContingencyTable:
         conf_int_method: str = "wilson",
         alpha: float = 0.05,
     ) -> str:
-        """Analyzes the individual cells
+        """Analyzes the individual cells.
 
         Parameters
         ----------
@@ -394,7 +395,7 @@ class ContingencyTable:
 
     @staticmethod
     def _convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[Any] | float:
-        """Converts our lift values to either percentages or dollar signs
+        """Convert our lift values to either percentages or dollar signs.
 
         Parameters
         ----------
@@ -436,7 +437,7 @@ class ContingencyTable:
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
     ) -> None:
-        """Plots the point estimates as well as confidence intervals
+        """Plot the point estimates as well as confidence intervals.
 
         Parameters
         ----------
@@ -593,6 +594,7 @@ class ContingencyTable:
         fig.show()  # type: ignore[no-untyped-call]
 
     def __str__(self) -> str:
+        """Return a tabulated string representation of the ContingencyTable."""
         result: str = tabulate(
             self.to_list(include_total=True),
             headers=["cell_name", "successes", "trials"],

@@ -1,3 +1,5 @@
+"""Methods to calculate the power of a test."""
+
 from typing import Any, Literal
 
 import numpy as np
