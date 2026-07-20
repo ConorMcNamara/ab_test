@@ -1,7 +1,7 @@
 """Statistical tests to determine significance."""
 
 import math
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import scipy.stats as ss
@@ -21,6 +21,73 @@ __all__ = [
     "neyman_test",
     "cressie_read_test",
 ]
+
+
+def _validate_two_group(
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    allow_relative_null: bool = True,
+) -> None:
+    """Validate the inputs shared by every significance test.
+
+    Parameters
+    ----------
+    trials, successes : array_like
+        Per-group trial and success counts. At most two groups are supported.
+    null_lift : float
+        Lift associated with the null hypothesis.
+    lift : str
+        Whether ``null_lift`` is interpreted in relative or absolute terms.
+    allow_relative_null : bool
+        If False, a nonzero relative ``null_lift`` is rejected (only tests that
+        support a nonzero relative null pass True).
+
+    Raises
+    ------
+    NotImplementedError
+        If more than two groups are supplied, or a nonzero relative ``null_lift``
+        is given when ``allow_relative_null`` is False.
+    """
+    if len(trials) > 2 or len(successes) > 2:
+        raise NotImplementedError("Only supports a 2x2 contingency table")
+    if not allow_relative_null and lift == "relative" and null_lift != 0.0:
+        raise NotImplementedError("Only supports relative lift with a null of 0%")
+
+
+def _contingency_table(
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+) -> np.ndarray[Any, Any]:
+    non_successes = np.asarray(trials) - np.asarray(successes)
+    return np.array([successes, non_successes])
+
+
+def _test_result(statistic: Any, pval: Any, crit: float | None) -> float | bool:
+    """Return the p-value, or a significance boolean when a critical value is given."""
+    if crit is None:
+        return float(pval)
+    return bool(abs(statistic) >= crit)
+
+
+def _power_divergence_test(
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+    lambda_: Literal["mod-log-likelihood", "freeman-tukey", "neyman", "cressie-read"],
+    null_lift: float,
+    lift: str,
+    crit: float | None,
+) -> float | bool:
+    """Run a power-divergence test on the 2x2 table via ``scipy.stats.chi2_contingency``.
+
+    Shared by the Freeman-Tukey, Neyman, Cressie-Read, and modified
+    log-likelihood tests, which differ only in the ``lambda_`` parameter.
+    """
+    _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
+    contingency_table = _contingency_table(trials, successes)
+    result = ss.chi2_contingency(contingency_table, correction=False, lambda_=lambda_)  # type: ignore[no-untyped-call, attr-defined, var-annotated]
+    return _test_result(result.statistic, result.pvalue, crit)
 
 
 def ab_test(
@@ -137,8 +204,7 @@ def score_test(
     -----
     Only supports two experiment groups at this time.
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
+    _validate_two_group(trials, successes, null_lift, lift)
 
     p = mle_under_null(trials, successes, null_lift=null_lift, lift=lift)
 
@@ -202,8 +268,7 @@ def likelihood_ratio_test(
     -----
     Only supports two experiment groups at this time.
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
+    _validate_two_group(trials, successes, null_lift, lift)
 
     p0 = mle_under_null(trials, successes, null_lift=null_lift, lift=lift)
     p1 = mle_under_alternative(trials, successes)
@@ -272,11 +337,7 @@ def z_test(
     -----
     Only supports two experiment groups at this time.
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-
-    if lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
+    _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
 
     p0 = mle_under_null(trials, successes, null_lift=null_lift, lift=lift)
     p1 = mle_under_alternative(trials, successes)
@@ -289,14 +350,6 @@ def z_test(
     return bool(abs(z) >= crit)
 
 
-def _contingency_table(
-    trials: np.ndarray[Any, Any] | list[Any],
-    successes: np.ndarray[Any, Any] | list[Any],
-) -> np.ndarray[Any, Any]:
-    non_successes = np.asarray(trials) - np.asarray(successes)
-    return np.array([successes, non_successes])
-
-
 def fisher_test(
     trials: np.ndarray[Any, Any] | list[Any],
     successes: np.ndarray[Any, Any] | list[Any],
@@ -306,52 +359,17 @@ def fisher_test(
 ) -> float | bool:
     """Fisher's Exact Test for a 2x2 Contingency Table.
 
-    Parameters
-    ----------
-     trials : array_like
-        Number of trials in each group.
-     successes : array_like
-        Number of successes in each group.
-     null_lift : float
-        Lift associated with null hypothesis. Defaults to 0.0.
-     lift : ["relative", "absolute"]
-        Whether to interpret the null lift relative to the baseline success
-        rate, or in absolute terms. Only absolute lift is currently supported,
-        but a relative lift with null_lift 0 is also supported since this is
-        equivalent to an absolute lift with null_lift 0. See Notes in
-        `maximum_likelihood_estimation`.
-     crit : float, optional
-        Critical value for the test statistic. If omitted, a p-value will be
-        returned. If passed, a boolean will be returned corresponding to
-        whether the result is statistically significant. Useful primarily for
-        simulations where we will be repeatedly assessing significance, since
-        calculating the critical value can be done once instead of repeatedly.
-        This makes such simulations about 5x faster.
-
-    Returns
-    -------
-     pval : float
-        P-value. Returned if `crit` is None.
-     stat_sig : boolean
-        True if the result is statistically significant, i.e. if the test
-        statistic is >= `crit`. Returned if `crit` is not None.
+    See :func:`score_test` for the shared parameter and return semantics.
 
     Notes
     -----
-    Only supports two experiment groups at this time.
+    Only supports two experiment groups, and only an absolute lift (or a
+    relative lift with a null of 0%).
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-
-    if lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
-
+    _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     contingency_table = _contingency_table(trials, successes)
     statistic, pval = ss.fisher_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined, arg-type]
-
-    if crit is None:
-        return float(pval)
-    return bool(abs(statistic) >= crit)
+    return _test_result(statistic, pval, crit)
 
 
 def barnard_exact_test(
@@ -363,53 +381,17 @@ def barnard_exact_test(
 ) -> float | bool:
     """Barnard's Exact Test for a 2x2 Contingency Table.
 
-    Parameters
-    ----------
-     trials : array_like
-        Number of trials in each group.
-     successes : array_like
-        Number of successes in each group.
-     null_lift : float
-        Lift associated with null hypothesis. Defaults to 0.0.
-     lift : ["relative", "absolute"]
-        Whether to interpret the null lift relative to the baseline success
-        rate, or in absolute terms. Only absolute lift is currently supported,
-        but a relative lift with null_lift 0 is also supported since this is
-        equivalent to an absolute lift with null_lift 0. See Notes in
-        `maximum_likelihood_estimation`.
-     crit : float, optional
-        Critical value for the test statistic. If omitted, a p-value will be
-        returned. If passed, a boolean will be returned corresponding to
-        whether the result is statistically significant. Useful primarily for
-        simulations where we will be repeatedly assessing significance, since
-        calculating the critical value can be done once instead of repeatedly.
-        This makes such simulations about 5x faster.
-
-    Returns
-    -------
-     pval : float
-        P-value. Returned if `crit` is None.
-     stat_sig : boolean
-        True if the result is statistically significant, i.e. if the test
-        statistic is >= `crit`. Returned if `crit` is not None.
+    See :func:`score_test` for the shared parameter and return semantics.
 
     Notes
     -----
-    Only supports two experiment groups at this time.
+    Only supports two experiment groups, and only an absolute lift (or a
+    relative lift with a null of 0%).
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-
-    if lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
-
+    _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     contingency_table = _contingency_table(trials, successes)
     barnard = ss.barnard_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
-    statistic, pval = barnard.statistic, barnard.pvalue
-
-    if crit is None:
-        return float(pval)
-    return bool(abs(statistic) >= crit)
+    return _test_result(barnard.statistic, barnard.pvalue, crit)
 
 
 def boschloo_exact_test(
@@ -421,53 +403,17 @@ def boschloo_exact_test(
 ) -> float | bool:
     """Boschloo's Exact Test for a 2x2 Contingency Table.
 
-    Parameters
-    ----------
-     trials : array_like
-        Number of trials in each group.
-     successes : array_like
-        Number of successes in each group.
-     null_lift : float
-        Lift associated with null hypothesis. Defaults to 0.0.
-     lift : ["relative", "absolute"]
-        Whether to interpret the null lift relative to the baseline success
-        rate, or in absolute terms. Only absolute lift is currently supported,
-        but a relative lift with null_lift 0 is also supported since this is
-        equivalent to an absolute lift with null_lift 0. See Notes in
-        `maximum_likelihood_estimation`.
-     crit : float, optional
-        Critical value for the test statistic. If omitted, a p-value will be
-        returned. If passed, a boolean will be returned corresponding to
-        whether the result is statistically significant. Useful primarily for
-        simulations where we will be repeatedly assessing significance, since
-        calculating the critical value can be done once instead of repeatedly.
-        This makes such simulations about 5x faster.
-
-    Returns
-    -------
-     pval : float
-        P-value. Returned if `crit` is None.
-     stat_sig : boolean
-        True if the result is statistically significant, i.e. if the test
-        statistic is >= `crit`. Returned if `crit` is not None.
+    See :func:`score_test` for the shared parameter and return semantics.
 
     Notes
     -----
-    Only supports two experiment groups at this time.
+    Only supports two experiment groups, and only an absolute lift (or a
+    relative lift with a null of 0%).
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-
-    if lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
-
+    _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     contingency_table = _contingency_table(trials, successes)
     boschloo = ss.boschloo_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
-    statistic, pval = boschloo.statistic, boschloo.pvalue
-
-    if crit is None:
-        return float(pval)
-    return bool(abs(statistic) >= crit)
+    return _test_result(boschloo.statistic, boschloo.pvalue, crit)
 
 
 def modified_log_likelihood_test(
@@ -477,55 +423,16 @@ def modified_log_likelihood_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Compute the Modified Log Likelihood Ratio Test for a 2x2 Contingency Table.
+    """Compute the Modified Log-Likelihood Ratio Test for a 2x2 Contingency Table.
 
-    Parameters
-    ----------
-     trials : array_like
-        Number of trials in each group.
-     successes : array_like
-        Number of successes in each group.
-     null_lift : float
-        Lift associated with null hypothesis. Defaults to 0.0.
-     lift : ["relative", "absolute"]
-        Whether to interpret the null lift relative to the baseline success
-        rate, or in absolute terms. Only absolute lift is currently supported,
-        but a relative lift with null_lift 0 is also supported since this is
-        equivalent to an absolute lift with null_lift 0. See Notes in
-        `maximum_likelihood_estimation`.
-     crit : float, optional
-        Critical value for the test statistic. If omitted, a p-value will be
-        returned. If passed, a boolean will be returned corresponding to
-        whether the result is statistically significant. Useful primarily for
-        simulations where we will be repeatedly assessing significance, since
-        calculating the critical value can be done once instead of repeatedly.
-        This makes such simulations about 5x faster.
-
-    Returns
-    -------
-     pval : float
-        P-value. Returned if `crit` is None.
-     stat_sig : boolean
-        True if the result is statistically significant, i.e. if the test
-        statistic is >= `crit`. Returned if `crit` is not None.
+    See :func:`score_test` for the shared parameter and return semantics.
 
     Notes
     -----
-    Only supports two experiment groups at this time.
+    Only supports two experiment groups, and only an absolute lift (or a
+    relative lift with a null of 0%).
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-
-    if lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
-
-    contingency_table = _contingency_table(trials, successes)
-    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="mod-log-likelihood")  # type: ignore[no-untyped-call, attr-defined, var-annotated]
-    statistic, pval = mod_like.statistic, mod_like.pvalue
-
-    if crit is None:
-        return float(pval)
-    return bool(abs(statistic) >= crit)
+    return _power_divergence_test(trials, successes, "mod-log-likelihood", null_lift, lift, crit)
 
 
 def freeman_tukey_test(
@@ -537,53 +444,14 @@ def freeman_tukey_test(
 ) -> float | bool:
     """Freeman-Tukey's Test for a 2x2 Contingency Table.
 
-    Parameters
-    ----------
-     trials : array_like
-        Number of trials in each group.
-     successes : array_like
-        Number of successes in each group.
-     null_lift : float
-        Lift associated with null hypothesis. Defaults to 0.0.
-     lift : ["relative", "absolute"]
-        Whether to interpret the null lift relative to the baseline success
-        rate, or in absolute terms. Only absolute lift is currently supported,
-        but a relative lift with null_lift 0 is also supported since this is
-        equivalent to an absolute lift with null_lift 0. See Notes in
-        `maximum_likelihood_estimation`.
-     crit : float, optional
-        Critical value for the test statistic. If omitted, a p-value will be
-        returned. If passed, a boolean will be returned corresponding to
-        whether the result is statistically significant. Useful primarily for
-        simulations where we will be repeatedly assessing significance, since
-        calculating the critical value can be done once instead of repeatedly.
-        This makes such simulations about 5x faster.
-
-    Returns
-    -------
-     pval : float
-        P-value. Returned if `crit` is None.
-     stat_sig : boolean
-        True if the result is statistically significant, i.e. if the test
-        statistic is >= `crit`. Returned if `crit` is not None.
+    See :func:`score_test` for the shared parameter and return semantics.
 
     Notes
     -----
-    Only supports two experiment groups at this time.
+    Only supports two experiment groups, and only an absolute lift (or a
+    relative lift with a null of 0%).
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-
-    if lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
-
-    contingency_table = _contingency_table(trials, successes)
-    freeman_tukey = ss.chi2_contingency(contingency_table, correction=False, lambda_="freeman-tukey")  # type: ignore[no-untyped-call, attr-defined, var-annotated]
-    statistic, pval = freeman_tukey.statistic, freeman_tukey.pvalue
-
-    if crit is None:
-        return float(pval)
-    return bool(abs(statistic) >= crit)
+    return _power_divergence_test(trials, successes, "freeman-tukey", null_lift, lift, crit)
 
 
 def neyman_test(
@@ -595,53 +463,14 @@ def neyman_test(
 ) -> float | bool:
     """Neyman's Test for a 2x2 Contingency Table.
 
-    Parameters
-    ----------
-     trials : array_like
-        Number of trials in each group.
-     successes : array_like
-        Number of successes in each group.
-     null_lift : float
-        Lift associated with null hypothesis. Defaults to 0.0.
-     lift : ["relative", "absolute"]
-        Whether to interpret the null lift relative to the baseline success
-        rate, or in absolute terms. Only absolute lift is currently supported,
-        but a relative lift with null_lift 0 is also supported since this is
-        equivalent to an absolute lift with null_lift 0. See Notes in
-        `maximum_likelihood_estimation`.
-     crit : float, optional
-        Critical value for the test statistic. If omitted, a p-value will be
-        returned. If passed, a boolean will be returned corresponding to
-        whether the result is statistically significant. Useful primarily for
-        simulations where we will be repeatedly assessing significance, since
-        calculating the critical value can be done once instead of repeatedly.
-        This makes such simulations about 5x faster.
-
-    Returns
-    -------
-     pval : float
-        P-value. Returned if `crit` is None.
-     stat_sig : boolean
-        True if the result is statistically significant, i.e. if the test
-        statistic is >= `crit`. Returned if `crit` is not None.
+    See :func:`score_test` for the shared parameter and return semantics.
 
     Notes
     -----
-    Only supports two experiment groups at this time.
+    Only supports two experiment groups, and only an absolute lift (or a
+    relative lift with a null of 0%).
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-
-    if lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
-
-    contingency_table = _contingency_table(trials, successes)
-    neyman = ss.chi2_contingency(contingency_table, correction=False, lambda_="neyman")  # type: ignore[no-untyped-call, attr-defined, var-annotated]
-    statistic, pval = neyman.statistic, neyman.pvalue
-
-    if crit is None:
-        return float(pval)
-    return bool(abs(statistic) >= crit)
+    return _power_divergence_test(trials, successes, "neyman", null_lift, lift, crit)
 
 
 def cressie_read_test(
@@ -653,50 +482,11 @@ def cressie_read_test(
 ) -> float | bool:
     """Cressie-Read's Test for a 2x2 Contingency Table.
 
-    Parameters
-    ----------
-     trials : array_like
-        Number of trials in each group.
-     successes : array_like
-        Number of successes in each group.
-     null_lift : float
-        Lift associated with null hypothesis. Defaults to 0.0.
-     lift : ["relative", "absolute"]
-        Whether to interpret the null lift relative to the baseline success
-        rate, or in absolute terms. Only absolute lift is currently supported,
-        but a relative lift with null_lift 0 is also supported since this is
-        equivalent to an absolute lift with null_lift 0. See Notes in
-        `maximum_likelihood_estimation`.
-     crit : float, optional
-        Critical value for the test statistic. If omitted, a p-value will be
-        returned. If passed, a boolean will be returned corresponding to
-        whether the result is statistically significant. Useful primarily for
-        simulations where we will be repeatedly assessing significance, since
-        calculating the critical value can be done once instead of repeatedly.
-        This makes such simulations about 5x faster.
-
-    Returns
-    -------
-     pval : float
-        P-value. Returned if `crit` is None.
-     stat_sig : boolean
-        True if the result is statistically significant, i.e. if the test
-        statistic is >= `crit`. Returned if `crit` is not None.
+    See :func:`score_test` for the shared parameter and return semantics.
 
     Notes
     -----
-    Only supports two experiment groups at this time.
+    Only supports two experiment groups, and only an absolute lift (or a
+    relative lift with a null of 0%).
     """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-
-    if lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
-
-    contingency_table = _contingency_table(trials, successes)
-    mod_like = ss.chi2_contingency(contingency_table, correction=False, lambda_="cressie-read")  # type: ignore[no-untyped-call, attr-defined, var-annotated]
-    statistic, pval = mod_like.statistic, mod_like.pvalue
-
-    if crit is None:
-        return float(pval)
-    return bool(abs(statistic) >= crit)
+    return _power_divergence_test(trials, successes, "cressie-read", null_lift, lift, crit)

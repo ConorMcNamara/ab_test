@@ -1,14 +1,13 @@
 """Our wrapper for analyzing experiment results."""
 
 import math
-from typing import Any, overload
+from typing import Any, ClassVar
 
 import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-import polars as pl
 from tabulate import tabulate
 
+from ab_test._contingency import BaseContingencyTable
+from ab_test._display import convert_to_tabulate_str
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
 from ab_test.frequentist_binomial.stats_tests import (
     ab_test,
@@ -44,55 +43,23 @@ def _scale_bound(bound: float, factor: float) -> float:
     return math.ceil(bound * factor)
 
 
-def _format_infinity(value: float) -> str:
-    """Render an infinite bound as a compact symbol.
-
-    Parameters
-    ----------
-    value : float
-        An infinite value (``math.inf`` or ``-math.inf``).
-
-    Returns
-    -------
-    str
-        ``"∞"`` for positive infinity, ``"-∞"`` for negative infinity.
-    """
-    return "∞" if value > 0 else "-∞"
-
-
-class ContingencyTable:
+class ContingencyTable(BaseContingencyTable):
     """A class for analyzing experiment results."""
 
-    def __init__(self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None) -> None:
-        """ContingencyTable is our class for creating and analyzing experiment results.
+    _columns: ClassVar[list[str]] = ["cell_name", "successes", "trials"]
+    _pyspark_types: ClassVar[dict[str, str]] = {
+        "cell_name": "StringType",
+        "successes": "IntegerType",
+        "trials": "IntegerType",
+    }
 
-        Parameters
-        ----------
-        name : str
-            The name of our experiment associated with our Contingency Table
-        metric_name : str
-            The name of our metric
-        spend : float
-            The amount we spent for this campaign. Used to calculate the ROAS of our campaign
-        msrp : float
-            The average msrp of our product. Used to calculate the revenue return of our campaign
-        """
-        self.experiment_name: str = name
-        self.names: list[str] = []
-        self.metric_name: str = metric_name
-        self.spend: float | None = spend
-        self.msrp: float | None = msrp
-        self.cells: dict[str, Any] = {
-            "experiment_name": self.experiment_name,
-            "metric_name": self.metric_name,
-            "spend": self.spend,
-            "msrp": self.msrp,
-            "table": {},
-        }
-        self.successes: list[int] = []
-        self.trials: list[int] = []
-        self.incremental_results: dict[str, Any] | None = None
-        self.individual_results: dict[str, dict[str, float]] = {}
+    def _total_row(self) -> list[Any]:
+        """Return the ``"Total"`` row appended to :meth:`to_list`."""
+        return ["Total", np.sum(self.successes), np.sum(self.trials)]
+
+    def _total_cell(self) -> dict[str, Any]:
+        """Return the ``"Total"`` cell dict appended to :meth:`serialize`."""
+        return {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials))}
 
     def add(self, cell_name: str, successes: int, trials: int) -> "ContingencyTable":
         """Add cells to our contingency table.
@@ -115,167 +82,6 @@ class ContingencyTable:
         self.names.append(cell_name)
         self.successes.append(successes)
         self.trials.append(trials)
-        return self
-
-    def to_df(
-        self,
-        method: str = "pandas",
-        include_total: bool = False,
-        spark_session: Any | None = None,
-        ibis_backend: Any | None = None,
-    ) -> pd.DataFrame | pl.DataFrame | Any:
-        """Return our ContingencyTable as a DataFrame.
-
-        Parameters
-        ----------
-        method : {"pandas", "polars", "pyspark", "modin", "ibis", "narwhals"}
-            Whether we want our DataFrame as a pandas, polars, pyspark, modin, ibis, or narwhals DataFrame
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-        spark_session : SparkSession, optional
-            An active SparkSession, required when method="pyspark"
-        ibis_backend : ibis backend, optional
-            An Ibis backend connection. When provided, it is set as the active backend before
-            creating the memtable. When omitted, the existing default backend is used.
-
-        Returns
-        -------
-        Our ContingencyTable as a DataFrame
-        """
-        method = method.casefold()
-        if method == "pandas":
-            return_df = pd.DataFrame(
-                self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials"])
-            )
-        elif method == "polars":
-            return_df = pl.DataFrame(
-                self.to_list(include_total), schema=["cell_name", "successes", "trials"], orient="row"
-            )
-        elif method == "pyspark":
-            from pyspark.sql import SparkSession
-            from pyspark.sql.types import IntegerType, StringType, StructField, StructType
-
-            if spark_session is None:
-                spark_session = SparkSession.getActiveSession()
-            if spark_session is None:
-                raise ValueError("No active SparkSession found. Please provide a spark_session argument.")
-            schema = StructType(
-                [
-                    StructField("cell_name", StringType(), True),
-                    StructField("successes", IntegerType(), True),
-                    StructField("trials", IntegerType(), True),
-                ]
-            )
-            return_df = spark_session.createDataFrame(self.to_list(include_total), schema=schema)
-        elif method == "data.table":
-            raise NotImplementedError("Have not implemented data.table yet")
-        elif method == "modin":
-            import modin.pandas as mpd  # type: ignore[import-not-found]
-
-            return_df = mpd.DataFrame(
-                self.to_list(include_total),
-                columns=mpd.Index(["cell_name", "successes", "trials"]),
-            )
-        elif method == "ibis":
-            import ibis  # type: ignore[import-not-found]
-
-            if ibis_backend is not None:
-                ibis.set_backend(ibis_backend)
-            pandas_df = pd.DataFrame(
-                self.to_list(include_total),
-                columns=pd.Index(["cell_name", "successes", "trials"]),
-            )
-            return_df = ibis.memtable(pandas_df)
-        elif method == "narwhals":
-            import narwhals as nw
-
-            pandas_df = pd.DataFrame(
-                self.to_list(include_total),
-                columns=pd.Index(["cell_name", "successes", "trials"]),
-            )
-            return_df = nw.from_native(pandas_df)
-        else:
-            raise ValueError(f"Method {method} not supported for creating DataFrames")
-        return return_df
-
-    def to_list(self, include_total: bool = False) -> list[Any]:
-        """Return our ContingencyTable as a list.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our ContingencyTable as a list
-        """
-        return_list = []
-        for name in self.names:
-            return_list.append([name] + list(self.cells["table"][name].values()))
-        if include_total:
-            return_list.append(["Total", np.sum(self.successes), np.sum(self.trials)])
-        return return_list
-
-    def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
-        """Return our ContingencyTable as a numpy array.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our ContingencyTable as a numpy array
-        """
-        return np.array(self.to_list(include_total))
-
-    def serialize(self, include_total: bool = False) -> dict[str, Any]:
-        """Return our ContingencyTable as a JSON, with all information.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our ContingencyTable as a JSON
-        """
-        table = dict(self.cells["table"])
-        if include_total:
-            table["Total"] = {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials))}
-        return {
-            "experiment_name": self.experiment_name,
-            "metric_name": self.metric_name,
-            "spend": self.spend,
-            "msrp": self.msrp,
-            "table": table,
-        }
-
-    def deserialize(self, serial: dict[str, Any]) -> "ContingencyTable":
-        """Populate our ContingencyTable from a serialized version.
-
-        Used when we want to populate our ContingencyTable with results from a prior campaign.
-
-        Parameters
-        ----------
-        serial : dict
-            A serialized version of our ContingencyTable
-
-        Returns
-        -------
-        Itself, to be chained with other methods
-        """
-        self.experiment_name = serial["experiment_name"]
-        self.metric_name = serial["metric_name"]
-        self.spend = serial["spend"]
-        self.msrp = serial["msrp"]
-        self.cells = serial
-        self.names = list(serial["table"].keys())
-        self.successes = [v["successes"] for v in serial["table"].values()]
-        self.trials = [v["trials"] for v in serial["table"].values()]
         return self
 
     def analyze(
@@ -375,8 +181,8 @@ class ContingencyTable:
         str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
         table_list = [
             [lift, self.metric_name]
-            + self._convert_to_tabulate_str(success_rate, lift)
-            + self._convert_to_tabulate_str([test_lift, lb, ub], lift)
+            + convert_to_tabulate_str(success_rate, lift)
+            + convert_to_tabulate_str([test_lift, lb, ub], lift)
             + [str_pvalue]
         ]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
@@ -409,13 +215,13 @@ class ContingencyTable:
         for name_i, s_i, n_i in zip(self.names, self.successes, self.trials):
             success_rate = s_i / n_i
             lb, ub = individual_confidence_interval(s_i, n_i, alpha, conf_int_method)
-            name_list = [name_i, s_i, n_i] + self._convert_to_tabulate_str([success_rate, lb, ub], "absolute")
+            name_list = [name_i, s_i, n_i] + convert_to_tabulate_str([success_rate, lb, ub], "absolute")
             self.individual_results[name_i] = {"lift": success_rate, "ci_lower": lb, "ci_upper": ub}
             table_list.append(name_list)
         total_success, total_trials = np.sum(self.successes), np.sum(self.trials)
         total_success_rate = total_success / total_trials
         lb_total, ub_total = individual_confidence_interval(total_success, total_trials, alpha, conf_int_method)
-        total_list = ["Total", total_success, total_trials] + self._convert_to_tabulate_str(
+        total_list = ["Total", total_success, total_trials] + convert_to_tabulate_str(
             [total_success_rate, lb_total, ub_total], "absolute"
         )
         self.individual_results["Total"] = {"lift": total_success_rate, "ci_lower": lb_total, "ci_upper": ub_total}
@@ -424,215 +230,3 @@ class ContingencyTable:
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
         return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
         return return_string
-
-    @overload
-    @staticmethod
-    def _convert_to_tabulate_str(value: float, lift: str) -> str | float: ...
-
-    @overload
-    @staticmethod
-    def _convert_to_tabulate_str(value: list[Any], lift: str) -> list[Any]: ...
-
-    @staticmethod
-    def _convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[Any] | float:
-        """Convert our lift values to either percentages or dollar signs.
-
-        Parameters
-        ----------
-        value : float or list
-            The value we are changing
-        lift : str
-            Depending on the lift type, whether we are adding percentages or dollar signs
-
-        Returns
-        -------
-        Our new str_value, as either a percentage or dollar sign
-        """
-
-        def _format_one(val: float) -> str | float:
-            if math.isinf(val):
-                return _format_infinity(val)
-            if lift in ["revenue", "roas"]:
-                return f"${round(val, 2):,}"
-            if lift in ["absolute", "relative"]:
-                return f"{round(val * 100.0, 2)}%"
-            if lift == "incremental":
-                return val
-            raise ValueError(f"No support for {lift}")
-
-        if isinstance(value, (int, float)):
-            return _format_one(value)
-        if isinstance(value, list):
-            return [_format_one(val) for val in value]
-        raise TypeError(f"No support for converting {value} to string")
-
-    def plot(
-        self,
-        is_individual: bool = True,
-        reverse_plot: bool = True,
-        color: str | dict[str, Any] | list[Any] | None = None,
-    ) -> None:
-        """Plot the point estimates as well as confidence intervals.
-
-        Parameters
-        ----------
-        is_individual : bool, default=True
-            Whether we are looking at the individual performance of each cell or the comparative performance
-        reverse_plot : bool, default=True
-            Whether we are reversing the order of our plot or not.
-        color : str or list or dict, default=None
-            If None, then uses plotly's default color scheme.
-            If a string, then one of the available colorblind options
-            If a list, then each item in the list corresponds to a color for the relevant group
-            If a dictionary, then each key in the dictionary corresponds to a group with the
-            value pertaining to its color
-
-        Returns
-        -------
-        A plot of our point estimates as well as confidence intervals
-
-        Notes
-        -----
-        This function is intended to be run _after_ either .analyze() or .analyze_individually()
-        """
-        plot_color: list[str] | dict[str, str] | None
-        if color is None:
-            plot_color = None
-        elif isinstance(color, str):
-            if color == "ibm":
-                plot_color = ["#648fff", "#785ef0", "#dc267f", "#fe6100", "#ffb000"]
-            elif color in ["wong", "ito"]:
-                plot_color = ["#e69f00", "#56b4e9", "#009e73", "#f0e442", "#0072b2", "#d55e00", "#cc79a7"]
-            elif color == "tol":
-                plot_color = ["#332288", "#117733", "#44aa99", "#88ccee", "#ddcc77", "#cc6677", "#aa4499", "#882255"]
-            elif color == "tol_bright":
-                plot_color = ["#4477aa", "#ee6677", "#228833", "#ccbb44", "#66ccee", "#aa3377"]
-            elif color == "tol_vibrant":
-                plot_color = ["#ee7733", "#0077bb", "#33bbee", "#ee3377", "#cc3311", "#009988"]
-            elif color == "tol_muted":
-                plot_color = [
-                    "#cc6677",
-                    "#332288",
-                    "#ddcc77",
-                    "#117733",
-                    "#88ccee",
-                    "#882255",
-                    "#44aa99",
-                    "#999933",
-                    "#aa4499",
-                ]
-            elif color == "tol_light":
-                plot_color = ["#77aadd", "#ee8866", "#eedd88", "#ffaabb", "#99ddff", "#44bb99", "#bbcc33", "#bbcc33"]
-            else:
-                raise ValueError(f"Not support for color scheme {color}")
-        elif isinstance(color, list):
-            plot_color = color
-        elif isinstance(color, dict):
-            plot_color = color
-        else:
-            raise TypeError("Color can be a string, list, dict, or None")
-        fig = go.Figure()  # type: ignore[attr-defined]
-        if is_individual:
-            for index, name in enumerate(self.names):
-                ind_results = self.individual_results[name]
-                c = (
-                    (plot_color[index] if isinstance(plot_color, list) else plot_color[name])
-                    if plot_color is not None
-                    else None
-                )
-                marker: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
-                error_x: dict[str, Any] = {
-                    "type": "data",
-                    "symmetric": False,
-                    "array": [ind_results["ci_upper"] - ind_results["lift"]],
-                    "arrayminus": [ind_results["lift"] - ind_results["ci_lower"]],
-                    "visible": True,
-                }
-                if c is not None:
-                    marker["color"] = c
-                    error_x["color"] = c
-                fig.add_trace(
-                    go.Scatter(  # type: ignore[attr-defined]
-                        x=[ind_results["lift"]],
-                        y=[name],
-                        marker=marker,
-                        error_x=error_x,
-                        name=name,
-                    )
-                )
-            total_results = self.individual_results["Total"]
-            c_total = (
-                (plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"])
-                if plot_color is not None
-                else None
-            )
-            marker_total: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
-            error_x_total: dict[str, Any] = {
-                "type": "data",
-                "symmetric": False,
-                "array": [total_results["ci_upper"] - total_results["lift"]],
-                "arrayminus": [total_results["lift"] - total_results["ci_lower"]],
-                "visible": True,
-            }
-            if c_total is not None:
-                marker_total["color"] = c_total
-                error_x_total["color"] = c_total
-            fig.add_trace(
-                go.Scatter(  # type: ignore[attr-defined]
-                    x=[total_results["lift"]],
-                    y=["Total"],
-                    marker=marker_total,
-                    error_x=error_x_total,
-                    name="Total",
-                )
-            )
-            fig.update_layout(xaxis_tickformat=",.0%")
-        else:
-            if self.incremental_results is None:
-                raise ValueError("Call .analyze() before plotting incremental results.")
-            c_inc = (
-                (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0])
-                if plot_color is not None
-                else None
-            )
-            marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
-            error_x_inc: dict[str, Any] = {
-                "type": "data",
-                "symmetric": False,
-                "array": [self.incremental_results["ci_upper"] - self.incremental_results["lift"]],
-                "arrayminus": [self.incremental_results["lift"] - self.incremental_results["ci_lower"]],
-                "visible": True,
-            }
-            if c_inc is not None:
-                marker_inc["color"] = c_inc
-                error_x_inc["color"] = c_inc
-            fig.add_trace(
-                go.Scatter(  # type: ignore[attr-defined]
-                    x=[self.incremental_results["lift"]],
-                    y=["Total"],
-                    marker=marker_inc,
-                    error_x=error_x_inc,
-                    name="Total",
-                )
-            )
-            if self.incremental_results["lift_type"] in ["relative", "absolute"]:
-                fig.update_layout(xaxis_tickformat=",.0%")
-            elif self.incremental_results["lift_type"] in ["revenue", "roas"]:
-                if self.incremental_results["lift_type"] == "revenue":
-                    fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="~s")
-                else:
-                    fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="0.2")
-            else:
-                fig.update_layout(xaxis_tickformat="~s")
-        if reverse_plot:
-            fig.update_layout(yaxis={"autorange": "reversed"})
-        fig.show()  # type: ignore[no-untyped-call]
-
-    def __str__(self) -> str:
-        """Return a tabulated string representation of the ContingencyTable."""
-        result: str = tabulate(
-            self.to_list(include_total=True),
-            headers=["cell_name", "successes", "trials"],
-            tablefmt="grid",
-        )
-        return result
