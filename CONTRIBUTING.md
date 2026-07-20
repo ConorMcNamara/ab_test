@@ -17,7 +17,7 @@ Contributions are welcome. Please follow the guidelines below to keep the codeba
 2. **Install dependencies** (including dev tools)
 
    ```bash
-   poetry install --extras dev
+   uv sync --extra dev
    ```
 
 3. **Verify the setup**
@@ -113,5 +113,5 @@ ab_test/
 Open an issue on GitHub with:
 
 - A minimal reproducible example
-- The Python and library version (`python --version`, `poetry show ab-test`)
+- The Python and library version (`python --version`, `uv pip show ab-test`)
 - The full traceback

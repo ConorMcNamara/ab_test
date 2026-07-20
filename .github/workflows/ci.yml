@@ -37,18 +37,13 @@ jobs:
           python-version: ${{ needs.setup.outputs.anchor }}
           allow-prereleases: true
 
-      - name: Cache dependencies
-        uses: actions/cache@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          enable-cache: true
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ".[dev]"
+        run: uv pip install --system ".[dev]"
 
       - name: Run ruff format check
         run: ruff format --check .
@@ -79,18 +74,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true
 
-      - name: Cache dependencies
-        uses: actions/cache@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          enable-cache: true
 
       - name: Install package with dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ".[dev]"
+        run: uv pip install --system ".[dev]"
 
       - name: Run tests with coverage
         run: pytest --cov=ab_test --cov-report=xml --cov-report=term-missing
@@ -118,13 +108,13 @@ jobs:
           python-version: ${{ needs.setup.outputs.anchor }}
           allow-prereleases: true
 
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install build
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
       - name: Build package
-        run: python -m build
+        run: uv build
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
