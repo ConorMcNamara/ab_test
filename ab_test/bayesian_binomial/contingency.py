@@ -14,6 +14,10 @@ from ab_test.bayesian_binomial.credible_intervals import credible_interval, indi
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
 from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
 
+__all__ = [
+    "BayesianContingencyTable",
+]
+
 
 class BayesianContingencyTable(BaseContingencyTable):
     """A class for analyzing experiment results using Bayesian approaches."""
