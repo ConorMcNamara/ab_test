@@ -1,8 +1,155 @@
 """Methods to calculate the power of a test."""
 
+from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
+
+
+def _resolve_alt_rate(
+    baseline: float,
+    alt_lift: float | None,
+    alt_rate: float | None,
+    lift: Literal["relative", "absolute"],
+) -> float:
+    """Resolve the treatment conversion rate from either ``alt_rate`` or ``alt_lift``.
+
+    Parameters
+    ----------
+    baseline : float
+        Expected conversion rate of the control variant.
+    alt_lift : float or None
+        Expected lift of the treatment over the control, interpreted per ``lift``.
+    alt_rate : float or None
+        Treatment conversion rate specified directly. Takes precedence over ``alt_lift``.
+    lift : {"relative", "absolute"}
+        How ``alt_lift`` is applied to ``baseline``. Ignored when ``alt_rate`` is given.
+
+    Returns
+    -------
+    float
+        The treatment conversion rate.
+
+    Raises
+    ------
+    ValueError
+        If neither ``alt_lift`` nor ``alt_rate`` is provided.
+    NotImplementedError
+        If ``alt_lift`` is provided but ``lift`` is not ``"relative"`` or ``"absolute"``.
+    """
+    if alt_rate is not None:
+        return alt_rate
+    if alt_lift is None:
+        raise ValueError("Provide either alt_lift or alt_rate")
+    if lift == "relative":
+        return baseline * (1 + alt_lift)
+    if lift == "absolute":
+        return baseline + alt_lift
+    raise NotImplementedError(f"lift '{lift}' not implemented")
+
+
+def _two_smallest_group_sizes(group_sizes: np.ndarray[Any, Any] | list[Any]) -> np.ndarray[Any, Any] | list[Any]:
+    """Return the two smallest group sizes, which govern overall power."""
+    if len(group_sizes) > 2:
+        a, b, *_ = np.partition(group_sizes, 1)
+        return [a, b]
+    return group_sizes
+
+
+def _simulate_posterior_draws(
+    group_sizes: np.ndarray[Any, Any] | list[Any],
+    alphas: np.ndarray[Any, Any] | list[Any],
+    betas: np.ndarray[Any, Any] | list[Any],
+    baseline: float,
+    alt_rate: float,
+    n_samples: int,
+    mc_samples: int,
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    """Simulate posterior draws for the control and treatment across ``n_samples`` experiments.
+
+    Draws ``n_samples`` simulated experiments (one binomial outcome per arm) then,
+    for each, ``mc_samples`` posterior draws from the resulting Beta posterior.
+
+    Returns
+    -------
+    tuple of np.ndarray
+        ``(samples_null, samples_alt)``, each of shape ``(n_samples, mc_samples)``.
+    """
+    successes_null = np.random.binomial(group_sizes[0], baseline, size=n_samples)
+    successes_alt = np.random.binomial(group_sizes[1], alt_rate, size=n_samples)
+    null_alpha, null_beta = alphas[0] + successes_null, betas[0] + group_sizes[0] - successes_null
+    alt_alpha, alt_beta = alphas[1] + successes_alt, betas[1] + group_sizes[1] - successes_alt
+
+    samples_null = np.random.beta(null_alpha[:, np.newaxis], null_beta[:, np.newaxis], size=(n_samples, mc_samples))
+    samples_alt = np.random.beta(alt_alpha[:, np.newaxis], alt_beta[:, np.newaxis], size=(n_samples, mc_samples))
+    return samples_null, samples_alt
+
+
+def _search_min_sample_size(
+    power_fn: Callable[[int], float],
+    target_power: float,
+    max_n: int,
+    error_message: str,
+) -> int:
+    """Find the smallest per-group sample size reaching ``target_power``.
+
+    Doubles a candidate size from 100 until ``power_fn`` meets ``target_power``,
+    then binary-searches the resulting bracket.
+
+    Raises
+    ------
+    ValueError
+        With ``error_message`` if ``target_power`` is not reached within ``max_n``.
+    """
+    low, high = 100, 200
+    while high <= max_n:
+        if power_fn(high) >= target_power:
+            break
+        low, high = high, high * 2
+    else:
+        raise ValueError(error_message)
+
+    while high - low > 1:
+        mid = (low + high) // 2
+        if power_fn(mid) >= target_power:
+            high = mid
+        else:
+            low = mid
+    return high
+
+
+def _search_min_lift(
+    power_fn: Callable[[float], float],
+    target_power: float,
+    max_lift: float,
+    tol: float,
+    error_message: str,
+) -> float:
+    """Find the smallest lift reaching ``target_power``.
+
+    Doubles a candidate lift from 0.01 until ``power_fn`` meets ``target_power``,
+    then binary-searches the resulting bracket to within ``tol``.
+
+    Raises
+    ------
+    ValueError
+        With ``error_message`` if ``target_power`` is not reached within ``max_lift``.
+    """
+    low, high = 0.0, 0.01
+    while high <= max_lift:
+        if power_fn(high) >= target_power:
+            break
+        low, high = high, high * 2
+    else:
+        raise ValueError(error_message)
+
+    while high - low > tol:
+        mid = (low + high) / 2
+        if power_fn(mid) >= target_power:
+            high = mid
+        else:
+            low = mid
+    return high
 
 
 def bayes_power_lift(
@@ -70,32 +217,14 @@ def bayes_power_lift(
         If ``alt_lift`` is provided but ``lift`` is not ``"relative"`` or
         ``"absolute"``.
     """
-    if len(group_sizes) > 2:
-        # Get two smallest groups — they govern the overall power
-        a, b, *_ = np.partition(group_sizes, 1)
-        group_sizes = [a, b]
-
-    if alt_rate is None:
-        if alt_lift is None:
-            raise ValueError("Provide either alt_lift or alt_rate")
-        if lift == "relative":
-            alt_rate = baseline * (1 + alt_lift)
-        elif lift == "absolute":
-            alt_rate = baseline + alt_lift
-        else:
-            raise NotImplementedError(f"lift '{lift}' not implemented")
-
-    successes_null = np.random.binomial(group_sizes[0], baseline, size=n_samples)
-    successes_alt = np.random.binomial(group_sizes[1], alt_rate, size=n_samples)
-    null_alpha, null_beta = alphas[0] + successes_null, betas[0] + group_sizes[0] - successes_null
-    alt_alpha, alt_beta = alphas[1] + successes_alt, betas[1] + group_sizes[1] - successes_alt
-
-    samples_null = np.random.beta(null_alpha[:, np.newaxis], null_beta[:, np.newaxis], size=(n_samples, mc_samples))
-    samples_alt = np.random.beta(alt_alpha[:, np.newaxis], alt_beta[:, np.newaxis], size=(n_samples, mc_samples))
+    group_sizes = _two_smallest_group_sizes(group_sizes)
+    alt_rate = _resolve_alt_rate(baseline, alt_lift, alt_rate, lift)
+    samples_null, samples_alt = _simulate_posterior_draws(
+        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples
+    )
 
     prob_b_better = np.mean(samples_alt > samples_null, axis=1)
-    power = float(np.mean(prob_b_better >= confidence_level))
-    return power
+    return float(np.mean(prob_b_better >= confidence_level))
 
 
 def bayes_power_loss(
@@ -171,32 +300,14 @@ def bayes_power_loss(
         If ``alt_lift`` is provided but ``lift`` is not ``"relative"`` or
         ``"absolute"``.
     """
-    if len(group_sizes) > 2:
-        # Get two smallest groups — they govern the overall power
-        a, b, *_ = np.partition(group_sizes, 1)
-        group_sizes = [a, b]
-
-    if alt_rate is None:
-        if alt_lift is None:
-            raise ValueError("Provide either alt_lift or alt_rate")
-        if lift == "relative":
-            alt_rate = baseline * (1 + alt_lift)
-        elif lift == "absolute":
-            alt_rate = baseline + alt_lift
-        else:
-            raise NotImplementedError(f"lift '{lift}' not implemented")
-
-    successes_null = np.random.binomial(group_sizes[0], baseline, size=n_samples)
-    successes_alt = np.random.binomial(group_sizes[1], alt_rate, size=n_samples)
-    null_alpha, null_beta = alphas[0] + successes_null, betas[0] + group_sizes[0] - successes_null
-    alt_alpha, alt_beta = alphas[1] + successes_alt, betas[1] + group_sizes[1] - successes_alt
-
-    samples_null = np.random.beta(null_alpha[:, np.newaxis], null_beta[:, np.newaxis], size=(n_samples, mc_samples))
-    samples_alt = np.random.beta(alt_alpha[:, np.newaxis], alt_beta[:, np.newaxis], size=(n_samples, mc_samples))
+    group_sizes = _two_smallest_group_sizes(group_sizes)
+    alt_rate = _resolve_alt_rate(baseline, alt_lift, alt_rate, lift)
+    samples_null, samples_alt = _simulate_posterior_draws(
+        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples
+    )
 
     expected_loss = np.mean(np.maximum(samples_null - samples_alt, 0), axis=1)
-    power = float(np.mean(expected_loss <= loss_threshold))
-    return power
+    return float(np.mean(expected_loss <= loss_threshold))
 
 
 def bayes_minimum_sample_size_loss(
@@ -288,26 +399,16 @@ def bayes_minimum_sample_size_loss(
             loss_threshold=loss_threshold,
         )
 
-    low, high = 100, 200
-    while high <= max_n:
-        if _power(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(
+    return _search_min_sample_size(
+        _power,
+        target_power,
+        max_n,
+        error_message=(
             f"Could not reach target power of {target_power} within "
             f"{max_n:,} samples per group. "
             "Consider a larger effect size."
-        )
-
-    while high - low > 1:
-        mid = (low + high) // 2
-        if _power(mid) >= target_power:
-            high = mid
-        else:
-            low = mid
-
-    return high
+        ),
+    )
 
 
 def bayes_minimum_sample_size(
@@ -396,28 +497,16 @@ def bayes_minimum_sample_size(
             confidence_level=confidence_level,
         )
 
-    # Phase 1: double from 100 until power exceeds target or we hit the cap
-    low, high = 100, 200
-    while high <= max_n:
-        if _power(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(
+    return _search_min_sample_size(
+        _power,
+        target_power,
+        max_n,
+        error_message=(
             f"Could not reach target power of {target_power} within "
             f"{max_n:,} samples per group. "
             "Consider a larger effect size."
-        )
-
-    # Phase 2: binary search within [low, high]
-    while high - low > 1:
-        mid = (low + high) // 2
-        if _power(mid) >= target_power:
-            high = mid
-        else:
-            low = mid
-
-    return high
+        ),
+    )
 
 
 def bayes_minimum_detectable_lift(
@@ -503,26 +592,17 @@ def bayes_minimum_detectable_lift(
             confidence_level=confidence_level,
         )
 
-    low, high = 0.0, 0.01
-    while high <= max_lift:
-        if _power(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(
+    return _search_min_lift(
+        _power,
+        target_power,
+        max_lift,
+        tol,
+        error_message=(
             f"Could not reach target power of {target_power} within "
             f"a lift of {max_lift}. "
             "Consider a smaller target power or larger group size."
-        )
-
-    while high - low > tol:
-        mid = (low + high) / 2
-        if _power(mid) >= target_power:
-            high = mid
-        else:
-            low = mid
-
-    return high
+        ),
+    )
 
 
 def bayes_minimum_detectable_lift_loss(
@@ -610,23 +690,14 @@ def bayes_minimum_detectable_lift_loss(
             loss_threshold=loss_threshold,
         )
 
-    low, high = 0.0, 0.01
-    while high <= max_lift:
-        if _power(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(
+    return _search_min_lift(
+        _power,
+        target_power,
+        max_lift,
+        tol,
+        error_message=(
             f"Could not reach target power of {target_power} within "
             f"a lift of {max_lift}. "
             "Consider a smaller target power or larger group size."
-        )
-
-    while high - low > tol:
-        mid = (low + high) / 2
-        if _power(mid) >= target_power:
-            high = mid
-        else:
-            low = mid
-
-    return high
+        ),
+    )
