@@ -1,23 +1,31 @@
 """Our wrapper for analyzing experiment results."""
 
 import math
-from typing import Any, Literal, cast
+from typing import Any, ClassVar, Literal, cast
 
 import numpy as np
-import pandas as pd
 import plotly.graph_objects as go
-import polars as pl
 from scipy.stats import beta
 from tabulate import tabulate
 
-from ab_test._display import convert_to_tabulate_str, render_forest_plot, resolve_plot_color
+from ab_test._contingency import BaseContingencyTable
+from ab_test._display import convert_to_tabulate_str, resolve_plot_color
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
 from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
 
 
-class BayesianContingencyTable:
+class BayesianContingencyTable(BaseContingencyTable):
     """A class for analyzing experiment results using Bayesian approaches."""
+
+    _columns: ClassVar[list[str]] = ["cell_name", "successes", "trials", "alpha", "beta"]
+    _pyspark_types: ClassVar[dict[str, str]] = {
+        "cell_name": "StringType",
+        "successes": "IntegerType",
+        "trials": "IntegerType",
+        "alpha": "DoubleType",
+        "beta": "DoubleType",
+    }
 
     def __init__(self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None) -> None:
         """BayesianContingencyTable is our class for creating and analyzing experiment results.
@@ -33,24 +41,27 @@ class BayesianContingencyTable:
         msrp : float
             The average msrp of our product. Used to calculate the revenue return of our campaign
         """
-        self.experiment_name: str = name
-        self.names: list[str] = []
-        self.metric_name: str = metric_name
-        self.spend: float | None = spend
-        self.msrp: float | None = msrp
-        self.cells: dict[str, Any] = {
-            "experiment_name": self.experiment_name,
-            "metric_name": self.metric_name,
-            "spend": self.spend,
-            "msrp": self.msrp,
-            "table": {},
-        }
-        self.successes: list[int] = []
-        self.trials: list[int] = []
+        super().__init__(name, metric_name, spend, msrp)
         self.alphas: list[float] = []
         self.betas: list[float] = []
-        self.incremental_results: dict[str, Any] | None = None
-        self.individual_results: dict[str, dict[str, float]] = {}
+
+    def _total_row(self) -> list[Any]:
+        """Return the ``"Total"`` row appended to :meth:`to_list`."""
+        return ["Total", np.sum(self.successes), np.sum(self.trials), np.nan, np.nan]
+
+    def _total_cell(self) -> dict[str, Any]:
+        """Return the ``"Total"`` cell dict appended to :meth:`serialize`."""
+        return {
+            "successes": int(np.sum(self.successes)),
+            "trials": int(np.sum(self.trials)),
+            "alpha": np.nan,
+            "beta": np.nan,
+        }
+
+    def _deserialize_extra(self, serial: dict[str, Any]) -> None:
+        """Restore per-cell Beta prior parameters during :meth:`deserialize`."""
+        self.alphas = [v["alpha"] for v in serial["table"].values()]
+        self.betas = [v["beta"] for v in serial["table"].values()]
 
     def add(self, cell_name: str, successes: int, trials: int, alpha: float, beta: float) -> "BayesianContingencyTable":
         """Add cells to our contingency table.
@@ -79,177 +90,6 @@ class BayesianContingencyTable:
         self.trials.append(trials)
         self.alphas.append(alpha)
         self.betas.append(beta)
-        return self
-
-    def to_df(
-        self,
-        method: str = "pandas",
-        include_total: bool = False,
-        spark_session: Any | None = None,
-        ibis_backend: Any | None = None,
-    ) -> pd.DataFrame | pl.DataFrame | Any:
-        """Return our BayesianContingencyTable as a DataFrame.
-
-        Parameters
-        ----------
-        method : {"pandas", "polars", "pyspark", "modin", "ibis", "narwhals"}
-            Whether we want our DataFrame as a pandas, polars, pyspark, modin, ibis, or narwhals DataFrame
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-        spark_session : SparkSession, optional
-            An active SparkSession, required when method="pyspark"
-        ibis_backend : ibis backend, optional
-            An Ibis backend connection. When provided, it is set as the active backend before
-            creating the memtable. When omitted, the existing default backend is used.
-
-        Returns
-        -------
-        Our BayesianContingencyTable as a DataFrame
-        """
-        method = method.casefold()
-        if method == "pandas":
-            return_df = pd.DataFrame(
-                self.to_list(include_total),
-                columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
-            )
-        elif method == "polars":
-            return_df = pl.DataFrame(
-                self.to_list(include_total), schema=["cell_name", "successes", "trials", "alpha", "beta"], orient="row"
-            )
-        elif method == "pyspark":
-            from pyspark.sql import SparkSession
-            from pyspark.sql.types import DoubleType, IntegerType, StringType, StructField, StructType
-
-            if spark_session is None:
-                spark_session = SparkSession.getActiveSession()
-            if spark_session is None:
-                raise ValueError("No active SparkSession found. Please provide a spark_session argument.")
-            schema = StructType(
-                [
-                    StructField("cell_name", StringType(), True),
-                    StructField("successes", IntegerType(), True),
-                    StructField("trials", IntegerType(), True),
-                    StructField("alpha", DoubleType(), True),
-                    StructField("beta", DoubleType(), True),
-                ]
-            )
-            return_df = spark_session.createDataFrame(self.to_list(include_total), schema=schema)
-        elif method == "data.table":
-            raise NotImplementedError("Have not implemented data.table yet")
-        elif method == "modin":
-            import modin.pandas as mpd  # type: ignore[import-not-found]
-
-            return_df = mpd.DataFrame(
-                self.to_list(include_total),
-                columns=mpd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
-            )
-        elif method == "ibis":
-            import ibis  # type: ignore[import-not-found]
-
-            if ibis_backend is not None:
-                ibis.set_backend(ibis_backend)
-            pandas_df = pd.DataFrame(
-                self.to_list(include_total),
-                columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
-            )
-            return_df = ibis.memtable(pandas_df)
-        elif method == "narwhals":
-            import narwhals as nw
-
-            pandas_df = pd.DataFrame(
-                self.to_list(include_total),
-                columns=pd.Index(["cell_name", "successes", "trials", "alpha", "beta"]),
-            )
-            return_df = nw.from_native(pandas_df)
-        else:
-            raise ValueError(f"Method {method} not supported for creating DataFrames")
-        return return_df
-
-    def to_list(self, include_total: bool = False) -> list[Any]:
-        """Return our BayesianContingencyTable as a list.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our BayesianContingencyTable as a list
-        """
-        return_list = []
-        for name in self.names:
-            return_list.append([name] + list(self.cells["table"][name].values()))
-        if include_total:
-            return_list.append(["Total", np.sum(self.successes), np.sum(self.trials), np.nan, np.nan])
-        return return_list
-
-    def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
-        """Return our BayesianContingencyTable as a numpy array.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our BayesianContingencyTable as a numpy array
-        """
-        return np.array(self.to_list(include_total))
-
-    def serialize(self, include_total: bool = False) -> dict[str, Any]:
-        """Return our BayesianContingencyTable as a JSON, with all information.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our BayesianContingencyTable as a JSON
-        """
-        table = dict(self.cells["table"])
-        if include_total:
-            table["Total"] = {
-                "successes": int(np.sum(self.successes)),
-                "trials": int(np.sum(self.trials)),
-                "alpha": np.nan,
-                "beta": np.nan,
-            }
-        return {
-            "experiment_name": self.experiment_name,
-            "metric_name": self.metric_name,
-            "spend": self.spend,
-            "msrp": self.msrp,
-            "table": table,
-        }
-
-    def deserialize(self, serial: dict[str, Any]) -> "BayesianContingencyTable":
-        """Populate our BayesianContingencyTable from a serialized version.
-
-        Used when we want to populate our BayesianContingencyTable with results from a prior campaign.
-
-        Parameters
-        ----------
-        serial : dict
-            A serialized version of our ContingencyTable
-
-        Returns
-        -------
-        Itself, to be chained with other methods
-        """
-        self.experiment_name = serial["experiment_name"]
-        self.metric_name = serial["metric_name"]
-        self.spend = serial["spend"]
-        self.msrp = serial["msrp"]
-        self.cells = serial
-        self.names = list(serial["table"].keys())
-        self.successes = [v["successes"] for v in serial["table"].values()]
-        self.trials = [v["trials"] for v in serial["table"].values()]
-        self.alphas = [v["alpha"] for v in serial["table"].values()]
-        self.betas = [v["beta"] for v in serial["table"].values()]
         return self
 
     def analyze(
@@ -388,34 +228,19 @@ class BayesianContingencyTable:
         else:
             raise ValueError(f"lift type {lift} not supported")
         success_rate = [pa, pb]
-        if lift in ["relative", "absolute"]:
-            self.incremental_results = {
-                "lift_type": lift,
-                "lift": test_lift,
-                f"{self.names[0]}": success_rate[0],
-                f"{self.names[1]}": success_rate[1],
-                "prob_b_greater_a": results["Proportion of samples where B exceeds A"],
-                "ci_lower": lb,
-                "ci_upper": ub,
-                "expected_loss": results["Expected loss"],
-                "prob_rope": results["Probability of ROPE"],
-                "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
-                "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
-            }
-        else:
-            self.incremental_results = {
-                "lift_type": lift,
-                "lift": test_lift,
-                f"{self.names[0]}": success_rate[0],
-                f"{self.names[1]}": success_rate[1],
-                "prob_b_greater_a": results["Proportion of samples where B exceeds A"],
-                "ci_lower": lb,
-                "ci_upper": ub,
-                "expected_loss": results["Expected loss"],
-                "prob_rope": results["Probability of ROPE"],
-                "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
-                "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
-            }
+        self.incremental_results = {
+            "lift_type": lift,
+            "lift": test_lift,
+            f"{self.names[0]}": success_rate[0],
+            f"{self.names[1]}": success_rate[1],
+            "prob_b_greater_a": results["Proportion of samples where B exceeds A"],
+            "ci_lower": lb,
+            "ci_upper": ub,
+            "expected_loss": results["Expected loss"],
+            "prob_rope": results["Probability of ROPE"],
+            "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
+            "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
+        }
         prob_b_exceeds_a = results["Proportion of samples where B exceeds A"]
         str_pvalue = (
             f"{convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}*"
@@ -509,43 +334,6 @@ class BayesianContingencyTable:
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
         return_string += f"\n** {round(confidence_level * 100)}% Credible Interval"
         return return_string
-
-    def plot(
-        self,
-        is_individual: bool = True,
-        reverse_plot: bool = True,
-        color: str | dict[str, Any] | list[Any] | None = None,
-    ) -> None:
-        """Plot the posterior means and credible intervals as a forest plot.
-
-        Parameters
-        ----------
-        is_individual : bool, default=True
-            Whether we are looking at the individual performance of each cell or
-            the comparative performance between variants.
-        reverse_plot : bool, default=True
-            Whether we are reversing the order of our plot or not.
-        color : str, list, dict, or None, default=None
-            If None, uses Plotly's default color scheme.
-            If a string, one of the colorblind-friendly palette names: ``"ibm"``,
-            ``"wong"``, ``"ito"``, ``"tol"``, ``"tol_bright"``, ``"tol_vibrant"``,
-            ``"tol_muted"``, ``"tol_light"``.
-            If a list, each item corresponds to a color for the relevant group.
-            If a dict, keys are group names and values are colors.
-
-        Notes
-        -----
-        This function is intended to be run after either .analyze() or
-        .analyze_individually().
-        """
-        render_forest_plot(
-            self.names,
-            self.individual_results,
-            self.incremental_results,
-            is_individual=is_individual,
-            reverse_plot=reverse_plot,
-            color=color,
-        )
 
     def plot_pdf(
         self,
@@ -645,19 +433,3 @@ class BayesianContingencyTable:
         )
 
         return fig
-
-    def __str__(self) -> str:
-        """Return a grid-formatted string representation of the contingency table.
-
-        Returns
-        -------
-        str
-            A tabulated grid showing each cell's name, successes, trials, alpha,
-            and beta, plus a totals row.
-        """
-        result: str = tabulate(
-            self.to_list(include_total=True),
-            headers=["cell_name", "successes", "trials", "alpha", "beta"],
-            tablefmt="grid",
-        )
-        return result

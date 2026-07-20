@@ -1,14 +1,13 @@
 """Our wrapper for analyzing experiment results."""
 
 import math
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
-import pandas as pd
-import polars as pl
 from tabulate import tabulate
 
-from ab_test._display import convert_to_tabulate_str, render_forest_plot
+from ab_test._contingency import BaseContingencyTable
+from ab_test._display import convert_to_tabulate_str
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
 from ab_test.frequentist_binomial.stats_tests import (
     ab_test,
@@ -20,39 +19,23 @@ from ab_test.frequentist_binomial.stats_tests import (
 from ab_test.frequentist_binomial.utils import observed_lift
 
 
-class ContingencyTable:
+class ContingencyTable(BaseContingencyTable):
     """A class for analyzing experiment results."""
 
-    def __init__(self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None) -> None:
-        """ContingencyTable is our class for creating and analyzing experiment results.
+    _columns: ClassVar[list[str]] = ["cell_name", "successes", "trials"]
+    _pyspark_types: ClassVar[dict[str, str]] = {
+        "cell_name": "StringType",
+        "successes": "IntegerType",
+        "trials": "IntegerType",
+    }
 
-        Parameters
-        ----------
-        name : str
-            The name of our experiment associated with our Contingency Table
-        metric_name : str
-            The name of our metric
-        spend : float
-            The amount we spent for this campaign. Used to calculate the ROAS of our campaign
-        msrp : float
-            The average msrp of our product. Used to calculate the revenue return of our campaign
-        """
-        self.experiment_name: str = name
-        self.names: list[str] = []
-        self.metric_name: str = metric_name
-        self.spend: float | None = spend
-        self.msrp: float | None = msrp
-        self.cells: dict[str, Any] = {
-            "experiment_name": self.experiment_name,
-            "metric_name": self.metric_name,
-            "spend": self.spend,
-            "msrp": self.msrp,
-            "table": {},
-        }
-        self.successes: list[int] = []
-        self.trials: list[int] = []
-        self.incremental_results: dict[str, Any] | None = None
-        self.individual_results: dict[str, dict[str, float]] = {}
+    def _total_row(self) -> list[Any]:
+        """Return the ``"Total"`` row appended to :meth:`to_list`."""
+        return ["Total", np.sum(self.successes), np.sum(self.trials)]
+
+    def _total_cell(self) -> dict[str, Any]:
+        """Return the ``"Total"`` cell dict appended to :meth:`serialize`."""
+        return {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials))}
 
     def add(self, cell_name: str, successes: int, trials: int) -> "ContingencyTable":
         """Add cells to our contingency table.
@@ -75,167 +58,6 @@ class ContingencyTable:
         self.names.append(cell_name)
         self.successes.append(successes)
         self.trials.append(trials)
-        return self
-
-    def to_df(
-        self,
-        method: str = "pandas",
-        include_total: bool = False,
-        spark_session: Any | None = None,
-        ibis_backend: Any | None = None,
-    ) -> pd.DataFrame | pl.DataFrame | Any:
-        """Return our ContingencyTable as a DataFrame.
-
-        Parameters
-        ----------
-        method : {"pandas", "polars", "pyspark", "modin", "ibis", "narwhals"}
-            Whether we want our DataFrame as a pandas, polars, pyspark, modin, ibis, or narwhals DataFrame
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-        spark_session : SparkSession, optional
-            An active SparkSession, required when method="pyspark"
-        ibis_backend : ibis backend, optional
-            An Ibis backend connection. When provided, it is set as the active backend before
-            creating the memtable. When omitted, the existing default backend is used.
-
-        Returns
-        -------
-        Our ContingencyTable as a DataFrame
-        """
-        method = method.casefold()
-        if method == "pandas":
-            return_df = pd.DataFrame(
-                self.to_list(include_total), columns=pd.Index(["cell_name", "successes", "trials"])
-            )
-        elif method == "polars":
-            return_df = pl.DataFrame(
-                self.to_list(include_total), schema=["cell_name", "successes", "trials"], orient="row"
-            )
-        elif method == "pyspark":
-            from pyspark.sql import SparkSession
-            from pyspark.sql.types import IntegerType, StringType, StructField, StructType
-
-            if spark_session is None:
-                spark_session = SparkSession.getActiveSession()
-            if spark_session is None:
-                raise ValueError("No active SparkSession found. Please provide a spark_session argument.")
-            schema = StructType(
-                [
-                    StructField("cell_name", StringType(), True),
-                    StructField("successes", IntegerType(), True),
-                    StructField("trials", IntegerType(), True),
-                ]
-            )
-            return_df = spark_session.createDataFrame(self.to_list(include_total), schema=schema)
-        elif method == "data.table":
-            raise NotImplementedError("Have not implemented data.table yet")
-        elif method == "modin":
-            import modin.pandas as mpd  # type: ignore[import-not-found]
-
-            return_df = mpd.DataFrame(
-                self.to_list(include_total),
-                columns=mpd.Index(["cell_name", "successes", "trials"]),
-            )
-        elif method == "ibis":
-            import ibis  # type: ignore[import-not-found]
-
-            if ibis_backend is not None:
-                ibis.set_backend(ibis_backend)
-            pandas_df = pd.DataFrame(
-                self.to_list(include_total),
-                columns=pd.Index(["cell_name", "successes", "trials"]),
-            )
-            return_df = ibis.memtable(pandas_df)
-        elif method == "narwhals":
-            import narwhals as nw
-
-            pandas_df = pd.DataFrame(
-                self.to_list(include_total),
-                columns=pd.Index(["cell_name", "successes", "trials"]),
-            )
-            return_df = nw.from_native(pandas_df)
-        else:
-            raise ValueError(f"Method {method} not supported for creating DataFrames")
-        return return_df
-
-    def to_list(self, include_total: bool = False) -> list[Any]:
-        """Return our ContingencyTable as a list.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our ContingencyTable as a list
-        """
-        return_list = []
-        for name in self.names:
-            return_list.append([name] + list(self.cells["table"][name].values()))
-        if include_total:
-            return_list.append(["Total", np.sum(self.successes), np.sum(self.trials)])
-        return return_list
-
-    def to_numpy(self, include_total: bool = False) -> np.ndarray[Any, Any]:
-        """Return our ContingencyTable as a numpy array.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our ContingencyTable as a numpy array
-        """
-        return np.array(self.to_list(include_total))
-
-    def serialize(self, include_total: bool = False) -> dict[str, Any]:
-        """Return our ContingencyTable as a JSON, with all information.
-
-        Parameters
-        ----------
-        include_total : bool, default=False
-            Whether we want to include another section with the total amount
-
-        Returns
-        -------
-        Our ContingencyTable as a JSON
-        """
-        table = dict(self.cells["table"])
-        if include_total:
-            table["Total"] = {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials))}
-        return {
-            "experiment_name": self.experiment_name,
-            "metric_name": self.metric_name,
-            "spend": self.spend,
-            "msrp": self.msrp,
-            "table": table,
-        }
-
-    def deserialize(self, serial: dict[str, Any]) -> "ContingencyTable":
-        """Populate our ContingencyTable from a serialized version.
-
-        Used when we want to populate our ContingencyTable with results from a prior campaign.
-
-        Parameters
-        ----------
-        serial : dict
-            A serialized version of our ContingencyTable
-
-        Returns
-        -------
-        Itself, to be chained with other methods
-        """
-        self.experiment_name = serial["experiment_name"]
-        self.metric_name = serial["metric_name"]
-        self.spend = serial["spend"]
-        self.msrp = serial["msrp"]
-        self.cells = serial
-        self.names = list(serial["table"].keys())
-        self.successes = [v["successes"] for v in serial["table"].values()]
-        self.trials = [v["trials"] for v in serial["table"].values()]
         return self
 
     def analyze(
@@ -384,50 +206,3 @@ class ContingencyTable:
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
         return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
         return return_string
-
-    def plot(
-        self,
-        is_individual: bool = True,
-        reverse_plot: bool = True,
-        color: str | dict[str, Any] | list[Any] | None = None,
-    ) -> None:
-        """Plot the point estimates as well as confidence intervals.
-
-        Parameters
-        ----------
-        is_individual : bool, default=True
-            Whether we are looking at the individual performance of each cell or the comparative performance
-        reverse_plot : bool, default=True
-            Whether we are reversing the order of our plot or not.
-        color : str or list or dict, default=None
-            If None, then uses plotly's default color scheme.
-            If a string, then one of the available colorblind options
-            If a list, then each item in the list corresponds to a color for the relevant group
-            If a dictionary, then each key in the dictionary corresponds to a group with the
-            value pertaining to its color
-
-        Returns
-        -------
-        A plot of our point estimates as well as confidence intervals
-
-        Notes
-        -----
-        This function is intended to be run _after_ either .analyze() or .analyze_individually()
-        """
-        render_forest_plot(
-            self.names,
-            self.individual_results,
-            self.incremental_results,
-            is_individual=is_individual,
-            reverse_plot=reverse_plot,
-            color=color,
-        )
-
-    def __str__(self) -> str:
-        """Return a tabulated string representation of the ContingencyTable."""
-        result: str = tabulate(
-            self.to_list(include_total=True),
-            headers=["cell_name", "successes", "trials"],
-            tablefmt="grid",
-        )
-        return result
