@@ -29,7 +29,7 @@ def ab_test(
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
-    method: str = "score_test",
+    method: str = "score",
 ) -> float | bool:
     """Dispatch to our different statistical tests.
 

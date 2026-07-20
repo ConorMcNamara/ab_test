@@ -62,8 +62,8 @@ class TestConfidenceIntervalComparison:
     def test_extremes_01():
         trials = [1000, 1000]
         successes = [0, 1]
-        expected_low = "-Infinity"
-        expected_high = "Infinity"
+        expected_low = float("-inf")
+        expected_high = float("inf")
         actual_low, actual_high = confidence_interval(trials, successes)
         assert actual_low == expected_low
         assert actual_high == expected_high
@@ -72,8 +72,8 @@ class TestConfidenceIntervalComparison:
     def test_extremes_00():
         trials = [1000, 1000]
         successes = [0, 0]
-        expected_low = "-Infinity"
-        expected_high = "Infinity"
+        expected_low = float("-inf")
+        expected_high = float("inf")
         actual_low, actual_high = confidence_interval(trials, successes)
         assert actual_low == expected_low
         assert actual_high == expected_high

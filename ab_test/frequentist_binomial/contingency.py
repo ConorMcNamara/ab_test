@@ -20,6 +20,46 @@ from ab_test.frequentist_binomial.stats_tests import (
 from ab_test.frequentist_binomial.utils import observed_lift
 
 
+def _scale_bound(bound: float, factor: float) -> float:
+    """Scale a lift bound to a count, leaving unbounded (infinite) bounds intact.
+
+    ``confidence_interval`` returns ``±math.inf`` when a bound does not exist.
+    ``math.ceil`` cannot convert an infinite float to an int, so such bounds are
+    passed through unchanged.
+
+    Parameters
+    ----------
+    bound : float
+        The confidence-interval bound to scale.
+    factor : float
+        The multiplier used to convert the bound to a count.
+
+    Returns
+    -------
+    float
+        ``bound`` unchanged if it is infinite, otherwise ``ceil(bound * factor)``.
+    """
+    if math.isinf(bound):
+        return bound
+    return math.ceil(bound * factor)
+
+
+def _format_infinity(value: float) -> str:
+    """Render an infinite bound as a compact symbol.
+
+    Parameters
+    ----------
+    value : float
+        An infinite value (``math.inf`` or ``-math.inf``).
+
+    Returns
+    -------
+    str
+        ``"∞"`` for positive infinity, ``"-∞"`` for negative infinity.
+    """
+    return "∞" if value > 0 else "-∞"
+
+
 class ContingencyTable:
     """A class for analyzing experiment results."""
 
@@ -293,13 +333,13 @@ class ContingencyTable:
             if self.trials[0] > self.trials[1]:
                 pb = math.ceil(self.successes[1] * (self.trials[0] / self.trials[1]))
                 pa = math.ceil(self.successes[0])
-                lb = math.ceil(lb * self.trials[0])
-                ub = math.ceil(ub * self.trials[0])
+                lb = _scale_bound(lb, self.trials[0])
+                ub = _scale_bound(ub, self.trials[0])
             else:
                 pa = math.ceil(self.successes[0] * (self.trials[1] / self.trials[0]))
                 pb = math.ceil(self.successes[1])
-                lb = math.ceil(lb * self.trials[1])
-                ub = math.ceil(ub * self.trials[1])
+                lb = _scale_bound(lb, self.trials[1])
+                ub = _scale_bound(ub, self.trials[1])
             test_lift = pb - pa
             if lift == "roas":
                 if self.spend is None:
@@ -408,28 +448,23 @@ class ContingencyTable:
         -------
         Our new str_value, as either a percentage or dollar sign
         """
-        str_value: str | list[str] | float
+
+        def _format_one(val: float) -> str | float:
+            if math.isinf(val):
+                return _format_infinity(val)
+            if lift in ["revenue", "roas"]:
+                return f"${round(val, 2):,}"
+            if lift in ["absolute", "relative"]:
+                return f"{round(val * 100.0, 2)}%"
+            if lift == "incremental":
+                return val
+            raise ValueError(f"No support for {lift}")
+
         if isinstance(value, (int, float)):
-            if lift in ["revenue", "roas"]:
-                str_value = f"${round(value, 2):,}"
-            elif lift in ["absolute", "relative"]:
-                str_value = f"{round(value * 100.0, 2)}%"
-            elif lift in ["incremental"]:
-                str_value = value
-            else:
-                raise ValueError(f"No support for {lift}")
-        elif isinstance(value, list):
-            if lift in ["revenue", "roas"]:
-                str_value = [f"${round(val, 2):,}" for val in value]
-            elif lift in ["absolute", "relative"]:
-                str_value = [f"{round(val * 100.0, 2)}%" for val in value]
-            elif lift == "incremental":
-                str_value = value
-            else:
-                raise ValueError(f"No support for {lift}")
-        else:
-            raise TypeError(f"No support for converting {value} to string")
-        return str_value
+            return _format_one(value)
+        if isinstance(value, list):
+            return [_format_one(val) for val in value]
+        raise TypeError(f"No support for converting {value} to string")
 
     def plot(
         self,

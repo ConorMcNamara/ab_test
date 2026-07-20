@@ -31,7 +31,7 @@ def _search_lower_bound(
     lift: str,
     pa: float,
     tol: float,
-) -> float | str:
+) -> float:
     eps = 0.01
     lower_bound_exists = True
     while True:
@@ -57,7 +57,7 @@ def _search_lower_bound(
     elif successes[0] > 0:
         return -1.0
     else:
-        return "-Infinity"
+        return -math.inf
 
 
 def _search_upper_bound(
@@ -70,7 +70,7 @@ def _search_upper_bound(
     lift: str,
     tol: float,
     upper_bound_exists: bool,
-) -> float | str:
+) -> float:
     if upper_bound_exists:
         eps = 0.01
         while True:
@@ -94,7 +94,7 @@ def _search_upper_bound(
                 ub_ub = ub
         return 0.5 * (ub_lb + ub_ub)
     elif lift == "relative":
-        return "Infinity"
+        return math.inf
     else:
         return 1.0
 
@@ -148,8 +148,8 @@ def confidence_interval(
     except ZeroDivisionError:
         ote = 1.0
         upper_bound_exists = False
-    lb: float | str
-    ub: float | str
+    lb: float
+    ub: float
     if method == "binary_search":
         if test.__name__ in ["score_test", "likelihood_ratio_test", "z_test"]:
             if lift == "relative":

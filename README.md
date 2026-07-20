@@ -190,7 +190,7 @@ print(bct)                                  # grid table
 print(bct.analyze(lift="relative"))         # relative lift + ROPE
 print(bct.analyze(lift="revenue"))          # incremental revenue + ROPE
 print(bct.analyze(lift="roas"))             # cost-per-acquisition + ROPE
-bct.plot_individually()                     # posterior PDF chart
+bct.plot_pdf().show()                       # posterior PDF chart
 ```
 
 ```python
@@ -293,7 +293,9 @@ calculate_rope(sample_a, sample_b, lift="roas", low=-1, high=1, trials=(1_000, 1
 |---|---|
 | `.add(cell_name, successes, trials, alpha, beta)` | Add a cell; returns `self` for chaining |
 | `.analyze(lift, cred_int_method, confidence_level, is_sample, n_samples, low_threshold, high_threshold)` | Run Bayesian analysis and return a formatted summary with ROPE metrics |
-| `.plot_individually(confidence_level, n_samples)` | Posterior PDF chart with HDI bars and P(B > A) title |
+| `.analyze_individually(cred_int_method, confidence_level)` | Credible interval for each cell independently |
+| `.plot(is_individual, reverse_plot, color)` | Plotly forest plot of posterior means + credible intervals |
+| `.plot_pdf(confidence_level, n_samples, color)` | Posterior PDF chart with HDI bars and P(B > A) title; returns a `go.Figure` |
 | `.to_df(method, include_total)` | Export to pandas, polars, PySpark, modin, ibis, or narwhals DataFrame |
 | `.to_list(include_total)` | Export to a plain list |
 | `.to_numpy(include_total)` | Export to a NumPy array |
