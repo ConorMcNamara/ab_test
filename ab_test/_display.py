@@ -5,6 +5,7 @@ renderer used by both :class:`~ab_test.frequentist_binomial.contingency.Continge
 and :class:`~ab_test.bayesian_binomial.contingency.BayesianContingencyTable`.
 """
 
+import math
 from typing import Any, overload
 
 import plotly.graph_objects as go
@@ -28,6 +29,22 @@ COLORBLIND_PALETTES: dict[str, list[str]] = {
     "tol_muted": ["#cc6677", "#332288", "#ddcc77", "#117733", "#88ccee", "#882255", "#44aa99", "#999933", "#aa4499"],
     "tol_light": ["#77aadd", "#ee8866", "#eedd88", "#ffaabb", "#99ddff", "#44bb99", "#bbcc33", "#bbcc33"],
 }
+
+
+def _format_infinity(value: float) -> str:
+    """Render an infinite bound as a compact symbol.
+
+    Parameters
+    ----------
+    value : float
+        An infinite value (``math.inf`` or ``-math.inf``).
+
+    Returns
+    -------
+    str
+        ``"∞"`` for positive infinity, ``"-∞"`` for negative infinity.
+    """
+    return "∞" if value > 0 else "-∞"
 
 
 def resolve_plot_color(
@@ -98,28 +115,23 @@ def convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[A
     TypeError
         If ``value`` is neither a number nor a list.
     """
-    str_value: str | list[str] | float
+
+    def _format_one(val: float) -> str | float:
+        if math.isinf(val):
+            return _format_infinity(val)
+        if lift in ["revenue", "roas"]:
+            return f"${round(val, 2):,}"
+        if lift in ["absolute", "relative"]:
+            return f"{round(val * 100.0, 2)}%"
+        if lift == "incremental":
+            return val
+        raise ValueError(f"No support for {lift}")
+
     if isinstance(value, (int, float)):
-        if lift in ["revenue", "roas"]:
-            str_value = f"${round(value, 2):,}"
-        elif lift in ["absolute", "relative"]:
-            str_value = f"{round(value * 100.0, 2)}%"
-        elif lift in ["incremental"]:
-            str_value = value
-        else:
-            raise ValueError(f"No support for {lift}")
-    elif isinstance(value, list):
-        if lift in ["revenue", "roas"]:
-            str_value = [f"${round(val, 2):,}" for val in value]
-        elif lift in ["absolute", "relative"]:
-            str_value = [f"{round(val * 100.0, 2)}%" for val in value]
-        elif lift == "incremental":
-            str_value = value
-        else:
-            raise ValueError(f"No support for {lift}")
-    else:
-        raise TypeError(f"No support for converting {value} to string")
-    return str_value
+        return _format_one(value)
+    if isinstance(value, list):
+        return [_format_one(val) for val in value]
+    raise TypeError(f"No support for converting {value} to string")
 
 
 def render_forest_plot(
