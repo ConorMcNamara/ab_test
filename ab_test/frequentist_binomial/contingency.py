@@ -44,6 +44,22 @@ def _scale_bound(bound: float, factor: float) -> float:
     return math.ceil(bound * factor)
 
 
+def _format_infinity(value: float) -> str:
+    """Render an infinite bound as a compact symbol.
+
+    Parameters
+    ----------
+    value : float
+        An infinite value (``math.inf`` or ``-math.inf``).
+
+    Returns
+    -------
+    str
+        ``"∞"`` for positive infinity, ``"-∞"`` for negative infinity.
+    """
+    return "∞" if value > 0 else "-∞"
+
+
 class ContingencyTable:
     """A class for analyzing experiment results."""
 
@@ -432,28 +448,23 @@ class ContingencyTable:
         -------
         Our new str_value, as either a percentage or dollar sign
         """
-        str_value: str | list[str] | float
+
+        def _format_one(val: float) -> str | float:
+            if math.isinf(val):
+                return _format_infinity(val)
+            if lift in ["revenue", "roas"]:
+                return f"${round(val, 2):,}"
+            if lift in ["absolute", "relative"]:
+                return f"{round(val * 100.0, 2)}%"
+            if lift == "incremental":
+                return val
+            raise ValueError(f"No support for {lift}")
+
         if isinstance(value, (int, float)):
-            if lift in ["revenue", "roas"]:
-                str_value = f"${round(value, 2):,}"
-            elif lift in ["absolute", "relative"]:
-                str_value = f"{round(value * 100.0, 2)}%"
-            elif lift in ["incremental"]:
-                str_value = value
-            else:
-                raise ValueError(f"No support for {lift}")
-        elif isinstance(value, list):
-            if lift in ["revenue", "roas"]:
-                str_value = [f"${round(val, 2):,}" for val in value]
-            elif lift in ["absolute", "relative"]:
-                str_value = [f"{round(val * 100.0, 2)}%" for val in value]
-            elif lift == "incremental":
-                str_value = value
-            else:
-                raise ValueError(f"No support for {lift}")
-        else:
-            raise TypeError(f"No support for converting {value} to string")
-        return str_value
+            return _format_one(value)
+        if isinstance(value, list):
+            return [_format_one(val) for val in value]
+        raise TypeError(f"No support for converting {value} to string")
 
     def plot(
         self,
