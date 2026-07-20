@@ -20,6 +20,30 @@ from ab_test.frequentist_binomial.stats_tests import (
 from ab_test.frequentist_binomial.utils import observed_lift
 
 
+def _scale_bound(bound: float, factor: float) -> float:
+    """Scale a lift bound to a count, leaving unbounded (infinite) bounds intact.
+
+    ``confidence_interval`` returns ``±math.inf`` when a bound does not exist.
+    ``math.ceil`` cannot convert an infinite float to an int, so such bounds are
+    passed through unchanged.
+
+    Parameters
+    ----------
+    bound : float
+        The confidence-interval bound to scale.
+    factor : float
+        The multiplier used to convert the bound to a count.
+
+    Returns
+    -------
+    float
+        ``bound`` unchanged if it is infinite, otherwise ``ceil(bound * factor)``.
+    """
+    if math.isinf(bound):
+        return bound
+    return math.ceil(bound * factor)
+
+
 class ContingencyTable:
     """A class for analyzing experiment results."""
 
@@ -293,13 +317,13 @@ class ContingencyTable:
             if self.trials[0] > self.trials[1]:
                 pb = math.ceil(self.successes[1] * (self.trials[0] / self.trials[1]))
                 pa = math.ceil(self.successes[0])
-                lb = math.ceil(lb * self.trials[0])
-                ub = math.ceil(ub * self.trials[0])
+                lb = _scale_bound(lb, self.trials[0])
+                ub = _scale_bound(ub, self.trials[0])
             else:
                 pa = math.ceil(self.successes[0] * (self.trials[1] / self.trials[0]))
                 pb = math.ceil(self.successes[1])
-                lb = math.ceil(lb * self.trials[1])
-                ub = math.ceil(ub * self.trials[1])
+                lb = _scale_bound(lb, self.trials[1])
+                ub = _scale_bound(ub, self.trials[1])
             test_lift = pb - pa
             if lift == "roas":
                 if self.spend is None:
