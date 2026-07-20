@@ -18,6 +18,7 @@ __all__ = [
     "jeffrey_interval",
     "clopper_pearson_interval",
     "wald_interval",
+    "delta_interval",
 ]
 
 
@@ -128,7 +129,7 @@ def confidence_interval(
         Whether to interpret the null lift relative to the baseline success
         rate, or in absolute terms. See Notes in
         `maximum_likelihood_estimation`.
-    method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald'}
+    method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald', 'delta'}
         How we want to calculate the confidence interval
     tol : float, default=1e-06
         The tolerance for our binary search. Lower values means narrower CIs

@@ -11,7 +11,8 @@ test:
 # Run tests, skipping the slow simulation tests
 test-fast:
 	poetry run pytest tests/ -v \
-		--ignore=tests/binomial/test_power_calculations.py \
+		--ignore=tests/frequentist_binomial/test_power_calculations.py \
+		--ignore=tests/bayesian_binomial/test_bayesian_power_calculations.py \
 		-k "not coverage"
 
 # Check for lint errors (does not modify files)

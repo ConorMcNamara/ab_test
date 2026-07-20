@@ -61,6 +61,7 @@ The key rules enforced are:
 
 - `E` / `F` — standard pycodestyle and pyflakes errors
 - `UP` — pyupgrade: modern Python syntax (e.g., `X | Y` instead of `Union[X, Y]`)
+- `D` — pydocstyle: numpy-style docstrings (enforced on `ab_test/`; tests are exempt)
 
 ### Type annotations
 
@@ -71,29 +72,40 @@ The key rules enforced are:
 
 ### Tests
 
-- Tests live in `tests/binomial/` and mirror the source layout.
-- Use `pytest`. Run with `make test`.
+- Tests live under `tests/` and mirror the source layout (`tests/frequentist_binomial/`, `tests/bayesian_binomial/`).
+- Use `pytest`. Run with `make test`, or `make test-fast` to skip the slow simulation tests.
 - Every new public function or method needs at least one test.
-- Avoid adding new slow tests (marked `# @pytest.mark.slow`) without good reason.
+- Avoid adding new slow simulation tests without good reason.
 
 ## Project Layout
 
 ```
 ab_test/
 ├── ab_test/
-│   └── binomial/
-│       ├── confidence_intervals.py   # CI methods (Wilson, Agresti-Coull, etc.)
-│       ├── contingency.py            # ContingencyTable class
-│       ├── power_calculations.py     # Power, MDL, required sample size
-│       ├── stats_tests.py            # Significance tests
-│       └── utils.py                  # MLE, observed lift, Wilson significance
+│   ├── frequentist_binomial/
+│   │   ├── confidence_intervals.py   # CI methods (Wilson, Agresti-Coull, delta, etc.)
+│   │   ├── contingency.py            # ContingencyTable class
+│   │   ├── power_calculations.py     # Power, MDL, required sample size
+│   │   ├── stats_tests.py            # Significance tests
+│   │   └── utils.py                  # MLE, observed lift, Wilson significance
+│   └── bayesian_binomial/
+│       ├── contingency.py            # BayesianContingencyTable class
+│       ├── credible_intervals.py     # Credible/HDI intervals
+│       ├── power_calculations.py     # Bayesian power, MDL, sample size
+│       ├── stats_tests.py            # P(B > A), expected loss, ROPE
+│       └── utils.py                  # Posterior sampling and mean
 └── tests/
-    └── binomial/
-        ├── test_confidence_intervals.py
-        ├── test_contingency.py
-        ├── test_power_calculations.py
-        ├── test_stats_test.py
-        └── test_utils.py
+    ├── frequentist_binomial/
+    │   ├── test_confidence_intervals.py
+    │   ├── test_contingency.py
+    │   ├── test_power_calculations.py
+    │   ├── test_stats_test.py
+    │   └── test_utils.py
+    └── bayesian_binomial/
+        ├── test_bayesian_contingency.py
+        ├── test_bayesian_power_calculations.py
+        ├── test_bayesian_stats_tests.py
+        └── test_credible_intervals.py
 ```
 
 ## Reporting Bugs

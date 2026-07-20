@@ -21,7 +21,7 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 
 ## Requirements
 
-- Python >= 3.11
+- Python >= 3.13
 - [Poetry](https://python-poetry.org/) (for dependency management)
 
 ## Installation
