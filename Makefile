@@ -2,36 +2,36 @@
 
 # Install all dependencies including dev tools
 install:
-	poetry install --extras dev
+	uv sync --extra dev
 
 # Run the full test suite
 test:
-	poetry run pytest tests/ -v
+	uv run pytest tests/ -v
 
 # Run tests, skipping the slow simulation tests
 test-fast:
-	poetry run pytest tests/ -v \
+	uv run pytest tests/ -v \
 		--ignore=tests/frequentist_binomial/test_power_calculations.py \
 		--ignore=tests/bayesian_binomial/test_bayesian_power_calculations.py \
 		-k "not coverage"
 
 # Check for lint errors (does not modify files)
 lint:
-	poetry run ruff check ab_test/ tests/
+	uv run ruff check ab_test/ tests/
 
 # Auto-format and auto-fix lint issues
 format:
-	poetry run ruff format ab_test/ tests/
-	poetry run ruff check --fix ab_test/ tests/
+	uv run ruff format ab_test/ tests/
+	uv run ruff check --fix ab_test/ tests/
 
 # Run tests and open an HTML coverage report
 coverage:
-	poetry run pytest tests/ -v --cov-report=html
+	uv run pytest tests/ -v --cov-report=html
 	open htmlcov/index.html
 
 # Run zuban type checking
 typecheck:
-	poetry run zuban check ab_test/
+	uv run zuban check ab_test/
 
 # Run lint + typecheck + tests (full quality gate)
 check: lint typecheck test

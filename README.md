@@ -22,14 +22,21 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 ## Requirements
 
 - Python >= 3.13
-- [Poetry](https://python-poetry.org/) (for dependency management)
+- [uv](https://docs.astral.sh/uv/) (for dependency management)
 
 ## Installation
 
 ```bash
 git clone https://github.com/ConorMcNamara/ab_test.git
 cd ab_test
-poetry install --extras dev
+uv sync --extra dev
+```
+
+Optional DataFrame backends for `ContingencyTable.to_df` / `BayesianContingencyTable.to_df`
+are separate extras — install only the one you need:
+
+```bash
+uv sync --extra pyspark   # or: modin, ibis, narwhals
 ```
 
 ## Quick Start

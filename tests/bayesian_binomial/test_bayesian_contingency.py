@@ -157,7 +157,7 @@ class TestBayesianContingencyTable:
         ct.add("Test", 110, 1_000, 1, 1)
         ct_df = ct.to_df(method="modin", include_total=include_total)
         assert isinstance(ct_df, mpd.DataFrame)
-        pd.testing.assert_frame_equal(ct_df.to_pandas(), expected)
+        pd.testing.assert_frame_equal(ct_df.modin.to_pandas(), expected)
 
     @pytest.mark.parametrize(
         "include_total, expected",

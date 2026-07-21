@@ -9,33 +9,41 @@ readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.13"
 dependencies = [
-    "numpy (>=1.24.0)",
-    "scipy (>=1.16.1)",
-    "tabulate (>=0.9.0,<0.10.0)",
-    "pandas (>=2.2.3,<3.0.0)",
-    "polars (>=1.27.1,<2.0.0)",
-    "plotly (>=6.0.1,<7.0.0)",
-    "pytest>=8.4.2",
-    "pytest-cov==7.1.0",
-    "scipy-stubs~=1.17.1",
-    "pandas-stubs~=2.3.3",
-    "pyspark-stubs>=3.0.0.post3",
+    "numpy>=1.24.0",
+    "scipy>=1.16.1",
+    "tabulate>=0.9.0,<0.10.0",
+    "pandas>=2.2.3,<3.0.0",
+    "polars>=1.27.1,<2.0.0",
+    "plotly>=6.0.1,<7.0.0",
 ]
 
 [project.optional-dependencies]
+# Optional DataFrame backends for ContingencyTable.to_df(method=...).
+# Install only the backend you need, e.g. `uv sync --extra pyspark`.
+pyspark = ["pyspark"]
+modin = ["modin[dask]"]
+ibis = ["ibis-framework"]
+narwhals = ["narwhals"]
 dev = [
-    "pytest (>=8.3.5,<9.0.0)",
-    "pytest-cov (>=6.0.0)",
-    "zuban (>=0.1.0)",
+    "pytest>=8.4.2,<9.0.0",
+    "pytest-cov>=6.0.0",
+    "zuban>=0.1.0",
+    "ruff>=0.9.0",
     "types-tabulate",
-    "pandas-stubs",
-    "ruff (>=0.9.0)",
+    "pandas-stubs~=2.3.3",
+    "scipy-stubs~=1.17.1",
+    "pyspark-stubs>=3.0.0.post3",
 ]
 
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.10,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the ab_test package lives at the repo root, not under src/.
+module-root = ""
+module-name = "ab_test"
 
 [tool.pytest.ini_options]
 pythonpath = ["ab_test", '.']
