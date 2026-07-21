@@ -37,8 +37,13 @@ dev = [
 
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.10,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Flat layout: the ab_test package lives at the repo root, not under src/.
+module-root = ""
+module-name = "ab_test"
 
 [tool.pytest.ini_options]
 pythonpath = ["ab_test", '.']
