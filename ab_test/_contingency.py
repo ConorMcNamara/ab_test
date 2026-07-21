@@ -19,6 +19,10 @@ from tabulate import tabulate
 
 from ab_test._display import render_forest_plot
 
+__all__ = [
+    "BaseContingencyTable",
+]
+
 
 class BaseContingencyTable:
     """Common storage, export, and plotting for contingency tables."""

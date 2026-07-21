@@ -1,9 +1,16 @@
 """General utility functions."""
 
+from typing import Any
+
 import numpy as np
 
+__all__ = [
+    "sample_beta",
+    "posterior_mean",
+]
 
-def sample_beta(s: int, n: int, alpha: float, beta: float, n_samples: int) -> np.ndarray:
+
+def sample_beta(s: int, n: int, alpha: float, beta: float, n_samples: int) -> np.ndarray[Any, Any]:
     """Draw samples from the Beta posterior given observed binomial data.
 
     Combines the observed data with the Beta prior to form the posterior

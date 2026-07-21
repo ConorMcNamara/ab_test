@@ -18,6 +18,10 @@ from ab_test.frequentist_binomial.stats_tests import (
 )
 from ab_test.frequentist_binomial.utils import observed_lift
 
+__all__ = [
+    "ContingencyTable",
+]
+
 
 def _scale_bound(bound: float, factor: float) -> float:
     """Scale a lift bound to a count, leaving unbounded (infinite) bounds intact.

@@ -5,6 +5,15 @@ from typing import Any, Literal
 
 import numpy as np
 
+__all__ = [
+    "bayes_power_lift",
+    "bayes_power_loss",
+    "bayes_minimum_sample_size",
+    "bayes_minimum_sample_size_loss",
+    "bayes_minimum_detectable_lift",
+    "bayes_minimum_detectable_lift_loss",
+]
+
 
 def _resolve_alt_rate(
     baseline: float,

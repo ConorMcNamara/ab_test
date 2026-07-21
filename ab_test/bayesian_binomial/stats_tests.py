@@ -6,6 +6,14 @@ import numpy as np
 
 from ab_test.bayesian_binomial.utils import sample_beta
 
+__all__ = [
+    "calculate_rope",
+    "probability_b_greater_than_a",
+    "expected_loss_b",
+    "prob_lift_exceeds",
+    "calculate_metrics",
+]
+
 
 def calculate_rope(
     sample_a: np.ndarray[Any, Any] | list[Any],
@@ -16,7 +24,7 @@ def calculate_rope(
     trials: tuple[int, int] | None = None,
     spend: float | None = None,
     msrp: float | None = None,
-) -> dict:
+) -> dict[str, float]:
     """Calculate the probability that the lift between B and A falls within the ROPE.
 
     The Region of Practical Equivalence (ROPE) is the interval [low, high]
@@ -99,18 +107,20 @@ def calculate_rope(
         raise NotImplementedError(f"lift {lift} not implemented")
 
     # Calculate what % of samples fall within the ROPE
-    prob_in_rope = np.mean((lift_arr >= low) & (lift_arr <= high))
+    prob_in_rope = float(np.mean((lift_arr >= low) & (lift_arr <= high)))
 
     # Also useful: Prob B is practically better (above ROPE)
-    prob_better = np.mean(lift_arr > high)
+    prob_better = float(np.mean(lift_arr > high))
 
     # Also useful: Prob B is practically worse (below ROPE)
-    prob_worse = np.mean(lift_arr < low)
+    prob_worse = float(np.mean(lift_arr < low))
 
     return {"prob_in_rope": prob_in_rope, "prob_lift_exceeds": prob_better, "prob_lift_drops": prob_worse}
 
 
-def probability_b_greater_than_a(sample_a: np.ndarray[Any] | list[Any], sample_b: np.ndarray[Any] | list[Any]) -> float:
+def probability_b_greater_than_a(
+    sample_a: np.ndarray[Any, Any] | list[Any], sample_b: np.ndarray[Any, Any] | list[Any]
+) -> float:
     """Estimate the probability that variant B is greater than variant A.
 
     Parameters
@@ -128,7 +138,7 @@ def probability_b_greater_than_a(sample_a: np.ndarray[Any] | list[Any], sample_b
     return calculate_rope(sample_a, sample_b, lift="absolute", high=0.0)["prob_lift_exceeds"]
 
 
-def expected_loss_b(sample_a: np.ndarray[Any], sample_b: np.ndarray[Any]) -> float:
+def expected_loss_b(sample_a: np.ndarray[Any, Any], sample_b: np.ndarray[Any, Any]) -> float:
     """Compute the expected loss from choosing variant B over variant A.
 
     The expected loss is the average amount by which A would exceed B across
@@ -147,12 +157,12 @@ def expected_loss_b(sample_a: np.ndarray[Any], sample_b: np.ndarray[Any]) -> flo
     float
         Expected loss incurred by selecting variant B.
     """
-    loss_b = np.maximum(sample_a - sample_b, 0).mean()
+    loss_b = float(np.maximum(sample_a - sample_b, 0).mean())
     return loss_b
 
 
 def prob_lift_exceeds(
-    sample_a: np.ndarray[Any], sample_b: np.ndarray[Any], lift: str = "relative", threshold: float = 0.01
+    sample_a: np.ndarray[Any, Any], sample_b: np.ndarray[Any, Any], lift: str = "relative", threshold: float = 0.01
 ) -> float:
     """Calculate the probability that the lift of B over A exceeds a threshold.
 
