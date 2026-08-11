@@ -1,5 +1,5 @@
 [project]
-name = "ab-test"
+name = "abtest-analysis"
 version = "0.1.0"
 description = "Analyze the effects of an AB test using Python"
 authors = [
@@ -8,6 +8,15 @@ authors = [
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.13"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "numpy>=1.24.0",
     "scipy>=1.16.1",
@@ -35,6 +44,11 @@ dev = [
     "pyspark-stubs>=3.0.0.post3",
 ]
 
+
+[project.urls]
+Homepage = "https://github.com/ConorMcNamara/ab_test"
+Repository = "https://github.com/ConorMcNamara/ab_test"
+Issues = "https://github.com/ConorMcNamara/ab_test/issues"
 
 [build-system]
 requires = ["uv_build>=0.10,<0.12"]
