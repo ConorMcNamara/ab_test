@@ -6,7 +6,8 @@ from typing import Any, Literal
 import numpy as np
 import scipy.stats as ss
 
-from ab_test.frequentist_binomial.utils import mle_under_null, mle_under_alternative
+from ab_test.frequentist_binomial.msprt import msprt_test
+from ab_test.frequentist_binomial.utils import mle_under_null, mle_under_alternative, validate_two_group
 
 __all__ = [
     "ab_test",
@@ -20,40 +21,11 @@ __all__ = [
     "freeman_tukey_test",
     "neyman_test",
     "cressie_read_test",
+    "msprt_test",
 ]
 
 
-def _validate_two_group(
-    trials: np.ndarray[Any, Any] | list[Any],
-    successes: np.ndarray[Any, Any] | list[Any],
-    null_lift: float = 0.0,
-    lift: str = "relative",
-    allow_relative_null: bool = True,
-) -> None:
-    """Validate the inputs shared by every significance test.
-
-    Parameters
-    ----------
-    trials, successes : array_like
-        Per-group trial and success counts. At most two groups are supported.
-    null_lift : float
-        Lift associated with the null hypothesis.
-    lift : str
-        Whether ``null_lift`` is interpreted in relative or absolute terms.
-    allow_relative_null : bool
-        If False, a nonzero relative ``null_lift`` is rejected (only tests that
-        support a nonzero relative null pass True).
-
-    Raises
-    ------
-    NotImplementedError
-        If more than two groups are supplied, or a nonzero relative ``null_lift``
-        is given when ``allow_relative_null`` is False.
-    """
-    if len(trials) > 2 or len(successes) > 2:
-        raise NotImplementedError("Only supports a 2x2 contingency table")
-    if not allow_relative_null and lift == "relative" and null_lift != 0.0:
-        raise NotImplementedError("Only supports relative lift with a null of 0%")
+_validate_two_group = validate_two_group
 
 
 def _contingency_table(
@@ -120,7 +92,8 @@ def ab_test(
         calculating the critical value can be done once instead of repeatedly.
         This makes such simulations about 5x faster.
     method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo',
-              'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
+              'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read',
+              'msprt'}
         How we plan on calculating the p_value or critical value of our experiment
 
     Returns
@@ -158,6 +131,8 @@ def ab_test(
         val = neyman_test(trials, successes, null_lift, lift, crit)
     elif method == "cressie-read":
         val = cressie_read_test(trials, successes, null_lift, lift, crit)
+    elif method == "msprt":
+        val = msprt_test(trials, successes, null_lift, lift, crit)
     else:
         raise ValueError(f"No support for calculating the p-value and critical value of {method}")
     return val

@@ -152,7 +152,7 @@ def confidence_interval(
     lb: float
     ub: float
     if method == "binary_search":
-        if test.__name__ in ["score_test", "likelihood_ratio_test", "z_test"]:
+        if test.__name__ in ["score_test", "likelihood_ratio_test", "z_test", "msprt_test"]:
             if lift == "relative":
                 lb_lb = ote - 0.01
                 lb_ub = ote

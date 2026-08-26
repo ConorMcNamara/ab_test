@@ -103,6 +103,62 @@ from ab_test.frequentist_binomial.stats_tests import ab_test
 p_value = ab_test(trials=[1_000, 1_000], successes=[100, 130], method="likelihood")
 ```
 
+### Always-valid testing (mSPRT)
+
+The mSPRT (Mixture Sequential Probability Ratio Test) provides always-valid p-values and confidence sequences. Unlike fixed-sample tests, you can peek at results as data accumulates without inflating the type-I error rate.
+
+```python
+from ab_test.frequentist_binomial.contingency import ContingencyTable
+
+# Single snapshot — safe to call at any time
+ct = (
+    ContingencyTable(name="Homepage Redesign", metric_name="purchases")
+    .add("Control", successes=500, trials=5_000)
+    .add("Treatment", successes=540, trials=5_000)
+)
+print(ct.analyze(test_method="msprt"))
+```
+
+The `ContingencyTable` is stateless — each `analyze()` call is a single snapshot, not a
+cumulative monitor. To track how results evolve over time, rebuild the table at each
+checkpoint with cumulative data:
+
+```python
+from ab_test.frequentist_binomial.contingency import ContingencyTable
+
+# Cumulative data at each checkpoint
+daily_cumulative = [
+    ("2026-08-01", 50, 500, 55, 500),
+    ("2026-08-02", 110, 1_000, 125, 1_000),
+    ("2026-08-03", 170, 1_500, 200, 1_500),
+]
+
+for date, s_ctrl, n_ctrl, s_treat, n_treat in daily_cumulative:
+    ct = ContingencyTable("Homepage Redesign", "purchases")
+    ct.add("Control", successes=s_ctrl, trials=n_ctrl)
+    ct.add("Treatment", successes=s_treat, trials=n_treat)
+    print(f"\n{date}")
+    print(ct.analyze(test_method="msprt"))
+```
+
+To visualize how the point estimate and confidence sequence evolve, use
+`plot_msprt_over_time`:
+
+```python
+from ab_test.frequentist_binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.msprt import plot_msprt_over_time
+
+tables = []
+for s_ctrl, n_ctrl, s_treat, n_treat in [(50, 500, 55, 500), (110, 1_000, 125, 1_000), (170, 1_500, 200, 1_500)]:
+    ct = ContingencyTable("Homepage Redesign", "purchases")
+    ct.add("Control", successes=s_ctrl, trials=n_ctrl)
+    ct.add("Treatment", successes=s_treat, trials=n_treat)
+    tables.append(ct)
+
+fig = plot_msprt_over_time(tables, labels=["Aug 1", "Aug 2", "Aug 3"])
+fig.show()
+```
+
 ### Confidence interval methods
 
 ```python
@@ -284,7 +340,7 @@ calculate_rope(sample_a, sample_b, lift="roas", low=-1, high=1, trials=(1_000, 1
 
 ### `test_method` options
 
-`"score"`, `"likelihood"`, `"z"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`
+`"score"`, `"likelihood"`, `"z"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`, `"msprt"`
 
 ### `conf_int_method` options
 

@@ -6,12 +6,46 @@ from typing import Any
 import numpy as np
 
 __all__ = [
+    "validate_two_group",
     "simple_hypothesis_from_composite",
     "mle_under_null",
     "mle_under_alternative",
     "wilson_significance",
     "observed_lift",
 ]
+
+
+def validate_two_group(
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    allow_relative_null: bool = True,
+) -> None:
+    """Validate the inputs shared by every significance test.
+
+    Parameters
+    ----------
+    trials, successes : array_like
+        Per-group trial and success counts. At most two groups are supported.
+    null_lift : float
+        Lift associated with the null hypothesis.
+    lift : str
+        Whether ``null_lift`` is interpreted in relative or absolute terms.
+    allow_relative_null : bool
+        If False, a nonzero relative ``null_lift`` is rejected (only tests that
+        support a nonzero relative null pass True).
+
+    Raises
+    ------
+    NotImplementedError
+        If more than two groups are supplied, or a nonzero relative ``null_lift``
+        is given when ``allow_relative_null`` is False.
+    """
+    if len(trials) > 2 or len(successes) > 2:
+        raise NotImplementedError("Only supports a 2x2 contingency table")
+    if not allow_relative_null and lift == "relative" and null_lift != 0.0:
+        raise NotImplementedError("Only supports relative lift with a null of 0%")
 
 
 def simple_hypothesis_from_composite(
