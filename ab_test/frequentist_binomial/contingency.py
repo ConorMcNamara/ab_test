@@ -59,10 +59,6 @@ class ContingencyTable(BaseContingencyTable):
         "trials": "IntegerType",
     }
 
-    def __init__(self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None) -> None:
-        super().__init__(name, metric_name, spend, msrp)
-        self.successes: list[float] = []
-
     def _total_row(self) -> list[Any]:
         """Return the ``"Total"`` row appended to :meth:`to_list`."""
         return ["Total", np.sum(self.successes), np.sum(self.trials)]
@@ -70,9 +66,6 @@ class ContingencyTable(BaseContingencyTable):
     def _total_cell(self) -> dict[str, Any]:
         """Return the ``"Total"`` cell dict appended to :meth:`serialize`."""
         return {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials))}
-
-    def _deserialize_extra(self, serial: dict[str, Any]) -> None:
-        self.successes = [v["successes"] for v in serial["table"].values()]
 
     def add(self, cell_name: str, successes: int, trials: int) -> "ContingencyTable":
         """Add cells to our contingency table.
