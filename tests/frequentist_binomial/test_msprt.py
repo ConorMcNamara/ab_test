@@ -10,7 +10,6 @@ from ab_test.frequentist_binomial.stats_tests import ab_test
 
 
 class TestMsprtTest:
-
     @staticmethod
     def test_msprt_returns_float():
         trials = [1000, 1000]
@@ -155,7 +154,6 @@ class TestMsprtTest:
 
 
 class TestMsprtContingencyTable:
-
     @staticmethod
     def test_analyze_msprt():
         ct = ContingencyTable("test_exp", "conversion")
@@ -196,7 +194,6 @@ class TestMsprtContingencyTable:
 
 
 class TestMsprtAlwaysValidProperty:
-
     @staticmethod
     def test_type_i_error_control():
         """Under the null, the mSPRT rejects at most alpha across multiple peeks."""
@@ -222,13 +219,10 @@ class TestMsprtAlwaysValidProperty:
                 rejections += 1
 
         rejection_rate = rejections / n_simulations
-        assert rejection_rate < alpha + 0.02, (
-            f"Rejection rate {rejection_rate:.3f} exceeds alpha={alpha} + margin"
-        )
+        assert rejection_rate < alpha + 0.02, f"Rejection rate {rejection_rate:.3f} exceeds alpha={alpha} + margin"
 
 
 class TestPlotMsprtOverTime:
-
     @staticmethod
     def test_returns_figure():
         tables = []

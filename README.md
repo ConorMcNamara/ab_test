@@ -141,6 +141,24 @@ for date, s_ctrl, n_ctrl, s_treat, n_treat in daily_cumulative:
     print(ct.analyze(test_method="msprt"))
 ```
 
+To visualize how the point estimate and confidence sequence evolve, use
+`plot_msprt_over_time`:
+
+```python
+from ab_test.frequentist_binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.msprt import plot_msprt_over_time
+
+tables = []
+for s_ctrl, n_ctrl, s_treat, n_treat in [(50, 500, 55, 500), (110, 1_000, 125, 1_000), (170, 1_500, 200, 1_500)]:
+    ct = ContingencyTable("Homepage Redesign", "purchases")
+    ct.add("Control", successes=s_ctrl, trials=n_ctrl)
+    ct.add("Treatment", successes=s_treat, trials=n_treat)
+    tables.append(ct)
+
+fig = plot_msprt_over_time(tables, labels=["Aug 1", "Aug 2", "Aug 3"])
+fig.show()
+```
+
 ### Confidence interval methods
 
 ```python
