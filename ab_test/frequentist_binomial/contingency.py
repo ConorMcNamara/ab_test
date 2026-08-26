@@ -1,5 +1,6 @@
 """Our wrapper for analyzing experiment results."""
 
+import functools
 import math
 from typing import Any, ClassVar
 
@@ -9,6 +10,7 @@ from tabulate import tabulate
 from ab_test._contingency import BaseContingencyTable
 from ab_test._display import convert_to_tabulate_str
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
+from ab_test.frequentist_binomial.msprt import msprt_test
 from ab_test.frequentist_binomial.stats_tests import (
     ab_test,
     score_test,
@@ -57,6 +59,10 @@ class ContingencyTable(BaseContingencyTable):
         "trials": "IntegerType",
     }
 
+    def __init__(self, name: str, metric_name: str, spend: float | None = None, msrp: float | None = None) -> None:
+        super().__init__(name, metric_name, spend, msrp)
+        self.successes: list[float] = []
+
     def _total_row(self) -> list[Any]:
         """Return the ``"Total"`` row appended to :meth:`to_list`."""
         return ["Total", np.sum(self.successes), np.sum(self.trials)]
@@ -64,6 +70,9 @@ class ContingencyTable(BaseContingencyTable):
     def _total_cell(self) -> dict[str, Any]:
         """Return the ``"Total"`` cell dict appended to :meth:`serialize`."""
         return {"successes": int(np.sum(self.successes)), "trials": int(np.sum(self.trials))}
+
+    def _deserialize_extra(self, serial: dict[str, Any]) -> None:
+        self.successes = [v["successes"] for v in serial["table"].values()]
 
     def add(self, cell_name: str, successes: int, trials: int) -> "ContingencyTable":
         """Add cells to our contingency table.
@@ -95,6 +104,8 @@ class ContingencyTable(BaseContingencyTable):
         conf_int_method: str = "binary_search",
         alpha: float = 0.05,
         null_lift: float = 0.0,
+        *,
+        tau: float | None = None,
     ) -> str:
         """Analyzes the effect of our experiments through the ContingencyTable.
 
@@ -103,14 +114,19 @@ class ContingencyTable(BaseContingencyTable):
         lift : {'relative', 'absolute', 'incremental', 'roas', 'revenue'}
             The kind of lift we are measuring for our campaign
         test_method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo',
-                       'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read'}
+                       'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read',
+                       'msprt'}
             The method we plan to use to assess whether our result is statistically significant
-        conf_int_method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald'}
+        conf_int_method : {'binary_search', 'wilson', 'jeffrey', 'agresti-coull', "clopper-pearson", 'wald'}
             The method we plan to use to craft confidence intervals of our lift
         alpha : float, default = 0.05
             The alpha level of our experiment, to be used to craft confidence intervals.
         null_lift : float
             Lift associated with null hypothesis. Defaults to 0.0.
+        tau : float or None, optional
+            Scale of the Gaussian mixing distribution for the mSPRT test.
+            Only used when ``test_method="msprt"``. When ``None``, the scale
+            is derived from the data. See :func:`~ab_test.frequentist_binomial.msprt.msprt_test`.
 
         Returns
         -------
@@ -119,16 +135,21 @@ class ContingencyTable(BaseContingencyTable):
         if len(self.names) != 2:
             raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
         lift = lift.casefold()
-        p_value = ab_test(self.trials, self.successes, null_lift, lift, method=test_method)
         test_lift = observed_lift(self.trials, self.successes, lift)
-        if test_method == "score":
-            test = score_test
-        elif test_method == "likelihood":
-            test = likelihood_ratio_test
-        elif test_method == "z":
-            test = z_test
+        if test_method == "msprt":
+            p_value = msprt_test(self.trials, self.successes, null_lift, lift, tau=tau)
+            test = functools.partial(msprt_test, tau=tau)
+            functools.update_wrapper(test, msprt_test)
         else:
-            test = cressie_read_test
+            p_value = ab_test(self.trials, self.successes, null_lift, lift, method=test_method)
+            if test_method == "score":
+                test = score_test
+            elif test_method == "likelihood":
+                test = likelihood_ratio_test
+            elif test_method == "z":
+                test = z_test
+            else:
+                test = cressie_read_test
         if lift in ["incremental", "roas", "revenue"]:
             ci_lift = "absolute"
         else:
