@@ -6,16 +6,24 @@ The test uses a Gaussian mixture on the effect size, following the
 framework of Johari et al. (2017).
 """
 
+from __future__ import annotations
+
+import functools
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import plotly.graph_objects as go
 
-from ab_test.frequentist_binomial.utils import mle_under_alternative, mle_under_null, validate_two_group
+from ab_test.frequentist_binomial.utils import mle_under_alternative, mle_under_null, observed_lift, validate_two_group
+
+if TYPE_CHECKING:
+    from ab_test.frequentist_binomial.contingency import ContingencyTable
 
 __all__ = [
     "msprt_test",
     "msprt_critical_value",
+    "plot_msprt_over_time",
 ]
 
 
@@ -139,3 +147,110 @@ def msprt_critical_value(alpha: float = 0.05) -> float:
         exceeds this value.
     """
     return 1.0 / alpha
+
+
+def plot_msprt_over_time(
+    tables: list[ContingencyTable],
+    labels: list[str],
+    lift: str = "relative",
+    alpha: float = 0.05,
+    null_lift: float = 0.0,
+    *,
+    tau: float | None = None,
+) -> go.Figure:
+    """Plot the mSPRT point estimate and confidence sequence over time.
+
+    Parameters
+    ----------
+    tables : list of ContingencyTable
+        One :class:`~ab_test.frequentist_binomial.contingency.ContingencyTable`
+        per checkpoint, each containing cumulative data up to that point.
+    labels : list of str
+        Display labels for the x-axis, one per table (e.g. dates).
+    lift : {"relative", "absolute"}
+        Kind of lift to plot.
+    alpha : float
+        Significance level for the confidence sequence.
+    null_lift : float
+        Lift associated with the null hypothesis.
+    tau : float or None, optional
+        Scale of the Gaussian mixing distribution. When ``None``, auto-derived
+        at each checkpoint.
+
+    Returns
+    -------
+    go.Figure
+        An interactive Plotly figure showing the point estimate as a line with
+        markers, a shaded confidence band, and a dashed null-lift reference.
+    """
+    if len(tables) != len(labels):
+        raise ValueError(f"tables and labels must have the same length, got {len(tables)} and {len(labels)}")
+
+    from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
+
+    estimates: list[float] = []
+    lbs: list[float] = []
+    ubs: list[float] = []
+
+    test = functools.partial(msprt_test, tau=tau)
+    functools.update_wrapper(test, msprt_test)
+
+    for ct in tables:
+        estimates.append(observed_lift(ct.trials, ct.successes, lift))
+        lb, ub = confidence_interval(ct.trials, ct.successes, test=test, alpha=alpha, lift=lift)
+        lbs.append(lb)
+        ubs.append(ub)
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=ubs,
+            mode="lines",
+            line={"width": 0},
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=lbs,
+            mode="lines",
+            line={"width": 0},
+            fill="tonexty",
+            fillcolor="rgba(99, 110, 250, 0.2)",
+            name=f"{round((1 - alpha) * 100)}% CI",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=labels,
+            y=estimates,
+            mode="lines+markers",
+            marker={"size": 8, "symbol": "diamond"},
+            line={"color": "#636EFA", "width": 2},
+            name="Point estimate",
+        )
+    )
+    fig.add_hline(
+        y=null_lift,
+        line_dash="dash",
+        line_color="gray",
+        annotation_text="H₀",
+        annotation_position="top left",
+    )
+
+    tick_format = ",.0%" if lift in ("relative", "absolute") else "~s"
+    fig.update_layout(
+        title="mSPRT Confidence Sequence Over Time",
+        xaxis_title="Checkpoint",
+        yaxis_title=f"{lift.capitalize()} lift",
+        yaxis_tickformat=tick_format,
+        template="plotly_white",
+        hovermode="x unified",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    )
+
+    return fig

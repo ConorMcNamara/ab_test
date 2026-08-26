@@ -5,7 +5,7 @@ import pytest
 
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
 from ab_test.frequentist_binomial.contingency import ContingencyTable
-from ab_test.frequentist_binomial.msprt import msprt_critical_value, msprt_test
+from ab_test.frequentist_binomial.msprt import msprt_critical_value, msprt_test, plot_msprt_over_time
 from ab_test.frequentist_binomial.stats_tests import ab_test
 
 
@@ -225,3 +225,62 @@ class TestMsprtAlwaysValidProperty:
         assert rejection_rate < alpha + 0.02, (
             f"Rejection rate {rejection_rate:.3f} exceeds alpha={alpha} + margin"
         )
+
+
+class TestPlotMsprtOverTime:
+
+    @staticmethod
+    def test_returns_figure():
+        tables = []
+        for n in [500, 1000, 2000]:
+            ct = ContingencyTable("test", "conv")
+            ct.add("Control", successes=int(n * 0.10), trials=n)
+            ct.add("Treatment", successes=int(n * 0.12), trials=n)
+            tables.append(ct)
+        labels = ["Day 1", "Day 2", "Day 3"]
+        import plotly.graph_objects as go
+
+        fig = plot_msprt_over_time(tables, labels)
+        assert isinstance(fig, go.Figure)
+
+    @staticmethod
+    def test_trace_count():
+        tables = []
+        for n in [500, 1000]:
+            ct = ContingencyTable("test", "conv")
+            ct.add("Control", successes=int(n * 0.10), trials=n)
+            ct.add("Treatment", successes=int(n * 0.12), trials=n)
+            tables.append(ct)
+        fig = plot_msprt_over_time(tables, ["Day 1", "Day 2"])
+        assert len(fig.data) == 3
+
+    @staticmethod
+    def test_absolute_lift():
+        tables = []
+        for n in [500, 1000]:
+            ct = ContingencyTable("test", "conv")
+            ct.add("Control", successes=int(n * 0.10), trials=n)
+            ct.add("Treatment", successes=int(n * 0.12), trials=n)
+            tables.append(ct)
+        fig = plot_msprt_over_time(tables, ["Day 1", "Day 2"], lift="absolute")
+        assert isinstance(fig.layout.yaxis.title.text, str)
+        assert "absolute" in fig.layout.yaxis.title.text.lower()
+
+    @staticmethod
+    def test_custom_tau():
+        tables = []
+        for n in [500, 1000]:
+            ct = ContingencyTable("test", "conv")
+            ct.add("Control", successes=int(n * 0.10), trials=n)
+            ct.add("Treatment", successes=int(n * 0.12), trials=n)
+            tables.append(ct)
+        fig = plot_msprt_over_time(tables, ["Day 1", "Day 2"], tau=0.05)
+        assert len(fig.data) == 3
+
+    @staticmethod
+    def test_mismatched_lengths():
+        ct = ContingencyTable("test", "conv")
+        ct.add("Control", successes=50, trials=500)
+        ct.add("Treatment", successes=60, trials=500)
+        with pytest.raises(ValueError, match="same length"):
+            plot_msprt_over_time([ct], ["Day 1", "Day 2"])
