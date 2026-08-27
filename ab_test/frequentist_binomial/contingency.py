@@ -106,11 +106,13 @@ class ContingencyTable(BaseContingencyTable):
         ----------
         lift : {'relative', 'absolute', 'incremental', 'roas', 'revenue'}
             The kind of lift we are measuring for our campaign
-        test_method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo',
-                       'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read',
-                       'msprt'}
-            The method we plan to use to assess whether our result is statistically significant
-        conf_int_method : {'binary_search', 'wilson', 'jeffrey', 'agresti-coull', "clopper-pearson", 'wald'}
+        test_method : str
+            The method we plan to use to assess whether our result is
+            statistically significant.  One of ``'score'``, ``'likelihood'``,
+            ``'z'``, ``'fisher'``, ``'barnard'``, ``'boschloo'``,
+            ``'modified_likelihood'``, ``'freeman-tukey'``, ``'neyman'``,
+            ``'cressie-read'``, or ``'msprt'``.
+        conf_int_method : str
             The method we plan to use to craft confidence intervals of our lift
         alpha : float, default = 0.05
             The alpha level of our experiment, to be used to craft confidence intervals.

@@ -91,10 +91,12 @@ def ab_test(
         simulations where we will be repeatedly assessing significance, since
         calculating the critical value can be done once instead of repeatedly.
         This makes such simulations about 5x faster.
-    method : {'score', 'likelihood', 'z', 'fisher', 'barnard', 'boschloo',
-              'modified_likelihood', 'freeman-tukey', 'neyman', 'cressie-read',
-              'msprt'}
-        How we plan on calculating the p_value or critical value of our experiment
+     method : str
+        How we plan on calculating the p_value or critical value of our
+        experiment.  One of ``'score'``, ``'likelihood'``, ``'z'``,
+        ``'fisher'``, ``'barnard'``, ``'boschloo'``,
+        ``'modified_likelihood'``, ``'freeman-tukey'``, ``'neyman'``,
+        ``'cressie-read'``, or ``'msprt'``.
 
     Returns
     -------
