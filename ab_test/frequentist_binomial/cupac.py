@@ -182,7 +182,7 @@ class CupacExperiment:
             raise ValueError(f"Outcome column must be binary (0/1), got values {outcome_vals}")
 
         for col in covariate_cols:
-            if not np.issubdtype(data[col].dtype, np.number):
+            if not np.issubdtype(data[col].dtype.type, np.number):
                 raise ValueError(f"Covariate column {col!r} must be numeric, got {data[col].dtype}")
 
     def fit(self) -> CupacExperiment:
