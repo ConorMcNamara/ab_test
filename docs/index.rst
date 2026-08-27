@@ -14,3 +14,4 @@ variance reduction.
    frequentist_binomial/index
    bayesian_binomial/index
    corrections
+   diagnostics
