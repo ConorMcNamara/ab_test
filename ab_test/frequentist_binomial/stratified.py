@@ -13,7 +13,9 @@ from typing import Any
 import numpy as np
 import scipy.stats as ss
 
-from ab_test._display import convert_to_tabulate_str
+import plotly.graph_objects as go  # type: ignore[import-untyped]
+
+from ab_test._display import convert_to_tabulate_str, resolve_plot_color
 
 try:
     from tabulate import tabulate
@@ -433,3 +435,149 @@ class StratifiedContingencyTable:
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
         return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
         return return_string
+
+    def plot(
+        self,
+        lift: str = "relative",
+        alpha: float = 0.05,
+        reverse_plot: bool = True,
+        color: str | dict[str, Any] | list[Any] | None = None,
+    ) -> None:
+        """Forest plot of per-stratum and pooled treatment effects.
+
+        Each stratum is shown as a circle with a confidence-interval
+        whisker. The pooled inverse-variance weighted estimate is shown
+        as a diamond. A vertical dashed line marks zero (no effect).
+
+        Parameters
+        ----------
+        lift : str, default='relative'
+            ``'relative'`` or ``'absolute'``.
+        alpha : float, default=0.05
+            Significance level for confidence intervals.
+        reverse_plot : bool, default=True
+            Whether to reverse the y-axis order (first stratum at top).
+        color : str, list, dict, or None, default=None
+            If ``None``, uses Plotly's default color scheme.
+            If a string, one of the colorblind-friendly palette names
+            (see :func:`~ab_test._display.resolve_plot_color`).
+            If a list, each item is a color for the corresponding
+            stratum (last entry is used for the pooled row).
+            If a dict, keys are stratum names (use ``"Overall"`` for
+            the pooled row).
+        """
+        lift = lift.casefold()
+        successes, trials_arr, strata_names = self._build_arrays()
+
+        p1 = successes[:, 0] / trials_arr[:, 0]
+        p2 = successes[:, 1] / trials_arr[:, 1]
+        z = float(ss.norm.ppf(1 - alpha / 2))
+
+        effects: list[float] = []
+        ci_lowers: list[float] = []
+        ci_uppers: list[float] = []
+        for k in range(len(strata_names)):
+            if lift == "absolute":
+                effect = float(p2[k] - p1[k])
+                se = float(np.sqrt(p1[k] * (1 - p1[k]) / trials_arr[k, 0] + p2[k] * (1 - p2[k]) / trials_arr[k, 1]))
+                effects.append(effect)
+                ci_lowers.append(effect - z * se)
+                ci_uppers.append(effect + z * se)
+            else:
+                log_rr = float(np.log(p2[k] / p1[k]))
+                se_log = float(
+                    np.sqrt((1 - p1[k]) / (trials_arr[k, 0] * p1[k]) + (1 - p2[k]) / (trials_arr[k, 1] * p2[k]))
+                )
+                effects.append(float(np.exp(log_rr) - 1))
+                ci_lowers.append(float(np.exp(log_rr - z * se_log) - 1))
+                ci_uppers.append(float(np.exp(log_rr + z * se_log) - 1))
+
+        if lift == "absolute":
+            rd = p2 - p1
+            var_rd = p1 * (1 - p1) / trials_arr[:, 0] + p2 * (1 - p2) / trials_arr[:, 1]
+            w = 1 / var_rd
+            pooled_est = float(np.sum(w * rd) / np.sum(w))
+            pooled_se = float(1 / np.sqrt(np.sum(w)))
+            pooled_lb = pooled_est - z * pooled_se
+            pooled_ub = pooled_est + z * pooled_se
+        else:
+            log_rr_all = np.log(p2 / p1)
+            var_log_rr = (1 - p1) / (trials_arr[:, 0] * p1) + (1 - p2) / (trials_arr[:, 1] * p2)
+            w = 1 / var_log_rr
+            log_rr_pooled = float(np.sum(w * log_rr_all) / np.sum(w))
+            se_log_pooled = float(1 / np.sqrt(np.sum(w)))
+            pooled_est = float(np.exp(log_rr_pooled) - 1)
+            pooled_lb = float(np.exp(log_rr_pooled - z * se_log_pooled) - 1)
+            pooled_ub = float(np.exp(log_rr_pooled + z * se_log_pooled) - 1)
+
+        plot_color = resolve_plot_color(color)
+        fig = go.Figure()  # type: ignore[attr-defined]
+
+        for k, s_name in enumerate(strata_names):
+            c = None
+            if plot_color is not None:
+                if isinstance(plot_color, list):
+                    c = plot_color[k % len(plot_color)]
+                elif isinstance(plot_color, dict):
+                    c = plot_color.get(s_name)
+
+            marker_kw: dict[str, Any] = {"symbol": "circle", "size": 10}
+            error_x_kw: dict[str, Any] = {
+                "type": "data",
+                "symmetric": False,
+                "array": [ci_uppers[k] - effects[k]],
+                "arrayminus": [effects[k] - ci_lowers[k]],
+                "visible": True,
+            }
+            if c is not None:
+                marker_kw["color"] = c
+                error_x_kw["color"] = c
+
+            fig.add_trace(
+                go.Scatter(  # type: ignore[attr-defined]
+                    x=[effects[k]],
+                    y=[s_name],
+                    marker=marker_kw,
+                    error_x=error_x_kw,
+                    name=s_name,
+                )
+            )
+
+        c_pooled = None
+        if plot_color is not None:
+            if isinstance(plot_color, list):
+                c_pooled = plot_color[len(strata_names) % len(plot_color)]
+            elif isinstance(plot_color, dict):
+                c_pooled = plot_color.get("Overall")
+
+        marker_pooled: dict[str, Any] = {"symbol": "diamond", "size": 14}
+        error_x_pooled: dict[str, Any] = {
+            "type": "data",
+            "symmetric": False,
+            "array": [pooled_ub - pooled_est],
+            "arrayminus": [pooled_est - pooled_lb],
+            "visible": True,
+        }
+        if c_pooled is not None:
+            marker_pooled["color"] = c_pooled
+            error_x_pooled["color"] = c_pooled
+
+        fig.add_trace(
+            go.Scatter(  # type: ignore[attr-defined]
+                x=[pooled_est],
+                y=["Overall"],
+                marker=marker_pooled,
+                error_x=error_x_pooled,
+                name="Overall (pooled)",
+            )
+        )
+
+        fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
+        fig.update_layout(
+            title=f"{self.experiment_name} — {self.metric_name} ({lift} lift)",
+            xaxis_tickformat=",.0%",
+            showlegend=False,
+        )
+        if reverse_plot:
+            fig.update_layout(yaxis={"autorange": "reversed"})
+        fig.show()  # type: ignore[no-untyped-call]

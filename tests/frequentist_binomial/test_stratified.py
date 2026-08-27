@@ -201,6 +201,45 @@ class TestStratifiedContingencyTable:
         assert "*" in result
 
 
+class TestPlot:
+    @staticmethod
+    def _make_table():
+        st = StratifiedContingencyTable("Test Experiment", "Conversion Rate")
+        st.add("Control", 50, 500, stratum="mobile")
+        st.add("Treatment", 70, 500, stratum="mobile")
+        st.add("Control", 80, 400, stratum="desktop")
+        st.add("Treatment", 100, 400, stratum="desktop")
+        return st
+
+    def test_plot_runs_without_error(self, monkeypatch):
+        st = self._make_table()
+        import plotly.graph_objects as go
+
+        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+        st.plot(lift="relative")
+
+    def test_plot_absolute(self, monkeypatch):
+        st = self._make_table()
+        import plotly.graph_objects as go
+
+        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+        st.plot(lift="absolute")
+
+    def test_plot_with_palette(self, monkeypatch):
+        st = self._make_table()
+        import plotly.graph_objects as go
+
+        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+        st.plot(color="wong")
+
+    def test_plot_with_color_dict(self, monkeypatch):
+        st = self._make_table()
+        import plotly.graph_objects as go
+
+        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+        st.plot(color={"mobile": "blue", "desktop": "red", "Overall": "black"})
+
+
 class TestStratifiedPower:
     @staticmethod
     def test_more_samples_more_power():
