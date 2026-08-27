@@ -89,13 +89,15 @@ def simple_hypothesis_from_composite(
 
     This function translates such composite null and alternative hypotheses to
     simple hypotheses. We need the baseline success rate as well. Consider this
-    translation mechanism:
+    translation mechanism::
+
        H0: pa = baseline, pb = baseline * (1 + null_lift)
        H1: pa = baseline, pb = baseline * (1 + alt_lift)
+
     The success rate in the first group is the same either way, but the success
     rate in the second group depends on the null/alt lift. This seems innocent
     enough, but consider the noncentrality parameter of the chi-2 distribution
-    under the alternative hypothesis:
+    under the alternative hypothesis::
 
                  na * (pa - pi_a)^2     nb * (pb - pi_b)^2
       lambda =   ------------------  +  ------------------ ,
@@ -206,9 +208,11 @@ def mle_under_null(
 
     Notes
     -----
-    Solves the following optimization problem:
+    Solves the following optimization problem::
+
         maximize ll(pa, pb)
         s.t.     H0
+
     where H0 is of the form A*(p-a) = 0.
 
     When the null lift is zero, that corresponds to pa = pb, or A = [1 -1] and
@@ -351,9 +355,10 @@ def wilson_significance(pval: float, alpha: float) -> float:
     The Wilson significance is defined to be log10(alpha / pval),
     where pval is the p-value and alpha is the Type-I error rate. It
     has the following properties:
-     - When the result is statistically significant, W > 0.
-     - The larger W, the stronger the evidence.
-     - An increase in W of 1 corresponds to a 10x decrease in p-value.
+
+    - When the result is statistically significant, W > 0.
+    - The larger W, the stronger the evidence.
+    - An increase in W of 1 corresponds to a 10x decrease in p-value.
     """
     try:
         W = math.log10(alpha) - math.log10(pval)
