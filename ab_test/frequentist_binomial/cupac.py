@@ -107,7 +107,9 @@ class CupacExperiment:
     treatment_col : str
         Name of the column indicating group assignment.
     covariate_cols : list of str
-        Names of pre-experiment covariate columns.
+        Names of pre-experiment covariate columns. All columns must be
+        numeric. Categorical features should be one-hot encoded before
+        being passed in.
     control_label : str or int
         Value in ``treatment_col`` identifying control-group users.
     treatment_label : str or int
@@ -183,7 +185,10 @@ class CupacExperiment:
 
         for col in covariate_cols:
             if not np.issubdtype(data[col].dtype.type, np.number):
-                raise ValueError(f"Covariate column {col!r} must be numeric, got {data[col].dtype}")
+                raise ValueError(
+                    f"Covariate column {col!r} must be numeric, got {data[col].dtype}. "
+                    f"Categorical features should be one-hot encoded before being passed in."
+                )
 
     def fit(self) -> CupacExperiment:
         """Run the CUPAC analysis pipeline.
