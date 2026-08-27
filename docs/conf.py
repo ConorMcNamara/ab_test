@@ -1,5 +1,10 @@
 """Sphinx configuration for ab-test documentation."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 project = "ab-test"
 author = "Conor McNamara"
 copyright = "2026, Conor McNamara"
