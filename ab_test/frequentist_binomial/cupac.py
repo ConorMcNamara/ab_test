@@ -108,8 +108,9 @@ class CupacExperiment:
         Name of the column indicating group assignment.
     covariate_cols : list of str
         Names of pre-experiment covariate columns. All columns must be
-        numeric. Categorical features should be one-hot encoded before
-        being passed in.
+        numeric. Nominal categorical features should be one-hot encoded
+        before being passed in, since OLS interprets numeric values as
+        continuous and will impose a spurious ordinal relationship.
     control_label : str or int
         Value in ``treatment_col`` identifying control-group users.
     treatment_label : str or int
@@ -187,7 +188,7 @@ class CupacExperiment:
             if not np.issubdtype(data[col].dtype.type, np.number):
                 raise ValueError(
                     f"Covariate column {col!r} must be numeric, got {data[col].dtype}. "
-                    f"Categorical features should be one-hot encoded before being passed in."
+                    f"Nominal categorical features should be one-hot encoded before being passed in."
                 )
 
     def fit(self) -> CupacExperiment:
