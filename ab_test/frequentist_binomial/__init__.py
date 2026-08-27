@@ -5,6 +5,7 @@ __version__ = "0.1.0"
 from ab_test.frequentist_binomial import (
     confidence_intervals,
     contingency,
+    cupac,
     msprt,
     power_calculations,
     stats_tests,
@@ -14,6 +15,7 @@ from ab_test.frequentist_binomial import (
 __all__: list[str] = [
     "confidence_intervals",
     "contingency",
+    "cupac",
     "msprt",
     "power_calculations",
     "stats_tests",
