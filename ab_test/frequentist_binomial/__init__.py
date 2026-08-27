@@ -9,6 +9,7 @@ from ab_test.frequentist_binomial import (
     msprt,
     power_calculations,
     stats_tests,
+    stratified,
     utils,
 )
 
@@ -19,6 +20,7 @@ __all__: list[str] = [
     "msprt",
     "power_calculations",
     "stats_tests",
+    "stratified",
     "utils",
 ]
 
