@@ -2,11 +2,12 @@
 
 __version__ = "0.1.0"
 
-from ab_test import bayesian_binomial, corrections, frequentist_binomial
+from ab_test import bayesian_binomial, corrections, diagnostics, frequentist_binomial
 
 __all__: list[str] = [
     "bayesian_binomial",
     "corrections",
+    "diagnostics",
     "frequentist_binomial",
 ]
 
