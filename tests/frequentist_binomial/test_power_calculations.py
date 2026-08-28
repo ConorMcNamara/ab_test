@@ -91,7 +91,7 @@ class TestScorePower:
         actual = required_sample_size(baseline, alt_lift, lift="absolute")
         assert actual == pytest.approx(expected)
 
-    # @pytest.mark.slow
+    @pytest.mark.slow
     @staticmethod
     def test_coverage(capsys):
         # Takes about 20 seconds on my machine

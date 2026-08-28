@@ -83,7 +83,7 @@ jobs:
         run: uv pip install --system ".[dev]"
 
       - name: Run tests with coverage
-        run: pytest --cov=ab_test --cov-report=xml --cov-report=term-missing
+        run: pytest -m "not slow" --cov=ab_test --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == needs.setup.outputs.anchor

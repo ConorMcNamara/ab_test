@@ -10,6 +10,8 @@ from ab_test.bayesian_binomial.power_calculations import (
     bayes_power_loss,
 )
 
+pytestmark = pytest.mark.slow
+
 
 class TestBayesPowerLift:
     @staticmethod

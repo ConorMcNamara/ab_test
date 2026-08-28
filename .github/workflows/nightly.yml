@@ -1,0 +1,51 @@
+name: Nightly (full test suite)
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # 06:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  setup:
+    name: Resolve Python versions
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.load.outputs.versions }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Load Python versions
+        id: load
+        run: |
+          echo "versions=$(jq -c . .github/python-versions.json)" >> "$GITHUB_OUTPUT"
+
+  test-all:
+    name: Full suite Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJSON(needs.setup.outputs.versions) }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install package with dev dependencies
+        run: uv pip install --system ".[dev]"
+
+      - name: Run all tests including slow
+        run: pytest --cov=ab_test --cov-report=term-missing

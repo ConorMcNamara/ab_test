@@ -97,7 +97,7 @@ class TestScoreTest:
         actual = score_test(trials, successes)
         assert actual == pytest.approx(expected)
 
-    # @pytest.mark.slow
+    @pytest.mark.slow
     @staticmethod
     def test_coverage(capsys):
         # Takes about 2 minutes to run on my machine
@@ -201,6 +201,7 @@ class TestFisherTest:
         assert one == two
 
 
+@pytest.mark.slow
 class TestBarnardTest:
     # Note that this test takes a while to go through all the permutations
     @staticmethod
@@ -221,6 +222,7 @@ class TestBarnardTest:
         assert one == two
 
 
+@pytest.mark.slow
 class TestBoschlooTest:
     # Note that this test takes a while to go through all the permutations, even more than Barnard
     @staticmethod
