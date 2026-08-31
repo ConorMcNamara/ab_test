@@ -76,6 +76,9 @@ def cochrans_q(
     return q, pvalue
 
 
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+
+
 def _compute_segment_stats(
     tables: list[ContingencyTable],
     lift: str,
@@ -88,7 +91,8 @@ def _compute_segment_stats(
     tables : list[ContingencyTable]
         One table per segment, each with exactly 2 cells.
     lift : str
-        ``"absolute"`` or ``"relative"``.
+        One of ``"absolute"``, ``"relative"``, ``"incremental"``,
+        ``"roas"``, or ``"revenue"``.
     alpha : float
         Significance level for Wald confidence intervals.
 
@@ -118,16 +122,7 @@ def _compute_segment_stats(
         p_controls.append(p_c)
         p_treatments.append(p_t)
 
-        if lift == "absolute":
-            d = p_t - p_c
-            var = p_t * (1 - p_t) / n_t + p_c * (1 - p_c) / n_c
-            se = np.sqrt(var)
-            effects.append(d)
-            internal_effects.append(d)
-            variances.append(var)
-            ci_lowers.append(d - z_crit * se)
-            ci_uppers.append(d + z_crit * se)
-        else:
+        if lift == "relative":
             if p_c == 0:
                 raise ValueError(
                     f"Segment {table.experiment_name!r} has zero control rate — relative lift is undefined"
@@ -144,6 +139,48 @@ def _compute_segment_stats(
             variances.append(var_log)
             ci_lowers.append(float(np.exp(log_rr - z_crit * se_log) - 1))
             ci_uppers.append(float(np.exp(log_rr + z_crit * se_log) - 1))
+        else:
+            d = p_t - p_c
+            var = p_t * (1 - p_t) / n_t + p_c * (1 - p_c) / n_c
+            se = np.sqrt(var)
+
+            if lift in ("incremental", "roas", "revenue"):
+                n_max = max(n_c, n_t)
+                scale = float(n_max)
+                d_scaled = d * scale
+                var_scaled = var * scale * scale
+                se_scaled = se * scale
+                ci_lo = d_scaled - z_crit * se_scaled
+                ci_hi = d_scaled + z_crit * se_scaled
+
+                if lift == "roas":
+                    if table.spend is None:
+                        raise ValueError(f"spend must be set on segment {table.experiment_name!r} for ROAS")
+                    spend = table.spend
+                    d_scaled /= spend
+                    var_scaled /= spend * spend
+                    ci_lo /= spend
+                    ci_hi /= spend
+                elif lift == "revenue":
+                    if table.msrp is None:
+                        raise ValueError(f"msrp must be set on segment {table.experiment_name!r} for revenue")
+                    msrp = table.msrp
+                    d_scaled *= msrp
+                    var_scaled *= msrp * msrp
+                    ci_lo *= msrp
+                    ci_hi *= msrp
+
+                effects.append(d_scaled)
+                internal_effects.append(d_scaled)
+                variances.append(var_scaled)
+                ci_lowers.append(ci_lo)
+                ci_uppers.append(ci_hi)
+            else:
+                effects.append(d)
+                internal_effects.append(d)
+                variances.append(var)
+                ci_lowers.append(d - z_crit * se)
+                ci_uppers.append(d + z_crit * se)
 
     return {
         "names": names,
@@ -228,8 +265,8 @@ class DiffInDiff:
         Parameters
         ----------
         lift : str, default="absolute"
-            Scale for treatment effects: ``"absolute"`` (risk difference)
-            or ``"relative"`` (risk ratio minus 1).
+            Scale for treatment effects: ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"roas"``, or ``"revenue"``.
         alpha : float, default=0.05
             Significance level for confidence intervals and tests.
         correction : str, default="holm"
@@ -244,8 +281,8 @@ class DiffInDiff:
             omnibus test, and pairwise DiD comparisons.
         """
         lift = lift.casefold()
-        if lift not in ("absolute", "relative"):
-            raise ValueError(f"lift must be 'absolute' or 'relative', got {lift!r}")
+        if lift not in _VALID_LIFTS:
+            raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
         stats = _compute_segment_stats(self._tables, lift, alpha)
         z_crit = ss.norm.isf(alpha / 2)
@@ -279,14 +316,14 @@ class DiffInDiff:
             raw_p = float(2 * ss.norm.sf(abs(z_val)))
             raw_pvals.append(raw_p)
 
-            if lift == "absolute":
-                did_display = stats["effects"][i] - stats["effects"][j]
-                ci_lo = delta_internal - z_crit * se
-                ci_hi = delta_internal + z_crit * se
-            else:
+            if lift == "relative":
                 did_display = float(np.exp(delta_internal) - 1)
                 ci_lo = float(np.exp(delta_internal - z_crit * se) - 1)
                 ci_hi = float(np.exp(delta_internal + z_crit * se) - 1)
+            else:
+                did_display = stats["effects"][i] - stats["effects"][j]
+                ci_lo = delta_internal - z_crit * se
+                ci_hi = delta_internal + z_crit * se
 
             pairwise.append(
                 {
@@ -320,14 +357,17 @@ class DiffInDiff:
         def fmt(v: float) -> str | float:
             return convert_to_tabulate_str(v, lift)
 
+        def fmt_rate(v: float) -> str | float:
+            return convert_to_tabulate_str(v, "absolute")
+
         seg_headers = ["Segment", "Control", "Treatment", "Lift", "CI Lower **", "CI Upper **"]
         seg_rows = []
         for i, name in enumerate(stats["names"]):
             seg_rows.append(
                 [
                     name,
-                    fmt(stats["p_controls"][i]),
-                    fmt(stats["p_treatments"][i]),
+                    fmt_rate(stats["p_controls"][i]),
+                    fmt_rate(stats["p_treatments"][i]),
                     fmt(stats["effects"][i]),
                     fmt(stats["ci_lowers"][i]),
                     fmt(stats["ci_uppers"][i]),
@@ -376,8 +416,8 @@ class DiffInDiff:
         Parameters
         ----------
         lift : str, default="absolute"
-            Scale for treatment effects: ``"absolute"`` (risk difference)
-            or ``"relative"`` (risk ratio minus 1).
+            Scale for treatment effects: ``"absolute"``, ``"relative"``,
+            ``"incremental"``, ``"roas"``, or ``"revenue"``.
         alpha : float, default=0.05
             Significance level for confidence intervals.
         reverse_plot : bool, default=True
@@ -388,8 +428,8 @@ class DiffInDiff:
             list of colors, or ``None`` for Plotly defaults.
         """
         lift = lift.casefold()
-        if lift not in ("absolute", "relative"):
-            raise ValueError(f"lift must be 'absolute' or 'relative', got {lift!r}")
+        if lift not in _VALID_LIFTS:
+            raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
         stats = _compute_segment_stats(self._tables, lift, alpha)
         resolved = resolve_plot_color(color)
@@ -433,11 +473,25 @@ class DiffInDiff:
 
         fig.add_vline(x=0, line_dash="dash", line_color="gray")
 
-        lift_label = "Risk Difference" if lift == "absolute" else "Relative Lift"
+        lift_labels = {
+            "absolute": "Risk Difference",
+            "relative": "Relative Lift",
+            "incremental": "Incremental Conversions",
+            "roas": "Return on Ad Spend",
+            "revenue": "Revenue",
+        }
+        tick_formats = {
+            "absolute": ",.1%",
+            "relative": ",.1%",
+            "incremental": ",",
+            "roas": "$,",
+            "revenue": "$,",
+        }
+        lift_label = lift_labels[lift]
         fig.update_layout(
             title=f"{self.metric_name} — Treatment Effect by Segment ({lift_label})",
             xaxis_title=lift_label,
-            xaxis_tickformat=",.1%",
+            xaxis_tickformat=tick_formats[lift],
             yaxis_title="",
             template="plotly_white",
         )
