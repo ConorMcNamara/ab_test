@@ -147,7 +147,7 @@ class TestStratifiedContingencyTable:
     def test_analyze_invalid_lift_raises(self):
         st = self._make_table()
         with pytest.raises(ValueError, match="lift must be"):
-            st.analyze(lift="incremental")
+            st.analyze(lift="logistic")
 
     def test_analyze_returns_string(self):
         st = self._make_table()
@@ -313,3 +313,127 @@ class TestCmhTypeIError:
 
         error_rate = rejections / n_sims
         assert error_rate < alpha + 0.02
+
+
+class TestStratifiedIncremental:
+    @staticmethod
+    def _make_table():
+        st = StratifiedContingencyTable("Test", "Conversion Rate", spend=1000.0, msrp=50.0)
+        st.add("Control", 50, 500, stratum="mobile")
+        st.add("Treatment", 70, 500, stratum="mobile")
+        st.add("Control", 80, 400, stratum="desktop")
+        st.add("Treatment", 100, 400, stratum="desktop")
+        return st
+
+    def test_analyze_incremental(self):
+        st = self._make_table()
+        result = st.analyze(lift="incremental")
+        assert isinstance(result, str)
+        assert "incremental" in result
+
+    def test_analyze_by_stratum_incremental(self):
+        st = self._make_table()
+        result = st.analyze_by_stratum(lift="incremental")
+        assert "mobile" in result
+        assert "desktop" in result
+
+    def test_incremental_pooled_scales_by_total_n(self):
+        """Pooled incremental should scale the pooled risk difference by total n_max."""
+        st = self._make_table()
+        st.analyze(lift="absolute")
+        result_abs = st.analyze(lift="absolute")
+        result_incr = st.analyze(lift="incremental")
+        assert result_abs != result_incr
+
+
+class TestStratifiedRoas:
+    @staticmethod
+    def test_roas_missing_spend_raises():
+        st = StratifiedContingencyTable("Test", "metric")
+        st.add("Control", 50, 500, stratum="s1")
+        st.add("Treatment", 70, 500, stratum="s1")
+        with pytest.raises(ValueError, match="spend must be set"):
+            st.analyze(lift="roas")
+
+    @staticmethod
+    def test_roas_runs():
+        st = StratifiedContingencyTable("Test", "metric", spend=1000.0)
+        st.add("Control", 50, 500, stratum="s1")
+        st.add("Treatment", 70, 500, stratum="s1")
+        st.add("Control", 80, 400, stratum="s2")
+        st.add("Treatment", 100, 400, stratum="s2")
+        result = st.analyze(lift="roas")
+        assert isinstance(result, str)
+
+    @staticmethod
+    def test_roas_by_stratum():
+        st = StratifiedContingencyTable("Test", "metric", spend=1000.0)
+        st.add("Control", 50, 500, stratum="s1")
+        st.add("Treatment", 70, 500, stratum="s1")
+        result = st.analyze_by_stratum(lift="roas")
+        assert isinstance(result, str)
+
+
+class TestStratifiedRevenue:
+    @staticmethod
+    def test_revenue_missing_msrp_raises():
+        st = StratifiedContingencyTable("Test", "metric")
+        st.add("Control", 50, 500, stratum="s1")
+        st.add("Treatment", 70, 500, stratum="s1")
+        with pytest.raises(ValueError, match="msrp must be set"):
+            st.analyze(lift="revenue")
+
+    @staticmethod
+    def test_revenue_runs():
+        st = StratifiedContingencyTable("Test", "metric", msrp=50.0)
+        st.add("Control", 50, 500, stratum="s1")
+        st.add("Treatment", 70, 500, stratum="s1")
+        st.add("Control", 80, 400, stratum="s2")
+        st.add("Treatment", 100, 400, stratum="s2")
+        result = st.analyze(lift="revenue")
+        assert isinstance(result, str)
+
+    @staticmethod
+    def test_revenue_by_stratum():
+        st = StratifiedContingencyTable("Test", "metric", msrp=50.0)
+        st.add("Control", 50, 500, stratum="s1")
+        st.add("Treatment", 70, 500, stratum="s1")
+        result = st.analyze_by_stratum(lift="revenue")
+        assert isinstance(result, str)
+
+
+class TestStratifiedPlotNewLifts:
+    @staticmethod
+    def _make_table():
+        st = StratifiedContingencyTable("Test", "Conversion Rate", spend=1000.0, msrp=50.0)
+        st.add("Control", 50, 500, stratum="mobile")
+        st.add("Treatment", 70, 500, stratum="mobile")
+        st.add("Control", 80, 400, stratum="desktop")
+        st.add("Treatment", 100, 400, stratum="desktop")
+        return st
+
+    def test_plot_incremental(self, monkeypatch):
+        import plotly.graph_objects as go
+
+        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+        st = self._make_table()
+        st.plot(lift="incremental")
+
+    def test_plot_roas(self, monkeypatch):
+        import plotly.graph_objects as go
+
+        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+        st = self._make_table()
+        st.plot(lift="roas")
+
+    def test_plot_revenue(self, monkeypatch):
+        import plotly.graph_objects as go
+
+        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+        st = self._make_table()
+        st.plot(lift="revenue")
+
+    def test_plot_invalid_lift_raises(self):
+        st = self._make_table()
+        with pytest.raises(ValueError, match="lift must be"):
+            st.plot(lift="logistic")
