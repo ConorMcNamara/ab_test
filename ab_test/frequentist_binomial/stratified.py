@@ -222,6 +222,113 @@ def stratified_power(
     return float(ss.ncx2.sf(crit, df=1, nc=ncp))
 
 
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+
+
+def _stratum_effect(
+    p1: float,
+    p2: float,
+    n1: float,
+    n2: float,
+    lift: str,
+    z: float,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> tuple[float, float, float, float]:
+    """Compute a single stratum's effect, SE, and CI on the requested scale.
+
+    Returns ``(effect, se, ci_lower, ci_upper)`` on the display scale.
+    """
+    if lift == "relative":
+        log_rr = float(np.log(p2 / p1))
+        se_log = float(np.sqrt((1 - p1) / (n1 * p1) + (1 - p2) / (n2 * p2)))
+        effect = float(np.exp(log_rr) - 1)
+        ci_lo = float(np.exp(log_rr - z * se_log) - 1)
+        ci_hi = float(np.exp(log_rr + z * se_log) - 1)
+        return effect, se_log, ci_lo, ci_hi
+
+    d = p2 - p1
+    var = p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2
+    se = float(np.sqrt(var))
+
+    if lift in ("incremental", "roas", "revenue"):
+        n_max = max(n1, n2)
+        d_scaled = d * n_max
+        se_scaled = se * n_max
+        ci_lo = d_scaled - z * se_scaled
+        ci_hi = d_scaled + z * se_scaled
+        if lift == "roas":
+            assert spend is not None
+            d_scaled /= spend
+            se_scaled /= spend
+            ci_lo /= spend
+            ci_hi /= spend
+        elif lift == "revenue":
+            assert msrp is not None
+            d_scaled *= msrp
+            se_scaled *= msrp
+            ci_lo *= msrp
+            ci_hi *= msrp
+        return d_scaled, se_scaled, ci_lo, ci_hi
+
+    return d, se, d - z * se, d + z * se
+
+
+def _pooled_effect(
+    p1: np.ndarray[Any, Any],
+    p2: np.ndarray[Any, Any],
+    trials_arr: np.ndarray[Any, Any],
+    lift: str,
+    z: float,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> tuple[float, float, float, float]:
+    """Compute the inverse-variance pooled effect on the requested scale.
+
+    Returns ``(estimate, se, ci_lower, ci_upper)`` on the display scale.
+    """
+    if lift == "relative":
+        log_rr = np.log(p2 / p1)
+        var_log_rr = (1 - p1) / (trials_arr[:, 0] * p1) + (1 - p2) / (trials_arr[:, 1] * p2)
+        w = 1 / var_log_rr
+        log_rr_pooled = float(np.sum(w * log_rr) / np.sum(w))
+        se_log = float(1 / np.sqrt(np.sum(w)))
+        estimate = float(np.exp(log_rr_pooled) - 1)
+        lb = float(np.exp(log_rr_pooled - z * se_log) - 1)
+        ub = float(np.exp(log_rr_pooled + z * se_log) - 1)
+        return estimate, se_log, lb, ub
+
+    rd = p2 - p1
+    var_rd = p1 * (1 - p1) / trials_arr[:, 0] + p2 * (1 - p2) / trials_arr[:, 1]
+    w = 1 / var_rd
+    pooled_d = float(np.sum(w * rd) / np.sum(w))
+    pooled_se = float(1 / np.sqrt(np.sum(w)))
+
+    if lift in ("incremental", "roas", "revenue"):
+        n_max = float(max(np.sum(trials_arr[:, 0]), np.sum(trials_arr[:, 1])))
+        est = pooled_d * n_max
+        se_scaled = pooled_se * n_max
+        lb = est - z * se_scaled
+        ub = est + z * se_scaled
+        if lift == "roas":
+            assert spend is not None
+            est /= spend
+            se_scaled /= spend
+            lb /= spend
+            ub /= spend
+        elif lift == "revenue":
+            assert msrp is not None
+            est *= msrp
+            se_scaled *= msrp
+            lb *= msrp
+            ub *= msrp
+        return est, se_scaled, lb, ub
+
+    lb = pooled_d - z * pooled_se
+    ub = pooled_d + z * pooled_se
+    return pooled_d, pooled_se, lb, ub
+
+
 class StratifiedContingencyTable:
     """Stratified analysis of a two-group binomial A/B test.
 
@@ -235,11 +342,23 @@ class StratifiedContingencyTable:
         Experiment name.
     metric_name : str
         Metric being measured.
+    spend : float or None
+        Campaign spend (required for ``lift="roas"``).
+    msrp : float or None
+        Average product price (required for ``lift="revenue"``).
     """
 
-    def __init__(self, name: str, metric_name: str) -> None:
+    def __init__(
+        self,
+        name: str,
+        metric_name: str,
+        spend: float | None = None,
+        msrp: float | None = None,
+    ) -> None:
         self.experiment_name: str = name
         self.metric_name: str = metric_name
+        self.spend: float | None = spend
+        self.msrp: float | None = msrp
         self._strata: dict[str, dict[str, dict[str, int]]] = {}
         self._cell_names: list[str] = []
 
@@ -299,6 +418,16 @@ class StratifiedContingencyTable:
                 trials[k, j] = stratum[c_name]["trials"]
         return successes, trials, strata_names
 
+    def _validate_lift(self, lift: str) -> str:
+        lift = lift.casefold()
+        if lift not in _VALID_LIFTS:
+            raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
+        if lift == "roas" and self.spend is None:
+            raise ValueError("spend must be set for ROAS calculations")
+        if lift == "revenue" and self.msrp is None:
+            raise ValueError("msrp must be set for revenue calculations")
+        return lift
+
     def analyze(
         self,
         lift: str = "relative",
@@ -314,7 +443,8 @@ class StratifiedContingencyTable:
         Parameters
         ----------
         lift : str, default='relative'
-            ``'relative'`` or ``'absolute'``.
+            ``"relative"``, ``"absolute"``, ``"incremental"``,
+            ``"roas"``, or ``"revenue"``.
         alpha : float, default=0.05
             Significance level for the confidence interval.
 
@@ -323,9 +453,7 @@ class StratifiedContingencyTable:
         str
             Formatted results table.
         """
-        lift = lift.casefold()
-        if lift not in ("relative", "absolute"):
-            raise ValueError(f"lift must be 'relative' or 'absolute', got {lift!r}")
+        lift = self._validate_lift(lift)
 
         successes, trials_arr, strata_names = self._build_arrays()
 
@@ -335,28 +463,15 @@ class StratifiedContingencyTable:
         p2 = successes[:, 1] / trials_arr[:, 1]
         z = float(ss.norm.ppf(1 - alpha / 2))
 
-        if lift == "absolute":
-            rd = p2 - p1
-            var_rd = p1 * (1 - p1) / trials_arr[:, 0] + p2 * (1 - p2) / trials_arr[:, 1]
-            w = 1 / var_rd
-            estimate = float(np.sum(w * rd) / np.sum(w))
-            se = float(1 / np.sqrt(np.sum(w)))
-            lb = estimate - z * se
-            ub = estimate + z * se
-        else:
-            log_rr = np.log(p2 / p1)
-            var_log_rr = (1 - p1) / (trials_arr[:, 0] * p1) + (1 - p2) / (trials_arr[:, 1] * p2)
-            w = 1 / var_log_rr
-            log_rr_pooled = float(np.sum(w * log_rr) / np.sum(w))
-            se_log = float(1 / np.sqrt(np.sum(w)))
-            estimate = float(np.exp(log_rr_pooled) - 1)
-            lb = float(np.exp(log_rr_pooled - z * se_log) - 1)
-            ub = float(np.exp(log_rr_pooled + z * se_log) - 1)
+        estimate, _, lb, ub = _pooled_effect(p1, p2, trials_arr, lift, z, self.spend, self.msrp)
 
         p_control = float(np.sum(successes[:, 0]) / np.sum(trials_arr[:, 0]))
         p_treatment = float(np.sum(successes[:, 1]) / np.sum(trials_arr[:, 1]))
 
-        success_rate: list[float] = [p_control, p_treatment]
+        def fmt_rate(v: float) -> str | float:
+            return convert_to_tabulate_str(v, "absolute")
+
+        success_rate: list[str | float] = [fmt_rate(p_control), fmt_rate(p_treatment)]
         str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
         table_headers = (
             ["Metric", "Metric Name"]
@@ -364,10 +479,7 @@ class StratifiedContingencyTable:
             + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", "p-value (CMH)"]
         )
         table_list = [
-            [lift, self.metric_name]
-            + convert_to_tabulate_str(success_rate, lift)
-            + convert_to_tabulate_str([estimate, lb, ub], lift)
-            + [str_pvalue]
+            [lift, self.metric_name] + success_rate + convert_to_tabulate_str([estimate, lb, ub], lift) + [str_pvalue]
         ]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
 
@@ -391,7 +503,8 @@ class StratifiedContingencyTable:
         Parameters
         ----------
         lift : str, default='relative'
-            ``'relative'`` or ``'absolute'``.
+            ``"relative"``, ``"absolute"``, ``"incremental"``,
+            ``"roas"``, or ``"revenue"``.
         alpha : float, default=0.05
             Significance level.
 
@@ -401,32 +514,24 @@ class StratifiedContingencyTable:
             Table with per-stratum effect estimates and confidence
             intervals.
         """
-        lift = lift.casefold()
+        lift = self._validate_lift(lift)
         successes, trials_arr, strata_names = self._build_arrays()
 
         p1 = successes[:, 0] / trials_arr[:, 0]
         p2 = successes[:, 1] / trials_arr[:, 1]
         z = float(ss.norm.ppf(1 - alpha / 2))
 
+        def fmt_rate(v: float) -> str | float:
+            return convert_to_tabulate_str(v, "absolute")
+
         table_list = []
         for k, s_name in enumerate(strata_names):
-            if lift == "absolute":
-                effect = p2[k] - p1[k]
-                se = float(np.sqrt(p1[k] * (1 - p1[k]) / trials_arr[k, 0] + p2[k] * (1 - p2[k]) / trials_arr[k, 1]))
-                lb = effect - z * se
-                ub = effect + z * se
-            else:
-                log_rr = float(np.log(p2[k] / p1[k]))
-                se_log = float(
-                    np.sqrt((1 - p1[k]) / (trials_arr[k, 0] * p1[k]) + (1 - p2[k]) / (trials_arr[k, 1] * p2[k]))
-                )
-                effect = float(np.exp(log_rr) - 1)
-                lb = float(np.exp(log_rr - z * se_log) - 1)
-                ub = float(np.exp(log_rr + z * se_log) - 1)
-
+            effect, _, lb, ub = _stratum_effect(
+                p1[k], p2[k], trials_arr[k, 0], trials_arr[k, 1], lift, z, self.spend, self.msrp
+            )
             table_list.append(
                 [s_name]
-                + convert_to_tabulate_str([p1[k], p2[k]], lift)
+                + [fmt_rate(p1[k]), fmt_rate(p2[k])]
                 + convert_to_tabulate_str([effect, lb, ub], lift)
                 + [int(trials_arr[k, 0]) + int(trials_arr[k, 1])]
             )
@@ -452,7 +557,8 @@ class StratifiedContingencyTable:
         Parameters
         ----------
         lift : str, default='relative'
-            ``'relative'`` or ``'absolute'``.
+            ``"relative"``, ``"absolute"``, ``"incremental"``,
+            ``"roas"``, or ``"revenue"``.
         alpha : float, default=0.05
             Significance level for confidence intervals.
         reverse_plot : bool, default=True
@@ -466,7 +572,7 @@ class StratifiedContingencyTable:
             If a dict, keys are stratum names (use ``"Overall"`` for
             the pooled row).
         """
-        lift = lift.casefold()
+        lift = self._validate_lift(lift)
         successes, trials_arr, strata_names = self._build_arrays()
 
         p1 = successes[:, 0] / trials_arr[:, 0]
@@ -477,38 +583,14 @@ class StratifiedContingencyTable:
         ci_lowers: list[float] = []
         ci_uppers: list[float] = []
         for k in range(len(strata_names)):
-            if lift == "absolute":
-                effect = float(p2[k] - p1[k])
-                se = float(np.sqrt(p1[k] * (1 - p1[k]) / trials_arr[k, 0] + p2[k] * (1 - p2[k]) / trials_arr[k, 1]))
-                effects.append(effect)
-                ci_lowers.append(effect - z * se)
-                ci_uppers.append(effect + z * se)
-            else:
-                log_rr = float(np.log(p2[k] / p1[k]))
-                se_log = float(
-                    np.sqrt((1 - p1[k]) / (trials_arr[k, 0] * p1[k]) + (1 - p2[k]) / (trials_arr[k, 1] * p2[k]))
-                )
-                effects.append(float(np.exp(log_rr) - 1))
-                ci_lowers.append(float(np.exp(log_rr - z * se_log) - 1))
-                ci_uppers.append(float(np.exp(log_rr + z * se_log) - 1))
+            effect, _, lb, ub = _stratum_effect(
+                p1[k], p2[k], trials_arr[k, 0], trials_arr[k, 1], lift, z, self.spend, self.msrp
+            )
+            effects.append(effect)
+            ci_lowers.append(lb)
+            ci_uppers.append(ub)
 
-        if lift == "absolute":
-            rd = p2 - p1
-            var_rd = p1 * (1 - p1) / trials_arr[:, 0] + p2 * (1 - p2) / trials_arr[:, 1]
-            w = 1 / var_rd
-            pooled_est = float(np.sum(w * rd) / np.sum(w))
-            pooled_se = float(1 / np.sqrt(np.sum(w)))
-            pooled_lb = pooled_est - z * pooled_se
-            pooled_ub = pooled_est + z * pooled_se
-        else:
-            log_rr_all = np.log(p2 / p1)
-            var_log_rr = (1 - p1) / (trials_arr[:, 0] * p1) + (1 - p2) / (trials_arr[:, 1] * p2)
-            w = 1 / var_log_rr
-            log_rr_pooled = float(np.sum(w * log_rr_all) / np.sum(w))
-            se_log_pooled = float(1 / np.sqrt(np.sum(w)))
-            pooled_est = float(np.exp(log_rr_pooled) - 1)
-            pooled_lb = float(np.exp(log_rr_pooled - z * se_log_pooled) - 1)
-            pooled_ub = float(np.exp(log_rr_pooled + z * se_log_pooled) - 1)
+        pooled_est, _, pooled_lb, pooled_ub = _pooled_effect(p1, p2, trials_arr, lift, z, self.spend, self.msrp)
 
         plot_color = resolve_plot_color(color)
         fig = go.Figure()  # type: ignore[attr-defined]
@@ -572,10 +654,25 @@ class StratifiedContingencyTable:
             )
         )
 
+        lift_labels = {
+            "absolute": "Risk Difference",
+            "relative": "Relative Lift",
+            "incremental": "Incremental Conversions",
+            "roas": "Return on Ad Spend",
+            "revenue": "Revenue",
+        }
+        tick_formats = {
+            "absolute": ",.1%",
+            "relative": ",.1%",
+            "incremental": ",",
+            "roas": "$,",
+            "revenue": "$,",
+        }
+
         fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
         fig.update_layout(
-            title=f"{self.experiment_name} — {self.metric_name} ({lift} lift)",
-            xaxis_tickformat=",.0%",
+            title=f"{self.experiment_name} — {self.metric_name} ({lift_labels[lift]})",
+            xaxis_tickformat=tick_formats[lift],
             showlegend=False,
         )
         if reverse_plot:
