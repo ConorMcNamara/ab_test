@@ -4,8 +4,8 @@ Bayesian Binomial
 Bayesian tools for A/B tests on binomial outcomes. This subpackage uses
 Beta-Binomial conjugate models to estimate posterior distributions, compute
 P(B > A), expected loss, ROPE probabilities, credible intervals,
-simulation-based power analysis, and difference-in-differences analysis for
-heterogeneous treatment effects.
+simulation-based power analysis, stratified analysis across strata, and
+difference-in-differences analysis for heterogeneous treatment effects.
 
 .. toctree::
    :maxdepth: 1
@@ -14,5 +14,6 @@ heterogeneous treatment effects.
    stats_tests
    credible_intervals
    power_calculations
+   stratified
    diff_in_diff
    utils
