@@ -212,11 +212,11 @@ class BayesianContingencyTable(BaseContingencyTable):
             if lift == "roas":
                 if self.spend is None:
                     raise ValueError("spend must be set for ROAS calculations")
-                test_lift = self.spend / test_lift
-                pa = self.spend / pa if pa > 0 else np.inf
-                pb = self.spend / pb if pb > 0 else np.inf
-                lb = self.spend / lb if lb > 0 else np.inf
-                ub = self.spend / ub if ub > 0 else np.inf
+                test_lift /= self.spend
+                pa /= self.spend
+                pb /= self.spend
+                lb /= self.spend
+                ub /= self.spend
             if lift == "revenue":
                 if self.msrp is None:
                     raise ValueError("msrp must be set for revenue calculations")
