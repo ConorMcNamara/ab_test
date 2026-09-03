@@ -81,7 +81,7 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 | `"relative"` | `(p_treatment - p_control) / p_control` |
 | `"absolute"` | `p_treatment - p_control` |
 | `"incremental"` | Incremental conversions normalized to equal group sizes |
-| `"roas"` | Return on ad spend (`spend / incremental_conversions`) |
+| `"roas"` | Return on ad spend (`incremental_conversions / spend`) |
 | `"revenue"` | Incremental revenue (`incremental_conversions × msrp`) |
 
 ### `test_method`

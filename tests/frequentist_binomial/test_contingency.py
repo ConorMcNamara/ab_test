@@ -202,12 +202,12 @@ class TestContingencyTable:
                 "roas",
                 {
                     "lift_type": "roas",
-                    "lift": 10,
-                    "Holdout": 1.00,
-                    "Test": 0.909090909090909,
+                    "lift": 0.1,
+                    "Holdout": 1.0,
+                    "Test": 1.1,
                     "p_value": 0.4657435879336349,
-                    "ci_lower": np.inf,
-                    "ci_upper": 2.63157894737,
+                    "ci_lower": -0.16,
+                    "ci_upper": 0.38,
                 },
             ),
             (

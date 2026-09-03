@@ -45,8 +45,8 @@ def calculate_rope(
           Requires ``trials``.
         - ``"revenue"``: ``(B - A) * max(trials) * msrp`` — incremental revenue.
           Requires ``trials`` and ``msrp``.
-        - ``"roas"``: ``spend / (A * max_n) - spend / (B * max_n)`` — difference
-          in cost-per-acquisition; positive means B is cheaper. Requires ``trials``
+        - ``"roas"``: ``(B - A) * max(trials) / spend`` — incremental conversions
+          per dollar spent; positive means B outperforms A. Requires ``trials``
           and ``spend``.
 
         Default is ``"relative"``.
@@ -101,8 +101,7 @@ def calculate_rope(
         else:  # roas
             if spend is None:
                 raise ValueError("spend must be provided for lift='roas'")
-            # CPA_A - CPA_B: positive means B has lower cost-per-conversion (better)
-            lift_arr = spend / (a * max_n) - spend / (b * max_n)
+            lift_arr = (b - a) * max_n / spend
     else:
         raise NotImplementedError(f"lift {lift} not implemented")
 
