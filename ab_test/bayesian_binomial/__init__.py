@@ -8,6 +8,7 @@ from ab_test.bayesian_binomial import (
     diff_in_diff,
     power_calculations,
     stats_tests,
+    stratified,
     utils,
 )
 
@@ -17,6 +18,7 @@ __all__: list[str] = [
     "diff_in_diff",
     "power_calculations",
     "stats_tests",
+    "stratified",
     "utils",
 ]
 
