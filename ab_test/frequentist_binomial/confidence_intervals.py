@@ -197,15 +197,16 @@ def confidence_interval(
                 z_critical = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
                 lower1, upper1 = wald_interval(successes[0], trials[0], alpha, z_critical)
                 lower2, upper2 = wald_interval(successes[1], trials[1], alpha, z_critical)
+            var_pA = math.pow((upper1 - lower1) / 2, 2)
+            var_pB = math.pow((upper2 - lower2) / 2, 2)
             if lift == "relative" and method != "delta":
-                lower1 /= successes[0] / trials[0]
-                lower2 /= successes[0] / trials[0]
-                upper1 /= successes[0] / trials[0]
-                upper2 /= successes[0] / trials[0]
-            var_p1 = math.pow((upper1 - lower1) / 2, 2)
-            var_p2 = math.pow((upper2 - lower2) / 2, 2)
-            lb = ote - math.sqrt(var_p1 + var_p2)
-            ub = ote + math.sqrt(var_p1 + var_p2)
+                p_A = successes[0] / trials[0]
+                p_B = successes[1] / trials[1]
+                var_g = var_pB / (p_A**2) + (p_B**2) * var_pA / (p_A**4)
+            else:
+                var_g = var_pA + var_pB
+            lb = ote - math.sqrt(var_g)
+            ub = ote + math.sqrt(var_g)
         elif method == "delta":
             lb, ub = delta_interval(trials, successes, alpha, lift)
         else:

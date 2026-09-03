@@ -250,6 +250,44 @@ class TestConfidenceIntervalComparison:
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
 
+    @staticmethod
+    @pytest.mark.parametrize(
+        "method, expected_low, expected_high",
+        [
+            ("wilson", -0.1822119971659585, 0.38221199716595844),
+            ("wald", -0.18185345201355, 0.3818534520135499),
+            ("agresti-coull", -0.18310407967188583, 0.38310407967188576),
+            ("jeffrey", -0.18181832821913138, 0.3818183282191313),
+            ("clopper-pearson", -0.18922734741996364, 0.38922734741996357),
+        ],
+    )
+    def test_conf_int_relative_individual_methods(method, expected_low, expected_high):
+        trials = [1000, 1000]
+        successes = [100, 110]
+
+        actual_low, actual_high = confidence_interval(
+            trials, successes, test=z_test, alpha=0.05, lift="relative", method=method
+        )
+
+        assert actual_low == pytest.approx(expected_low)
+        assert actual_high == pytest.approx(expected_high)
+
+    @staticmethod
+    def test_relative_individual_ci_close_to_delta():
+        """Individual CI methods should approximate the delta method for relative lift."""
+        trials = [1000, 1000]
+        successes = [100, 150]
+
+        delta_lo, delta_hi = confidence_interval(
+            trials, successes, test=z_test, alpha=0.05, lift="relative", method="delta"
+        )
+        wilson_lo, wilson_hi = confidence_interval(
+            trials, successes, test=z_test, alpha=0.05, lift="relative", method="wilson"
+        )
+
+        assert wilson_lo == pytest.approx(delta_lo, abs=0.02)
+        assert wilson_hi == pytest.approx(delta_hi, abs=0.02)
+
 
 class TestConfidenceInterval:
     @staticmethod
