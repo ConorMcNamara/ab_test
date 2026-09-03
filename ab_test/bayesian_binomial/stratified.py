@@ -23,7 +23,7 @@ __all__ = [
     "BayesianStratifiedContingencyTable",
 ]
 
-_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue", "cpa"})
 
 
 class BayesianStratifiedContingencyTable:
@@ -155,8 +155,8 @@ class BayesianStratifiedContingencyTable:
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
-        if lift == "roas" and self.spend is None:
-            raise ValueError("spend must be set for ROAS calculations")
+        if lift in ("roas", "cpa") and self.spend is None:
+            raise ValueError(f"spend must be set for {lift.upper()} calculations")
         if lift == "revenue" and self.msrp is None:
             raise ValueError("msrp must be set for revenue calculations")
         return lift
@@ -211,12 +211,15 @@ class BayesianStratifiedContingencyTable:
         if lift == "relative":
             return np.exp(pooled) - 1
 
-        if lift in ("incremental", "roas", "revenue"):
+        if lift in ("incremental", "roas", "revenue", "cpa"):
             n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
             pooled = pooled * n_max
             if lift == "roas":
                 assert self.spend is not None
                 pooled = pooled / self.spend
+            elif lift == "cpa":
+                assert self.spend is not None
+                pooled = np.where(np.abs(pooled) > 1e-12, self.spend / pooled, np.inf)
             elif lift == "revenue":
                 assert self.msrp is not None
                 pooled = pooled * self.msrp
@@ -255,7 +258,7 @@ class BayesianStratifiedContingencyTable:
         ----------
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
-            ``"roas"``, or ``"revenue"``.
+            ``"roas"``, ``"revenue"``, or ``"cpa"``.
         confidence_level : float, default=0.95
             Probability mass for the credible interval.
         n_samples : int, default=100_000
@@ -318,7 +321,7 @@ class BayesianStratifiedContingencyTable:
 
         if lift == "relative":
             display_stratum_samples = [np.exp(s) - 1 for s in stratum_samples]
-        elif lift in ("incremental", "roas", "revenue"):
+        elif lift in ("incremental", "roas", "revenue", "cpa"):
             display_stratum_samples = []
             for k, s in enumerate(stratum_samples):
                 n_max_k = max(trials[k, 0], trials[k, 1])
@@ -326,6 +329,9 @@ class BayesianStratifiedContingencyTable:
                 if lift == "roas":
                     assert self.spend is not None
                     scaled = scaled / self.spend
+                elif lift == "cpa":
+                    assert self.spend is not None
+                    scaled = np.where(np.abs(scaled) > 1e-12, self.spend / scaled, np.inf)
                 elif lift == "revenue":
                     assert self.msrp is not None
                     scaled = scaled * self.msrp
@@ -408,7 +414,7 @@ class BayesianStratifiedContingencyTable:
         ----------
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
-            ``"roas"``, or ``"revenue"``.
+            ``"roas"``, ``"revenue"``, or ``"cpa"``.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -437,12 +443,15 @@ class BayesianStratifiedContingencyTable:
 
             if lift == "relative":
                 display_samples = np.exp(samples) - 1
-            elif lift in ("incremental", "roas", "revenue"):
+            elif lift in ("incremental", "roas", "revenue", "cpa"):
                 n_max_k = max(trials[k, 0], trials[k, 1])
                 display_samples = samples * n_max_k
                 if lift == "roas":
                     assert self.spend is not None
                     display_samples = display_samples / self.spend
+                elif lift == "cpa":
+                    assert self.spend is not None
+                    display_samples = np.where(np.abs(display_samples) > 1e-12, self.spend / display_samples, np.inf)
                 elif lift == "revenue":
                     assert self.msrp is not None
                     display_samples = display_samples * self.msrp
@@ -497,7 +506,7 @@ class BayesianStratifiedContingencyTable:
         ----------
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
-            ``"roas"``, or ``"revenue"``.
+            ``"roas"``, ``"revenue"``, or ``"cpa"``.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -522,12 +531,15 @@ class BayesianStratifiedContingencyTable:
         for k, samples in enumerate(stratum_samples):
             if lift == "relative":
                 display_samples = np.exp(samples) - 1
-            elif lift in ("incremental", "roas", "revenue"):
+            elif lift in ("incremental", "roas", "revenue", "cpa"):
                 n_max_k = max(trials[k, 0], trials[k, 1])
                 display_samples = samples * n_max_k
                 if lift == "roas":
                     assert self.spend is not None
                     display_samples = display_samples / self.spend
+                elif lift == "cpa":
+                    assert self.spend is not None
+                    display_samples = np.where(np.abs(display_samples) > 1e-12, self.spend / display_samples, np.inf)
                 elif lift == "revenue":
                     assert self.msrp is not None
                     display_samples = display_samples * self.msrp

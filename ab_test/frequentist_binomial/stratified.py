@@ -222,7 +222,7 @@ def stratified_power(
     return float(ss.ncx2.sf(crit, df=1, nc=ncp))
 
 
-_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue", "cpa"})
 
 
 def _stratum_effect(
@@ -251,7 +251,7 @@ def _stratum_effect(
     var = p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2
     se = float(np.sqrt(var))
 
-    if lift in ("incremental", "roas", "revenue"):
+    if lift in ("incremental", "roas", "revenue", "cpa"):
         n_max = max(n1, n2)
         d_scaled = d * n_max
         se_scaled = se * n_max
@@ -263,6 +263,14 @@ def _stratum_effect(
             se_scaled /= spend
             ci_lo /= spend
             ci_hi /= spend
+        elif lift == "cpa":
+            assert spend is not None
+            se_scaled = np.inf
+            d_scaled = spend / d_scaled if abs(d_scaled) > 1e-12 else np.inf
+            ci_lo, ci_hi = (
+                (spend / ci_hi if ci_hi > 0 else np.inf),
+                (spend / ci_lo if ci_lo > 0 else np.inf),
+            )
         elif lift == "revenue":
             assert msrp is not None
             d_scaled *= msrp
@@ -304,7 +312,7 @@ def _pooled_effect(
     pooled_d = float(np.sum(w * rd) / np.sum(w))
     pooled_se = float(1 / np.sqrt(np.sum(w)))
 
-    if lift in ("incremental", "roas", "revenue"):
+    if lift in ("incremental", "roas", "revenue", "cpa"):
         n_max = float(max(np.sum(trials_arr[:, 0]), np.sum(trials_arr[:, 1])))
         est = pooled_d * n_max
         se_scaled = pooled_se * n_max
@@ -316,6 +324,11 @@ def _pooled_effect(
             se_scaled /= spend
             lb /= spend
             ub /= spend
+        elif lift == "cpa":
+            assert spend is not None
+            se_scaled = np.inf
+            est = spend / est if abs(est) > 1e-12 else np.inf
+            lb, ub = (spend / ub if ub > 0 else np.inf), (spend / lb if lb > 0 else np.inf)
         elif lift == "revenue":
             assert msrp is not None
             est *= msrp
@@ -424,6 +437,8 @@ class StratifiedContingencyTable:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
         if lift == "roas" and self.spend is None:
             raise ValueError("spend must be set for ROAS calculations")
+        if lift == "cpa" and self.spend is None:
+            raise ValueError("spend must be set for CPA calculations")
         if lift == "revenue" and self.msrp is None:
             raise ValueError("msrp must be set for revenue calculations")
         return lift
@@ -444,7 +459,7 @@ class StratifiedContingencyTable:
         ----------
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
-            ``"roas"``, or ``"revenue"``.
+            ``"roas"``, ``"revenue"``, or ``"cpa"``.
         alpha : float, default=0.05
             Significance level for the confidence interval.
 
@@ -504,7 +519,7 @@ class StratifiedContingencyTable:
         ----------
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
-            ``"roas"``, or ``"revenue"``.
+            ``"roas"``, ``"revenue"``, or ``"cpa"``.
         alpha : float, default=0.05
             Significance level.
 
@@ -558,7 +573,7 @@ class StratifiedContingencyTable:
         ----------
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
-            ``"roas"``, or ``"revenue"``.
+            ``"roas"``, ``"revenue"``, or ``"cpa"``.
         alpha : float, default=0.05
             Significance level for confidence intervals.
         reverse_plot : bool, default=True
@@ -660,6 +675,7 @@ class StratifiedContingencyTable:
             "incremental": "Incremental Conversions",
             "roas": "Return on Ad Spend",
             "revenue": "Revenue",
+            "cpa": "Cost Per Acquisition",
         }
         tick_formats = {
             "absolute": ",.1%",
@@ -667,6 +683,7 @@ class StratifiedContingencyTable:
             "incremental": ",",
             "roas": "$,",
             "revenue": "$,",
+            "cpa": "$,",
         }
 
         fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)

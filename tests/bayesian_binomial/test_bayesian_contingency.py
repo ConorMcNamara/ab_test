@@ -380,6 +380,26 @@ class TestBayesianContingencyTable:
         assert expected["prob_rope"] == pytest.approx(bct.incremental_results["prob_rope"], abs=1e-02)
 
     @staticmethod
+    def test_contingency_cpa():
+        bct = BayesianContingencyTable(name="CPA Test", spend=100, metric_name="conversions")
+        bct.add("Holdout", 100, 1_000, 1, 1)
+        bct.add("Test", 110, 1_000, 1, 1)
+        bct.analyze(lift="cpa")
+        r = bct.incremental_results
+        assert r["lift_type"] == "cpa"
+        assert r["lift"] == pytest.approx(10.0, abs=2)
+        assert r["ci_lower"] < r["lift"]
+        assert r["ci_upper"] > r["lift"]
+
+    @staticmethod
+    def test_contingency_cpa_requires_spend():
+        bct = BayesianContingencyTable(name="No Spend", metric_name="conversions")
+        bct.add("Holdout", 100, 1_000, 1, 1)
+        bct.add("Test", 110, 1_000, 1, 1)
+        with pytest.raises(ValueError, match="spend"):
+            bct.analyze(lift="cpa")
+
+    @staticmethod
     def test_contingency_analyze_individual_results():
         ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000, 1, 1)

@@ -1,6 +1,7 @@
+import numpy as np
 import pytest
 
-from ab_test.bayesian_binomial.stats_tests import calculate_metrics
+from ab_test.bayesian_binomial.stats_tests import calculate_metrics, calculate_rope
 
 
 class TestStatsTests:
@@ -49,6 +50,22 @@ class TestStatsTests:
             "Expected loss"
         ]
         assert actual_prob == pytest.approx(expected_prob, abs=1e-02)
+
+    @staticmethod
+    def test_calculate_rope_cpa():
+        rng = np.random.default_rng(42)
+        sample_a = rng.beta(101, 901, size=100_000)
+        sample_b = rng.beta(111, 891, size=100_000)
+        result = calculate_rope(sample_a, sample_b, lift="cpa", low=0, high=20, trials=(1000, 1000), spend=100)
+        assert 0 < result["prob_in_rope"] < 1
+        assert 0 < result["prob_lift_exceeds"] < 1
+
+    @staticmethod
+    def test_calculate_rope_cpa_requires_spend():
+        sample_a = np.array([0.1, 0.1])
+        sample_b = np.array([0.11, 0.11])
+        with pytest.raises(ValueError, match="spend must be provided"):
+            calculate_rope(sample_a, sample_b, lift="cpa", trials=(1000, 1000))
 
 
 if __name__ == "__main__":

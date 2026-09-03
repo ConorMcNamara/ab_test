@@ -119,7 +119,7 @@ def convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[A
     def _format_one(val: float) -> str | float:
         if math.isinf(val):
             return _format_infinity(val)
-        if lift in ["revenue", "roas"]:
+        if lift in ["revenue", "roas", "cpa"]:
             return f"${round(val, 2):,}"
         if lift in ["absolute", "relative"]:
             return f"{round(val * 100.0, 2)}%"
@@ -255,7 +255,7 @@ def render_forest_plot(
         )
         if incremental_results["lift_type"] in ["relative", "absolute"]:
             fig.update_layout(xaxis_tickformat=",.0%")
-        elif incremental_results["lift_type"] in ["revenue", "roas"]:
+        elif incremental_results["lift_type"] in ["revenue", "roas", "cpa"]:
             if incremental_results["lift_type"] == "revenue":
                 fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="~s")
             else:

@@ -29,7 +29,7 @@ __all__ = [
     "BayesianDiffInDiff",
 ]
 
-_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue", "cpa"})
 
 
 def _credible_interval_from_samples(
@@ -58,7 +58,7 @@ def _compute_segment_samples(
         One table per segment, each with exactly 2 cells.
     lift : str
         One of ``"absolute"``, ``"relative"``, ``"incremental"``,
-        ``"roas"``, or ``"revenue"``.
+        ``"roas"``, ``"revenue"``, or ``"cpa"``.
     n_samples : int
         Number of posterior samples to draw per variant.
 
@@ -89,13 +89,17 @@ def _compute_segment_samples(
         if lift == "relative":
             safe_c = np.where(samples_c == 0, 1e-9, samples_c)
             segment_lift = (samples_t - samples_c) / safe_c
-        elif lift in ("incremental", "roas", "revenue"):
+        elif lift in ("incremental", "roas", "revenue", "cpa"):
             n_max = max(n_c, n_t)
             segment_lift = (samples_t - samples_c) * n_max
             if lift == "roas":
                 if table.spend is None:
                     raise ValueError(f"spend must be set on segment {table.experiment_name!r} for ROAS")
                 segment_lift = segment_lift / table.spend
+            elif lift == "cpa":
+                if table.spend is None:
+                    raise ValueError(f"spend must be set on segment {table.experiment_name!r} for CPA")
+                segment_lift = np.where(np.abs(segment_lift) > 1e-12, table.spend / segment_lift, np.inf)
             elif lift == "revenue":
                 if table.msrp is None:
                     raise ValueError(f"msrp must be set on segment {table.experiment_name!r} for revenue")
@@ -401,6 +405,7 @@ class BayesianDiffInDiff:
             "incremental": "Incremental Conversions",
             "roas": "Return on Ad Spend",
             "revenue": "Revenue",
+            "cpa": "Cost Per Acquisition",
         }
         tick_formats = {
             "absolute": ",.1%",
@@ -408,6 +413,7 @@ class BayesianDiffInDiff:
             "incremental": ",",
             "roas": "$,",
             "revenue": "$,",
+            "cpa": "$,",
         }
         lift_label = lift_labels[lift]
         fig.update_layout(

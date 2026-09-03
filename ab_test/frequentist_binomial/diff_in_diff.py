@@ -76,7 +76,7 @@ def cochrans_q(
     return q, pvalue
 
 
-_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue", "cpa"})
 
 
 def _compute_segment_stats(
@@ -92,7 +92,7 @@ def _compute_segment_stats(
         One table per segment, each with exactly 2 cells.
     lift : str
         One of ``"absolute"``, ``"relative"``, ``"incremental"``,
-        ``"roas"``, or ``"revenue"``.
+        ``"roas"``, ``"revenue"``, or ``"cpa"``.
     alpha : float
         Significance level for Wald confidence intervals.
 
@@ -144,7 +144,7 @@ def _compute_segment_stats(
             var = p_t * (1 - p_t) / n_t + p_c * (1 - p_c) / n_c
             se = np.sqrt(var)
 
-            if lift in ("incremental", "roas", "revenue"):
+            if lift in ("incremental", "roas", "revenue", "cpa"):
                 n_max = max(n_c, n_t)
                 scale = float(n_max)
                 d_scaled = d * scale
@@ -161,6 +161,16 @@ def _compute_segment_stats(
                     var_scaled /= spend * spend
                     ci_lo /= spend
                     ci_hi /= spend
+                elif lift == "cpa":
+                    if table.spend is None:
+                        raise ValueError(f"spend must be set on segment {table.experiment_name!r} for CPA")
+                    spend = table.spend
+                    var_scaled = np.inf
+                    d_scaled = spend / d_scaled if abs(d_scaled) > 1e-12 else np.inf
+                    ci_lo, ci_hi = (
+                        (spend / ci_hi if ci_hi > 0 else np.inf),
+                        (spend / ci_lo if ci_lo > 0 else np.inf),
+                    )
                 elif lift == "revenue":
                     if table.msrp is None:
                         raise ValueError(f"msrp must be set on segment {table.experiment_name!r} for revenue")
@@ -479,6 +489,7 @@ class DiffInDiff:
             "incremental": "Incremental Conversions",
             "roas": "Return on Ad Spend",
             "revenue": "Revenue",
+            "cpa": "Cost Per Acquisition",
         }
         tick_formats = {
             "absolute": ",.1%",
@@ -486,6 +497,7 @@ class DiffInDiff:
             "incremental": ",",
             "roas": "$,",
             "revenue": "$,",
+            "cpa": "$,",
         }
         lift_label = lift_labels[lift]
         fig.update_layout(

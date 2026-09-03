@@ -24,7 +24,7 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 | **Bayesian inference** | P(B > A), expected loss, ROPE analysis, lift probability thresholds | [docs](docs/bayesian_binomial/stats_tests.rst) |
 | **Multiple testing** | Bonferroni, Sidak, Holm (FWER), Benjamini-Hochberg (FDR) | [docs](docs/corrections.rst) |
 | **Diagnostics** | Sample ratio mismatch (SRM) detection | [docs](docs/diagnostics.rst) |
-| **Lift types** | Relative, absolute, incremental, ROAS, and revenue — all methods | — |
+| **Lift types** | Relative, absolute, incremental, ROAS, CPA, and revenue — all methods | — |
 
 ## Installation
 
@@ -82,6 +82,7 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 | `"absolute"` | `p_treatment - p_control` |
 | `"incremental"` | Incremental conversions normalized to equal group sizes |
 | `"roas"` | Return on ad spend (`incremental_conversions / spend`) |
+| `"cpa"` | Cost per acquisition (`spend / incremental_conversions`) |
 | `"revenue"` | Incremental revenue (`incremental_conversions × msrp`) |
 
 ### `test_method`

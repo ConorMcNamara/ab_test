@@ -48,6 +48,8 @@ def calculate_rope(
         - ``"roas"``: ``(B - A) * max(trials) / spend`` — incremental conversions
           per dollar spent; positive means B outperforms A. Requires ``trials``
           and ``spend``.
+        - ``"cpa"``: ``spend / ((B - A) * max(trials))`` — cost per incremental
+          conversion; lower means B is cheaper. Requires ``trials`` and ``spend``.
 
         Default is ``"relative"``.
     low : float, optional
@@ -88,7 +90,7 @@ def calculate_rope(
         lift_arr = (b - a) / a
     elif lift == "absolute":
         lift_arr = b - a
-    elif lift in ("incremental", "revenue", "roas"):
+    elif lift in ("incremental", "revenue", "roas", "cpa"):
         if trials is None:
             raise ValueError(f"trials must be provided for lift='{lift}'")
         max_n = max(trials)
@@ -98,10 +100,15 @@ def calculate_rope(
             if msrp is None:
                 raise ValueError("msrp must be provided for lift='revenue'")
             lift_arr = (b - a) * max_n * msrp
-        else:  # roas
+        elif lift == "roas":
             if spend is None:
                 raise ValueError("spend must be provided for lift='roas'")
             lift_arr = (b - a) * max_n / spend
+        else:  # cpa
+            if spend is None:
+                raise ValueError("spend must be provided for lift='cpa'")
+            incremental = (b - a) * max_n
+            lift_arr = np.where(np.abs(incremental) > 1e-12, spend / incremental, np.inf)
     else:
         raise NotImplementedError(f"lift {lift} not implemented")
 
