@@ -173,8 +173,7 @@ class ContingencyTable(BaseContingencyTable):
                 test_lift = self.spend / test_lift
                 pa = self.spend / pa if pa > 0 else np.inf
                 pb = self.spend / pb if pb > 0 else np.inf
-                lb = self.spend / lb if lb > 0 else np.inf
-                ub = self.spend / ub if ub > 0 else np.inf
+                lb, ub = (self.spend / ub if ub > 0 else np.inf), (self.spend / lb if lb > 0 else np.inf)
             if lift == "revenue":
                 if self.msrp is None:
                     raise ValueError("msrp must be set for revenue calculations")

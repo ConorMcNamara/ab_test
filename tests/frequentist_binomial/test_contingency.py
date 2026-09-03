@@ -206,8 +206,8 @@ class TestContingencyTable:
                     "Holdout": 1.00,
                     "Test": 0.909090909090909,
                     "p_value": 0.4657435879336349,
-                    "ci_lower": np.inf,
-                    "ci_upper": 2.63157894737,
+                    "ci_lower": 2.63157894737,
+                    "ci_upper": np.inf,
                 },
             ),
             (
