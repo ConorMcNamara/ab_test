@@ -74,6 +74,20 @@ class TestScorePower:
         assert actual == pytest.approx(expected)
 
     @staticmethod
+    def test_minimum_detectable_drop_absolute():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        mdl = minimum_detectable_lift(group_sizes, baseline, drop=True, lift="absolute")
+        assert 0 < mdl < baseline
+
+    @staticmethod
+    def test_minimum_detectable_lift_absolute_positive():
+        baseline = 0.50
+        group_sizes = [1000, 1000]
+        mdl = minimum_detectable_lift(group_sizes, baseline, drop=False, lift="absolute")
+        assert 0 < mdl < 1 - baseline
+
+    @staticmethod
     def test_required_sample_size_relative_lift():
         baseline = 0.10
         alt_lift = 0.50
