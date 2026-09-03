@@ -377,18 +377,22 @@ class BayesianContingencyTable(BaseContingencyTable):
         plot_color = resolve_plot_color(color) or ["#636EFA", "#EF553B"]
         color_a = plot_color[0] if isinstance(plot_color, list) else plot_color[self.names[0]]
         color_b = plot_color[1] if isinstance(plot_color, list) else plot_color[self.names[1]]
+        # Posterior parameters: Beta(alpha + successes, beta + trials - successes)
+        post_alpha_a = self.alphas[0] + self.successes[0]
+        post_beta_a = self.betas[0] + self.trials[0] - self.successes[0]
+        post_alpha_b = self.alphas[1] + self.successes[1]
+        post_beta_b = self.betas[1] + self.trials[1] - self.successes[1]
+
         # 1. Define X-axis range (0 to 1, but zoomed to relevant area)
-        x_min = max(
-            0, min(beta.ppf(0.001, self.alphas[0], self.betas[0]), beta.ppf(0.001, self.alphas[1], self.betas[1])) * 0.8
-        )
-        x_max = min(
-            1, max(beta.ppf(0.999, self.alphas[0], self.betas[0]), beta.ppf(0.999, self.alphas[1], self.betas[1])) * 1.2
-        )
+        ppf_lo = min(beta.ppf(0.001, post_alpha_a, post_beta_a), beta.ppf(0.001, post_alpha_b, post_beta_b))
+        ppf_hi = max(beta.ppf(0.999, post_alpha_a, post_beta_a), beta.ppf(0.999, post_alpha_b, post_beta_b))
+        x_min = max(0, ppf_lo * 0.8)
+        x_max = min(1, ppf_hi * 1.2)
         x = np.linspace(x_min, x_max, 500)
 
         # 2. PDF Curves
-        pdf_a = beta.pdf(x, self.alphas[0], self.betas[0])
-        pdf_b = beta.pdf(x, self.alphas[1], self.betas[1])
+        pdf_a = beta.pdf(x, post_alpha_a, post_beta_a)
+        pdf_b = beta.pdf(x, post_alpha_b, post_beta_b)
 
         # 3. HDI Lines
         hdi_a = individual_credible_interval(
