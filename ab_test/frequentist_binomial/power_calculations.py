@@ -171,8 +171,10 @@ def minimum_detectable_lift(
         mdl_inner = mdl_extremum
         if lift == "relative":
             mdl_extremum *= 2
-        else:
+        elif drop:
             mdl_extremum = 0.5 * (-baseline + mdl_extremum)
+        else:
+            mdl_extremum = 0.5 * ((1 - baseline) + mdl_extremum)
 
         pwr = abtest_power(
             group_sizes,
