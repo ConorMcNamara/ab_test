@@ -1,6 +1,6 @@
 [project]
 name = "abtest-analysis"
-version = "0.4.0"
+version = "0.5.0"
 description = "Analyze the effects of an AB test using Python"
 authors = [
     {name = "ConorMcNamara",email = "conor.s.mcnamara@gmail.com"}
@@ -33,6 +33,7 @@ pyspark = ["pyspark"]
 modin = ["modin[dask]"]
 ibis = ["ibis-framework"]
 narwhals = ["narwhals"]
+sklearn = ["scikit-learn>=1.0"]
 dev = [
     "pytest>=8.4.2,<9.0.0",
     "pytest-cov>=6.0.0",

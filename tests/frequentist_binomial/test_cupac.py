@@ -126,7 +126,7 @@ class TestCupacExperiment:
     @staticmethod
     def test_init_method_lin_raises():
         df = _make_experiment_data()
-        with pytest.raises(NotImplementedError, match="lin"):
+        with pytest.raises(NotImplementedError, match="not supported"):
             CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin")
 
     @staticmethod
@@ -307,6 +307,302 @@ class TestCupacStatisticalProperties:
         for seed in range(200):
             df = _make_experiment_data(n_control=1000, n_treatment=1000, treatment_effect=true_effect, seed=seed)
             exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment").fit()
+            ates.append(exp.ate)
+
+        mean_ate = np.mean(ates)
+        assert mean_ate == pytest.approx(true_effect, abs=0.005)
+
+
+# ---------------------------------------------------------------------------
+# MLRATE tests — guarded by sklearn availability
+# ---------------------------------------------------------------------------
+
+sklearn = pytest.importorskip("sklearn")
+from sklearn.linear_model import LinearRegression  # noqa: E402
+
+
+class TestCupacMlrateValidation:
+    @staticmethod
+    def test_mlrate_without_estimator_raises():
+        df = _make_experiment_data()
+        with pytest.raises(ValueError, match="estimator is required"):
+            CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="mlrate")
+
+    @staticmethod
+    def test_mlrate_bad_estimator_raises():
+        df = _make_experiment_data()
+        with pytest.raises(ValueError, match="fit.*predict"):
+            CupacExperiment(
+                df,
+                "converted",
+                "group",
+                ["pre_visits"],
+                "control",
+                "treatment",
+                method="mlrate",
+                estimator="not_a_model",
+            )
+
+    @staticmethod
+    def test_mlrate_valid_init():
+        df = _make_experiment_data()
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        )
+        assert exp.method == "mlrate"
+
+
+class TestCupacMlrateAnalyze:
+    @staticmethod
+    def test_fit_returns_self():
+        df = _make_experiment_data()
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        )
+        result = exp.fit()
+        assert result is exp
+
+    @staticmethod
+    def test_analyze_returns_string():
+        df = _make_experiment_data()
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        )
+        result = exp.analyze()
+        assert isinstance(result, str)
+        assert "MLRATE" in result
+
+    @staticmethod
+    def test_summary_dict_keys():
+        df = _make_experiment_data()
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        ).fit()
+        s = exp.summary()
+        expected_keys = {
+            "ate",
+            "ate_unadjusted",
+            "se",
+            "se_unadjusted",
+            "z_stat",
+            "p_value",
+            "r_squared",
+            "theta",
+            "n_control",
+            "n_treatment",
+        }
+        assert set(s.keys()) == expected_keys
+
+    @staticmethod
+    def test_known_treatment_effect():
+        df = _make_experiment_data(n_control=5000, n_treatment=5000, treatment_effect=0.03, seed=123)
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        ).fit()
+        assert exp.ate == pytest.approx(0.03, abs=0.015)
+
+    @staticmethod
+    def test_variance_reduction_positive():
+        df = _make_experiment_data(covariate_r_squared=0.3)
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        ).fit()
+        assert exp.variance_reduction > 0
+
+    @staticmethod
+    def test_se_smaller_than_unadjusted():
+        df = _make_experiment_data(covariate_r_squared=0.3)
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        ).fit()
+        s = exp.summary()
+        assert s["se"] < s["se_unadjusted"]
+
+
+class TestCupacMlratePredictProba:
+    @staticmethod
+    def test_classifier_uses_predict_proba():
+        """A classifier with predict_proba should yield better variance reduction than discrete predict."""
+        pytest.importorskip("sklearn")
+        from sklearn.linear_model import LogisticRegression
+
+        df = _make_experiment_data(n_control=3000, n_treatment=3000, covariate_r_squared=0.3, seed=99)
+
+        exp_classifier = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LogisticRegression(),
+        ).fit()
+
+        assert exp_classifier.variance_reduction > 0
+
+    @staticmethod
+    def test_regressor_still_works():
+        """A regressor (no predict_proba) still produces valid results."""
+        df = _make_experiment_data(covariate_r_squared=0.3)
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        ).fit()
+        assert exp.variance_reduction > 0
+        assert exp._results is not None
+
+
+class TestCupacMlrateCrossFitting:
+    @staticmethod
+    def test_custom_n_folds():
+        df = _make_experiment_data()
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+            n_folds=3,
+        ).fit()
+        assert exp._results is not None
+
+    @staticmethod
+    def test_cross_fitted_predictions_differ_from_in_sample():
+        """Cross-fitted predictions should differ from in-sample predictions."""
+        df = _make_experiment_data(covariate_r_squared=0.3)
+        covariates = df[["pre_visits"]].to_numpy(dtype=float)
+        y = df["converted"].to_numpy(dtype=float)
+
+        model = LinearRegression()
+        model.fit(covariates, y)
+        y_hat_insample = model.predict(covariates)
+
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        )
+        y_hat_oof = exp._cross_fit_predictions(covariates, y)
+
+        assert not np.allclose(y_hat_insample, y_hat_oof)
+
+
+class TestCupacMlrateStatisticalProperties:
+    @staticmethod
+    def test_type_i_error_control():
+        """Under the null, MLRATE rejects at approximately alpha."""
+        rng = np.random.default_rng(42)
+        alpha = 0.05
+        n_sims = 500
+        rejections = 0
+
+        for i in range(n_sims):
+            n = 2000
+            df = pd.DataFrame(
+                {
+                    "group": ["control"] * 1000 + ["treatment"] * 1000,
+                    "converted": rng.binomial(1, 0.1, n),
+                    "cov": rng.normal(0, 1, n),
+                }
+            )
+            exp = CupacExperiment(
+                df,
+                "converted",
+                "group",
+                ["cov"],
+                "control",
+                "treatment",
+                method="mlrate",
+                estimator=LinearRegression(),
+            ).fit()
+            if exp.p_value < alpha:
+                rejections += 1
+
+        rejection_rate = rejections / n_sims
+        assert rejection_rate < alpha + 0.03, f"Rejection rate {rejection_rate:.3f} exceeds alpha={alpha} + margin"
+
+    @staticmethod
+    def test_ate_unbiased():
+        """Over many simulations, the mean ATE should be close to the true effect."""
+        true_effect = 0.02
+        ates = []
+
+        for seed in range(200):
+            df = _make_experiment_data(n_control=1000, n_treatment=1000, treatment_effect=true_effect, seed=seed)
+            exp = CupacExperiment(
+                df,
+                "converted",
+                "group",
+                ["pre_visits"],
+                "control",
+                "treatment",
+                method="mlrate",
+                estimator=LinearRegression(),
+            ).fit()
             ates.append(exp.ate)
 
         mean_ate = np.mean(ates)

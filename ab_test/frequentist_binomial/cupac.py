@@ -1,9 +1,16 @@
-"""CUPAC (Controlled-experiment Using Pre-experiment data with Adjusted Covariates).
+"""CUPAC and MLRATE variance reduction for A/B tests.
 
 Provides variance reduction for A/B tests by fitting a predictive model
-on control-group covariates and adjusting outcomes via the CUPED framework.
-Uses a linear probability model with HC2 robust standard errors for valid
-inference under randomization.
+on covariates and adjusting outcomes via the CUPED framework.  Two methods
+are supported:
+
+* **CUPAC** fits OLS on control-group covariates and predicts for all users.
+* **MLRATE** accepts any scikit-learn-compatible estimator and uses K-fold
+  cross-fitting so that flexible models (random forests, gradient boosting,
+  etc.) produce valid inference without overfitting bias.
+
+Both methods use HC2 robust standard errors for the final treatment-effect
+estimate.
 
 References
 ----------
@@ -13,10 +20,13 @@ Deng, A. et al. (2013). "Improving the Sensitivity of Online Controlled
     Experiments by Utilizing Pre-Experiment Data."
 Lin, W. (2013). "Agnostic notes on regression adjustments to experimental
     data: Reexamining Freedman's critique."
+Guo, Y. et al. (2021). "Machine Learning for Variance Reduction in Online
+    Experiments."
 """
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from typing import Any
 
@@ -91,11 +101,15 @@ def _hc2_standard_errors(
 
 
 class CupacExperiment:
-    """Analyze an A/B test with CUPAC variance reduction.
+    """Analyze an A/B test with CUPAC or MLRATE variance reduction.
 
-    CUPAC fits a predictive model on control-group pre-experiment covariates,
-    uses the predictions to adjust outcomes via the CUPED framework, and
-    estimates the treatment effect with HC2 robust standard errors.
+    CUPAC fits OLS on control-group pre-experiment covariates and adjusts
+    outcomes via CUPED.  MLRATE generalises this by accepting any
+    scikit-learn-compatible estimator and using K-fold cross-fitting so
+    flexible models produce valid inference without overfitting bias.
+
+    Both methods estimate the treatment effect with HC2 robust standard
+    errors.
 
     Parameters
     ----------
@@ -120,7 +134,13 @@ class CupacExperiment:
     metric_name : str
         Display name for the outcome metric.
     method : str
-        Adjustment method. Currently only ``"cupac"`` is supported.
+        Adjustment method: ``"cupac"`` or ``"mlrate"``.
+    estimator : object or None
+        A scikit-learn-compatible estimator with ``fit`` and ``predict``
+        methods.  Required when ``method="mlrate"``, ignored otherwise.
+    n_folds : int
+        Number of cross-fitting folds for MLRATE.  Ignored when
+        ``method="cupac"``.
     """
 
     def __init__(
@@ -134,6 +154,8 @@ class CupacExperiment:
         experiment_name: str = "CUPAC Experiment",
         metric_name: str = "outcome",
         method: str = "cupac",
+        estimator: Any = None,
+        n_folds: int = 5,
     ) -> None:
         try:
             import polars as pl
@@ -154,9 +176,17 @@ class CupacExperiment:
         self.experiment_name = experiment_name
         self.metric_name = metric_name
 
-        if method != "cupac":
-            raise NotImplementedError(f"Method {method!r} is not yet supported. Use 'cupac'.")
+        method = method.casefold()
+        if method not in ("cupac", "mlrate"):
+            raise NotImplementedError(f"Method {method!r} is not supported. Use 'cupac' or 'mlrate'.")
+        if method == "mlrate":
+            if estimator is None:
+                raise ValueError("estimator is required when method='mlrate'")
+            if not (hasattr(estimator, "fit") and hasattr(estimator, "predict")):
+                raise ValueError("estimator must have fit() and predict() methods")
         self.method = method
+        self.estimator = estimator
+        self.n_folds = n_folds
 
         self._results: dict[str, Any] | None = None
 
@@ -191,8 +221,51 @@ class CupacExperiment:
                     f"Nominal categorical features should be one-hot encoded before being passed in."
                 )
 
+    def _cross_fit_predictions(
+        self,
+        covariates: np.ndarray[Any, Any],
+        y: np.ndarray[Any, Any],
+    ) -> np.ndarray[Any, Any]:
+        """K-fold cross-fitted predictions for MLRATE.
+
+        Each unit's prediction comes from a model trained on all other
+        folds, ensuring the prediction is independent of the unit's own
+        outcome.
+
+        Parameters
+        ----------
+        covariates : ndarray of shape (n, p)
+            Pre-experiment covariates.
+        y : ndarray of shape (n,)
+            Outcome vector.
+
+        Returns
+        -------
+        y_hat : ndarray of shape (n,)
+            Out-of-fold predictions.
+        """
+        n = len(y)
+        indices = np.arange(n)
+        rng = np.random.default_rng(0)
+        rng.shuffle(indices)
+        folds = np.array_split(indices, self.n_folds)
+
+        y_hat = np.empty(n, dtype=float)
+        for fold_idx in folds:
+            train_mask = np.ones(n, dtype=bool)
+            train_mask[fold_idx] = False
+
+            model = copy.deepcopy(self.estimator)
+            model.fit(covariates[train_mask], y[train_mask])
+            if hasattr(model, "predict_proba"):
+                y_hat[fold_idx] = model.predict_proba(covariates[fold_idx])[:, 1]
+            else:
+                y_hat[fold_idx] = model.predict(covariates[fold_idx])
+
+        return y_hat
+
     def fit(self) -> CupacExperiment:
-        """Run the CUPAC analysis pipeline.
+        """Run the CUPAC or MLRATE analysis pipeline.
 
         Returns
         -------
@@ -207,16 +280,16 @@ class CupacExperiment:
         n_ctrl = int(is_control.sum())
         n_treat = int(is_treatment.sum())
 
-        # Stage 1: fit OLS on control data
-        X_ctrl = np.column_stack([np.ones(n_ctrl), covariates[is_control]])
-        y_ctrl = y[is_control]
-        beta = _ols_fit(X_ctrl, y_ctrl)
+        if self.method == "mlrate":
+            y_hat = self._cross_fit_predictions(covariates, y)
+        else:
+            X_ctrl = np.column_stack([np.ones(n_ctrl), covariates[is_control]])
+            y_ctrl = y[is_control]
+            beta = _ols_fit(X_ctrl, y_ctrl)
+            X_all = np.column_stack([np.ones(len(y)), covariates])
+            y_hat = X_all @ beta
 
-        # Stage 2: predict for all users
-        X_all = np.column_stack([np.ones(len(y)), covariates])
-        y_hat = X_all @ beta
-
-        # Stage 3: CUPED adjustment
+        # CUPED adjustment
         y_hat_var = np.var(y_hat, ddof=1)
         if y_hat_var > 1e-12:
             theta = np.cov(y, y_hat, ddof=1)[0, 1] / y_hat_var
@@ -225,11 +298,11 @@ class CupacExperiment:
             y_adj = y.copy()
             theta = 0.0
 
-        # Stage 4: treatment effect (adjusted and unadjusted)
+        # Treatment effect (adjusted and unadjusted)
         tau_hat = float(np.mean(y_adj[is_treatment]) - np.mean(y_adj[is_control]))
         tau_unadj = float(np.mean(y[is_treatment]) - np.mean(y[is_control]))
 
-        # Stage 5: HC2 robust SEs via full regression
+        # HC2 robust SEs via full regression
         treatment_indicator = is_treatment.astype(float)
         X_full = np.column_stack([np.ones(len(y_adj)), treatment_indicator, covariates])
         beta_full = _ols_fit(X_full, y_adj)
@@ -239,7 +312,7 @@ class CupacExperiment:
         # Unadjusted SE for comparison
         se_unadj = float(np.sqrt(np.var(y[is_control], ddof=1) / n_ctrl + np.var(y[is_treatment], ddof=1) / n_treat))
 
-        # Stage 6: inference
+        # Inference
         z_stat = tau_hat / se_tau if se_tau > 0 else 0.0
         p_value = float(2 * ss.norm.sf(abs(z_stat)))
 
@@ -328,7 +401,7 @@ class CupacExperiment:
         table = [
             ["Experiment", self.experiment_name],
             ["Metric", self.metric_name],
-            ["Method", self.method.upper()],
+            ["Method", "MLRATE" if self.method == "mlrate" else "CUPAC"],
             ["N (control)", f"{results['n_control']:,}"],
             ["N (treatment)", f"{results['n_treatment']:,}"],
             ["Unadj. ATE", f"{results['ate_unadjusted']:.4%}"],
@@ -368,9 +441,10 @@ class CupacExperiment:
         c_adj = plot_color[1] if isinstance(plot_color, list) else list(plot_color.values())[1]
 
         fig = go.Figure()
+        adj_label = "Adjusted (MLRATE)" if self.method == "mlrate" else "Adjusted (CUPAC)"
         for label, ate, ci_half, c in [
             ("Unadjusted", results["ate_unadjusted"], unadj_ci, c_unadj),
-            ("Adjusted (CUPAC)", results["ate"], adj_ci, c_adj),
+            (adj_label, results["ate"], adj_ci, c_adj),
         ]:
             fig.add_trace(
                 go.Scatter(
@@ -390,7 +464,7 @@ class CupacExperiment:
             )
         fig.add_vline(x=0, line_dash="dash", line_color="gray")
         fig.update_layout(
-            title=f"{self.experiment_name}: Unadjusted vs CUPAC-Adjusted",
+            title=f"{self.experiment_name}: Unadjusted vs {'MLRATE' if self.method == 'mlrate' else 'CUPAC'}-Adjusted",
             xaxis_title="Treatment Effect",
             xaxis_tickformat=",.2%",
             template="plotly_white",
