@@ -7,23 +7,24 @@
 [![Checked with zuban](https://img.shields.io/badge/type%20checked-zuban-blue)](https://zubanls.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Python library for designing, running, and analyzing A/B tests on binomial metrics (conversion rates, click-through rates, etc.).
+A Python library for designing, running, and analyzing A/B tests on binomial metrics (conversion rates, click-through rates, etc.). It provides both frequentist and Bayesian approaches with full power analysis, sequential testing, and covariate-adjusted variance reduction.
 
 ## Features
 
-- **Statistical tests** — Score (Rao), Likelihood Ratio, Z, Fisher's Exact, Barnard's Exact, Boschloo's Exact, and several power-divergence variants (Freeman-Tukey, Neyman, Cressie-Read, Modified Log-Likelihood)
-- **Confidence intervals** — Binary search (score/LRT/z-test inversion), Wilson, Agresti-Coull, Jeffreys, Clopper-Pearson, Wald, and Delta method
-- **Power & sample size** — Power calculations, minimum detectable lift, and required sample size via binary search
-- **Lift types** — Relative, absolute, incremental, ROAS, and revenue lift
-- **`ContingencyTable`** — A chainable class that ties everything together, with DataFrame export, serialization, and plotting
-- **Bayesian inference** — Posterior sampling, P(B > A), expected loss, ROPE analysis, and lift probability thresholds
-- **Bayesian power & sample size** — Power calculations, minimum sample size, and minimum detectable lift via P(B > A) or expected loss criterion
-- **Variance reduction** — CUPAC (OLS-based) and MLRATE (any scikit-learn estimator with K-fold cross-fitting) for covariate-adjusted treatment effects with HC2 robust standard errors
-
-## Requirements
-
-- Python >= 3.13
-- [uv](https://docs.astral.sh/uv/) (for dependency management)
+| Category | Highlights | Docs |
+|---|---|---|
+| **Contingency tables** | Chainable builder, DataFrame export, serialization, plotting | [frequentist](docs/frequentist_binomial/contingency.rst) · [bayesian](docs/bayesian_binomial/contingency.rst) |
+| **Statistical tests** | Score, LRT, Z, Fisher, Barnard, Boschloo, power-divergence variants | [docs](docs/frequentist_binomial/stats_tests.rst) |
+| **Confidence / credible intervals** | Wilson, Agresti-Coull, Jeffreys, Clopper-Pearson, HDI, binary-search inversion | [frequentist](docs/frequentist_binomial/confidence_intervals.rst) · [bayesian](docs/bayesian_binomial/credible_intervals.rst) |
+| **Power & sample size** | Power, MDL, required n — frequentist and Bayesian (P(B>A) or expected loss) | [frequentist](docs/frequentist_binomial/power_calculations.rst) · [bayesian](docs/bayesian_binomial/power_calculations.rst) |
+| **Sequential testing** | mSPRT always-valid p-values and confidence sequences | [docs](docs/frequentist_binomial/msprt.rst) |
+| **Variance reduction** | CUPAC (OLS) and MLRATE (any sklearn estimator, K-fold cross-fitting) | [docs](docs/frequentist_binomial/cupac.rst) |
+| **Stratified analysis** | CMH test, Breslow-Day, MH odds ratio, Bayesian inverse-variance pooling | [frequentist](docs/frequentist_binomial/stratified.rst) · [bayesian](docs/bayesian_binomial/stratified.rst) |
+| **Diff-in-diff** | Multi-period heterogeneity testing, pairwise comparisons, Cochran's Q | [frequentist](docs/frequentist_binomial/diff_in_diff.rst) · [bayesian](docs/bayesian_binomial/diff_in_diff.rst) |
+| **Bayesian inference** | P(B > A), expected loss, ROPE analysis, lift probability thresholds | [docs](docs/bayesian_binomial/stats_tests.rst) |
+| **Multiple testing** | Bonferroni, Sidak, Holm (FWER), Benjamini-Hochberg (FDR) | [docs](docs/corrections.rst) |
+| **Diagnostics** | Sample ratio mismatch (SRM) detection | [docs](docs/diagnostics.rst) |
+| **Lift types** | Relative, absolute, incremental, ROAS, and revenue — all methods | — |
 
 ## Installation
 
@@ -33,16 +34,19 @@ cd ab_test
 uv sync --extra dev
 ```
 
-Optional DataFrame backends for `ContingencyTable.to_df` / `BayesianContingencyTable.to_df`
-are separate extras — install only the one you need:
+Optional extras:
 
 ```bash
-uv sync --extra pyspark   # or: modin, ibis, narwhals
+uv sync --extra sklearn    # MLRATE variance reduction (scikit-learn)
+uv sync --extra pyspark    # PySpark DataFrame export
+uv sync --extra modin      # modin DataFrame export
+uv sync --extra ibis       # ibis DataFrame export
+uv sync --extra narwhals   # narwhals DataFrame export
 ```
 
-## Quick Start
+Requires Python >= 3.13 and [uv](https://docs.astral.sh/uv/).
 
-### Analyzing an experiment
+## Quick Start
 
 ```python
 from ab_test.frequentist_binomial.contingency import ContingencyTable
@@ -52,325 +56,25 @@ ct = (
     .add("Control", successes=100, trials=1_000)
     .add("Treatment", successes=130, trials=1_000)
 )
-
-# Print the raw table
-print(ct)
-
-# Analyze relative lift with a score test and 95% CI
 print(ct.analyze(lift="relative", test_method="score", alpha=0.05))
 ```
-
-### Individual cell confidence intervals
-
-```python
-print(ct.analyze_individually(conf_int_method="wilson", alpha=0.05))
-```
-
-### Plotting results
-
-```python
-# Individual success rates with CIs
-ct.analyze_individually()
-ct.plot(is_individual=True, color="ibm")
-
-# Comparative lift with CI
-ct.analyze()
-ct.plot(is_individual=False)
-```
-
-### Power and sample size
-
-```python
-from ab_test.frequentist_binomial.power_calculations import abtest_power, minimum_detectable_lift, required_sample_size
-
-# Power for a given experiment design
-power = abtest_power(group_sizes=[1_000, 1_000], baseline=0.10, alt_lift=0.20, lift="relative")
-print(f"Power: {power:.1%}")  # → ~43%
-
-# Minimum lift detectable at 80% power
-mdl = minimum_detectable_lift(group_sizes=[1_000, 1_000], baseline=0.10, lift="relative")
-print(f"MDL: {mdl:.1%}")  # → ~47%
-
-# Sample size needed to detect a 20% relative lift at 80% power
-n = required_sample_size(baseline=0.10, alt_lift=0.20, lift="relative")
-print(f"Required n: {n:,}")
-```
-
-### Using a different statistical test
-
-```python
-from ab_test.frequentist_binomial.stats_tests import ab_test
-
-p_value = ab_test(trials=[1_000, 1_000], successes=[100, 130], method="likelihood")
-```
-
-### Always-valid testing (mSPRT)
-
-The mSPRT (Mixture Sequential Probability Ratio Test) provides always-valid p-values and confidence sequences. Unlike fixed-sample tests, you can peek at results as data accumulates without inflating the type-I error rate.
-
-```python
-from ab_test.frequentist_binomial.contingency import ContingencyTable
-
-# Single snapshot — safe to call at any time
-ct = (
-    ContingencyTable(name="Homepage Redesign", metric_name="purchases")
-    .add("Control", successes=500, trials=5_000)
-    .add("Treatment", successes=540, trials=5_000)
-)
-print(ct.analyze(test_method="msprt"))
-```
-
-The `ContingencyTable` is stateless — each `analyze()` call is a single snapshot, not a
-cumulative monitor. To track how results evolve over time, rebuild the table at each
-checkpoint with cumulative data:
-
-```python
-from ab_test.frequentist_binomial.contingency import ContingencyTable
-
-# Cumulative data at each checkpoint
-daily_cumulative = [
-    ("2026-08-01", 50, 500, 55, 500),
-    ("2026-08-02", 110, 1_000, 125, 1_000),
-    ("2026-08-03", 170, 1_500, 200, 1_500),
-]
-
-for date, s_ctrl, n_ctrl, s_treat, n_treat in daily_cumulative:
-    ct = ContingencyTable("Homepage Redesign", "purchases")
-    ct.add("Control", successes=s_ctrl, trials=n_ctrl)
-    ct.add("Treatment", successes=s_treat, trials=n_treat)
-    print(f"\n{date}")
-    print(ct.analyze(test_method="msprt"))
-```
-
-To visualize how the point estimate and confidence sequence evolve, use
-`plot_msprt_over_time`:
-
-```python
-from ab_test.frequentist_binomial.contingency import ContingencyTable
-from ab_test.frequentist_binomial.msprt import plot_msprt_over_time
-
-tables = []
-for s_ctrl, n_ctrl, s_treat, n_treat in [(50, 500, 55, 500), (110, 1_000, 125, 1_000), (170, 1_500, 200, 1_500)]:
-    ct = ContingencyTable("Homepage Redesign", "purchases")
-    ct.add("Control", successes=s_ctrl, trials=n_ctrl)
-    ct.add("Treatment", successes=s_treat, trials=n_treat)
-    tables.append(ct)
-
-fig = plot_msprt_over_time(tables, labels=["Aug 1", "Aug 2", "Aug 3"])
-fig.show()
-```
-
-### Confidence interval methods
-
-```python
-from ab_test.frequentist_binomial.confidence_intervals import wilson_interval, confidence_interval
-
-# Individual proportion CI
-lb, ub = wilson_interval(s=100, n=1_000, alpha=0.05)
-
-# Lift CI via binary search (most accurate)
-lb, ub = confidence_interval(
-    trials=[1_000, 1_000],
-    successes=[100, 130],
-    lift="relative",
-    method="binary_search",
-    alpha=0.05,
-)
-```
-
-### Bayesian power and sample size
-
-```python
-from ab_test.bayesian_binomial.power_calculations import (
-    bayes_power_lift,
-    bayes_power_loss,
-    bayes_minimum_sample_size,
-    bayes_minimum_sample_size_loss,
-    bayes_minimum_detectable_lift,
-    bayes_minimum_detectable_lift_loss,
-)
-
-# Power for a given design — P(B > A) criterion
-power = bayes_power_lift(
-    group_sizes=[3_000, 3_000],
-    alphas=[1.0, 1.0],
-    betas=[1.0, 1.0],
-    baseline=0.10,
-    alt_lift=0.20,
-    lift="relative",
-    confidence_level=0.95,
-)
-print(f"Power: {power:.1%}")  # → ~80%
-
-# Power — expected loss criterion
-power = bayes_power_loss(
-    group_sizes=[1_600, 1_600],
-    alphas=[1.0, 1.0],
-    betas=[1.0, 1.0],
-    baseline=0.10,
-    alt_lift=0.20,
-    lift="relative",
-    loss_threshold=0.001,
-)
-print(f"Power: {power:.1%}")  # → ~80%
-
-# Minimum per-group sample size to detect a 20% relative lift at 80% power
-n = bayes_minimum_sample_size(
-    alphas=[1.0, 1.0], betas=[1.0, 1.0], baseline=0.10, alt_lift=0.20
-)
-print(f"Required n (lift): {n:,}")  # → ~3,000
-
-n = bayes_minimum_sample_size_loss(
-    alphas=[1.0, 1.0], betas=[1.0, 1.0], baseline=0.10, alt_lift=0.20
-)
-print(f"Required n (loss): {n:,}")  # → ~1,600
-
-# Minimum detectable lift for a fixed group size
-mdl = bayes_minimum_detectable_lift(
-    group_size=3_000, alphas=[1.0, 1.0], betas=[1.0, 1.0], baseline=0.10
-)
-print(f"MDL (lift): {mdl:.1%}")  # → ~20%
-
-mdl = bayes_minimum_detectable_lift_loss(
-    group_size=1_600, alphas=[1.0, 1.0], betas=[1.0, 1.0], baseline=0.10
-)
-print(f"MDL (loss): {mdl:.1%}")  # → ~20%
-```
-
-### Bayesian analysis
-
-Use `BayesianContingencyTable` for a chainable high-level interface, `calculate_metrics` for an all-in-one result, or call the lower-level functions directly for more control.
 
 ```python
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 
 bct = (
-    BayesianContingencyTable(name="Homepage Redesign", metric_name="purchases", spend=50_000, msrp=120.0)
+    BayesianContingencyTable(name="Homepage Redesign", metric_name="purchases")
     .add("Control",   successes=100, trials=1_000, alpha=1.0, beta=1.0)
     .add("Treatment", successes=130, trials=1_000, alpha=1.0, beta=1.0)
 )
-
-print(bct)                                  # grid table
-print(bct.analyze(lift="relative"))         # relative lift + ROPE
-print(bct.analyze(lift="revenue"))          # incremental revenue + ROPE
-print(bct.analyze(lift="roas"))             # cost-per-acquisition + ROPE
-bct.plot_pdf().show()                       # posterior PDF chart
+print(bct.analyze(lift="relative"))
 ```
 
-```python
-import numpy as np
-from ab_test.bayesian_binomial.stats_tests import calculate_metrics
+See the [docs/](docs/) directory for detailed usage examples and API reference for each module.
 
-# Relative / absolute lift
-metrics = calculate_metrics(
-    successes=np.array([100, 130]),
-    trials=np.array([1_000, 1_000]),
-    alphas=np.array([1.0, 1.0]),
-    betas=np.array([1.0, 1.0]),
-    n_samples=10_000,
-    lift="relative",
-    low_threshold=-0.01,
-    high_threshold=0.01,
-)
+## Reference Options
 
-# Incremental / revenue / ROAS — pass spend and msrp as needed
-metrics = calculate_metrics(
-    successes=np.array([100, 130]),
-    trials=np.array([1_000, 1_000]),
-    alphas=np.array([1.0, 1.0]),
-    betas=np.array([1.0, 1.0]),
-    n_samples=10_000,
-    lift="revenue",
-    low_threshold=-5_000,
-    high_threshold=5_000,
-    msrp=120.0,
-)
-```
-
-```python
-from ab_test.bayesian_binomial.stats_tests import (
-    probability_b_greater_than_a,
-    expected_loss_b,
-    calculate_rope,
-    prob_lift_exceeds,
-)
-from ab_test.bayesian_binomial.utils import sample_beta
-
-sample_a = sample_beta(s=100, n=1_000, alpha=1.0, beta=1.0, n_samples=10_000)
-sample_b = sample_beta(s=130, n=1_000, alpha=1.0, beta=1.0, n_samples=10_000)
-
-probability_b_greater_than_a(sample_a, sample_b)       # P(B > A)
-expected_loss_b(sample_a, sample_b)                    # E[max(A - B, 0)]
-prob_lift_exceeds(sample_a, sample_b, threshold=0.05)  # P(relative lift > 5%)
-calculate_rope(sample_a, sample_b)                     # relative ROPE breakdown
-
-# Incremental count ROPE (within ±500 conversions is negligible)
-calculate_rope(sample_a, sample_b, lift="incremental", low=-500, high=500, trials=(1_000, 1_000))
-
-# Revenue ROPE (within ±$5 000 is negligible)
-calculate_rope(sample_a, sample_b, lift="revenue", low=-5_000, high=5_000, trials=(1_000, 1_000), msrp=120.0)
-
-# ROAS / CPA ROPE (within ±$1 cost-per-acquisition is negligible)
-calculate_rope(sample_a, sample_b, lift="roas", low=-1, high=1, trials=(1_000, 1_000), spend=50_000.0)
-```
-
-### Variance reduction (CUPAC / MLRATE)
-
-CUPAC adjusts for pre-experiment covariates using OLS, reducing variance and boosting power:
-
-```python
-from ab_test.frequentist_binomial.cupac import CupacExperiment
-
-exp = CupacExperiment(
-    data=df,
-    outcome_col="converted",
-    treatment_col="group",
-    covariate_cols=["pre_visits", "days_since_signup"],
-    control_label="control",
-    treatment_label="treatment",
-)
-print(exp.analyze())
-print(f"Variance reduction: {exp.variance_reduction:.1%}")
-```
-
-MLRATE generalizes this to any scikit-learn estimator via K-fold cross-fitting,
-enabling flexible models (gradient boosting, random forests) without overfitting bias:
-
-```python
-from sklearn.ensemble import GradientBoostingClassifier
-from ab_test.frequentist_binomial.cupac import CupacExperiment
-
-exp = CupacExperiment(
-    data=df,
-    outcome_col="converted",
-    treatment_col="group",
-    covariate_cols=["pre_visits", "pre_pageviews", "days_since_signup"],
-    control_label="control",
-    treatment_label="treatment",
-    method="mlrate",
-    estimator=GradientBoostingClassifier(n_estimators=100),
-)
-print(exp.analyze())
-```
-
-Install with `pip install abtest-analysis[sklearn]` for MLRATE support.
-
-## API Reference
-
-### `ContingencyTable`
-
-| Method | Description |
-|---|---|
-| `.add(name, successes, trials)` | Add a cell; returns `self` for chaining |
-| `.analyze(lift, test_method, conf_int_method, alpha, null_lift)` | Run significance test and compute lift + CI |
-| `.analyze_individually(conf_int_method, alpha)` | CI for each cell independently |
-| `.plot(is_individual, reverse_plot, color)` | Plotly dot-and-whisker chart |
-| `.to_df(method, include_total)` | Export to pandas or polars DataFrame |
-| `.to_list(include_total)` | Export to a plain list |
-| `.to_numpy(include_total)` | Export to a NumPy array |
-| `.serialize()` / `.deserialize(serial)` | JSON-compatible dict round-trip |
-
-### `lift` options
+### `lift`
 
 | Value | Interpretation |
 |---|---|
@@ -380,67 +84,17 @@ Install with `pip install abtest-analysis[sklearn]` for MLRATE support.
 | `"roas"` | Return on ad spend (`spend / incremental_conversions`) |
 | `"revenue"` | Incremental revenue (`incremental_conversions × msrp`) |
 
-### `test_method` options
+### `test_method`
 
 `"score"`, `"likelihood"`, `"z"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`, `"msprt"`
 
-### `conf_int_method` options
+### `conf_int_method` / `cred_int_method`
 
-`"binary_search"`, `"wilson"`, `"jeffrey"`, `"agresti-coull"`, `"clopper-pearson"`, `"wald"`, `"delta"`
+`"binary_search"`, `"wilson"`, `"jeffrey"`, `"agresti-coull"`, `"clopper-pearson"`, `"wald"`, `"delta"`, `"hdi"`, `"equal_tailed"`
 
-### Colorblind-friendly color palettes (`.plot`)
+### Color palettes (`.plot`)
 
 `"ibm"`, `"wong"`, `"ito"`, `"tol"`, `"tol_bright"`, `"tol_vibrant"`, `"tol_muted"`, `"tol_light"`
-
-### `BayesianContingencyTable`
-
-| Method | Description |
-|---|---|
-| `.add(cell_name, successes, trials, alpha, beta)` | Add a cell; returns `self` for chaining |
-| `.analyze(lift, cred_int_method, confidence_level, is_sample, n_samples, low_threshold, high_threshold)` | Run Bayesian analysis and return a formatted summary with ROPE metrics |
-| `.analyze_individually(cred_int_method, confidence_level)` | Credible interval for each cell independently |
-| `.plot(is_individual, reverse_plot, color)` | Plotly forest plot of posterior means + credible intervals |
-| `.plot_pdf(confidence_level, n_samples, color)` | Posterior PDF chart with HDI bars and P(B > A) title; returns a `go.Figure` |
-| `.to_df(method, include_total)` | Export to pandas, polars, PySpark, modin, ibis, or narwhals DataFrame |
-| `.to_list(include_total)` | Export to a plain list |
-| `.to_numpy(include_total)` | Export to a NumPy array |
-| `.serialize()` / `.deserialize(serial)` | JSON-compatible dict round-trip |
-
-Constructor: `BayesianContingencyTable(name, metric_name, spend=None, msrp=None)` — `spend` and `msrp` are required for `lift="roas"` and `lift="revenue"` respectively.
-
-### Bayesian power & sample size (`ab_test.bayesian_binomial.power_calculations`)
-
-| Function | Criterion | Description |
-|---|---|---|
-| `bayes_power_lift(group_sizes, alphas, betas, baseline, ...)` | P(B > A) | Estimated power given group sizes and a confidence level threshold |
-| `bayes_power_loss(group_sizes, alphas, betas, baseline, ...)` | Expected loss | Estimated power given group sizes and a loss threshold |
-| `bayes_minimum_sample_size(alphas, betas, baseline, ...)` | P(B > A) | Minimum per-group n to achieve a target power |
-| `bayes_minimum_sample_size_loss(alphas, betas, baseline, ...)` | Expected loss | Minimum per-group n to achieve a target power |
-| `bayes_minimum_detectable_lift(group_size, alphas, betas, baseline, ...)` | P(B > A) | Minimum lift detectable at a target power for a fixed group size |
-| `bayes_minimum_detectable_lift_loss(group_size, alphas, betas, baseline, ...)` | Expected loss | Minimum lift detectable at a target power for a fixed group size |
-
-All functions accept `alt_lift` + `lift` (`"relative"` or `"absolute"`) or `alt_rate` directly (power functions only). Sample size and MDL functions use a two-phase doubling + binary search.
-
-### Bayesian stats (`ab_test.bayesian_binomial`)
-
-| Function | Description |
-|---|---|
-| `calculate_metrics(successes, trials, alphas, betas, n_samples, lift, low_threshold, high_threshold, spend, msrp)` | Draws posteriors and returns P(B > A), expected loss, and ROPE metrics in one call |
-| `probability_b_greater_than_a(sample_a, sample_b)` | Proportion of posterior samples where B exceeds A |
-| `expected_loss_b(sample_a, sample_b)` | E[max(A − B, 0)]: expected loss from choosing B |
-| `calculate_rope(sample_a, sample_b, lift, low, high, trials, spend, msrp)` | Probability that lift falls within, above, or below the ROPE; supports all five lift types |
-| `prob_lift_exceeds(sample_a, sample_b, lift, threshold)` | Probability that lift exceeds a given threshold |
-| `sample_beta(s, n, alpha, beta, n_samples)` | Draw posterior samples from Beta(alpha + s, beta + n − s) |
-
-### Bayesian `lift` options
-
-| Value | Unit | Extra args required |
-|---|---|---|
-| `"relative"` | rate ratio `(B − A) / A` | — |
-| `"absolute"` | rate difference `B − A` | — |
-| `"incremental"` | count difference `(B − A) × max(trials)` | `trials` |
-| `"revenue"` | incremental revenue `(B − A) × max(trials) × msrp` | `trials`, `msrp` |
-| `"roas"` | CPA difference `spend/A_count − spend/B_count`; positive = B cheaper | `trials`, `spend` |
 
 ## Contributing
 
