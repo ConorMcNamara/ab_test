@@ -472,7 +472,7 @@ class TestCupacMlratePredictProba:
     @staticmethod
     def test_classifier_uses_predict_proba():
         """A classifier with predict_proba should yield better variance reduction than discrete predict."""
-        sklearn = pytest.importorskip("sklearn")
+        pytest.importorskip("sklearn")
         from sklearn.linear_model import LogisticRegression
 
         df = _make_experiment_data(n_control=3000, n_treatment=3000, covariate_r_squared=0.3, seed=99)

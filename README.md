@@ -18,6 +18,7 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 - **`ContingencyTable`** — A chainable class that ties everything together, with DataFrame export, serialization, and plotting
 - **Bayesian inference** — Posterior sampling, P(B > A), expected loss, ROPE analysis, and lift probability thresholds
 - **Bayesian power & sample size** — Power calculations, minimum sample size, and minimum detectable lift via P(B > A) or expected loss criterion
+- **Variance reduction** — CUPAC (OLS-based) and MLRATE (any scikit-learn estimator with K-fold cross-fitting) for covariate-adjusted treatment effects with HC2 robust standard errors
 
 ## Requirements
 
@@ -312,6 +313,47 @@ calculate_rope(sample_a, sample_b, lift="revenue", low=-5_000, high=5_000, trial
 # ROAS / CPA ROPE (within ±$1 cost-per-acquisition is negligible)
 calculate_rope(sample_a, sample_b, lift="roas", low=-1, high=1, trials=(1_000, 1_000), spend=50_000.0)
 ```
+
+### Variance reduction (CUPAC / MLRATE)
+
+CUPAC adjusts for pre-experiment covariates using OLS, reducing variance and boosting power:
+
+```python
+from ab_test.frequentist_binomial.cupac import CupacExperiment
+
+exp = CupacExperiment(
+    data=df,
+    outcome_col="converted",
+    treatment_col="group",
+    covariate_cols=["pre_visits", "days_since_signup"],
+    control_label="control",
+    treatment_label="treatment",
+)
+print(exp.analyze())
+print(f"Variance reduction: {exp.variance_reduction:.1%}")
+```
+
+MLRATE generalizes this to any scikit-learn estimator via K-fold cross-fitting,
+enabling flexible models (gradient boosting, random forests) without overfitting bias:
+
+```python
+from sklearn.ensemble import GradientBoostingClassifier
+from ab_test.frequentist_binomial.cupac import CupacExperiment
+
+exp = CupacExperiment(
+    data=df,
+    outcome_col="converted",
+    treatment_col="group",
+    covariate_cols=["pre_visits", "pre_pageviews", "days_since_signup"],
+    control_label="control",
+    treatment_label="treatment",
+    method="mlrate",
+    estimator=GradientBoostingClassifier(n_estimators=100),
+)
+print(exp.analyze())
+```
+
+Install with `pip install abtest-analysis[sklearn]` for MLRATE support.
 
 ## API Reference
 
