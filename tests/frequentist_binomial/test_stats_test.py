@@ -200,6 +200,18 @@ class TestFisherTest:
         two = fisher_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == two
 
+    @staticmethod
+    def test_crit_not_significant():
+        trials = [1000, 1000]
+        successes = [100, 110]
+        assert fisher_test(trials, successes, crit=0.05) is False
+
+    @staticmethod
+    def test_crit_significant():
+        trials = [1000, 1000]
+        successes = [100, 150]
+        assert fisher_test(trials, successes, crit=0.05) is True
+
 
 @pytest.mark.slow
 class TestBarnardTest:
@@ -241,6 +253,18 @@ class TestBoschlooTest:
         one = boschloo_exact_test(trials, successes, null_lift=0.0)
         two = boschloo_exact_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == pytest.approx(two, rel=1e-10)
+
+    @staticmethod
+    def test_crit_not_significant():
+        trials = [1000, 1000]
+        successes = [100, 110]
+        assert boschloo_exact_test(trials, successes, crit=0.05) is False
+
+    @staticmethod
+    def test_crit_significant():
+        trials = [1000, 1000]
+        successes = [100, 150]
+        assert boschloo_exact_test(trials, successes, crit=0.05) is True
 
 
 class TestModifiedLikelihoodTest:

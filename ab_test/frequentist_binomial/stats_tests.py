@@ -43,6 +43,17 @@ def _test_result(statistic: Any, pval: Any, crit: float | None) -> float | bool:
     return bool(abs(statistic) >= crit)
 
 
+def _pvalue_decision(pval: Any, crit: float | None) -> float | bool:
+    """Return the p-value, or a significance boolean when an alpha threshold is given.
+
+    Use this for exact tests (Fisher, Boschloo) whose test statistics do not
+    support a critical-value comparison.
+    """
+    if crit is None:
+        return float(pval)
+    return bool(pval <= crit)
+
+
 def _power_divergence_test(
     trials: np.ndarray[Any, Any] | list[Any],
     successes: np.ndarray[Any, Any] | list[Any],
@@ -337,6 +348,9 @@ def fisher_test(
     """Fisher's Exact Test for a 2x2 Contingency Table.
 
     See :func:`score_test` for the shared parameter and return semantics.
+    Unlike chi-squared or z tests, ``crit`` is compared against the p-value
+    (i.e. treated as an alpha threshold) because Fisher's test has no
+    test statistic amenable to a critical-value comparison.
 
     Notes
     -----
@@ -345,8 +359,8 @@ def fisher_test(
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     contingency_table = _contingency_table(trials, successes)
-    statistic, pval = ss.fisher_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined, arg-type]
-    return _test_result(statistic, pval, crit)
+    _, pval = ss.fisher_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined, arg-type]
+    return _pvalue_decision(pval, crit)
 
 
 def barnard_exact_test(
@@ -381,6 +395,9 @@ def boschloo_exact_test(
     """Boschloo's Exact Test for a 2x2 Contingency Table.
 
     See :func:`score_test` for the shared parameter and return semantics.
+    Unlike chi-squared or z tests, ``crit`` is compared against the p-value
+    (i.e. treated as an alpha threshold) because Boschloo's test has no
+    test statistic amenable to a critical-value comparison.
 
     Notes
     -----
@@ -390,7 +407,7 @@ def boschloo_exact_test(
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     contingency_table = _contingency_table(trials, successes)
     boschloo = ss.boschloo_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
-    return _test_result(boschloo.statistic, boschloo.pvalue, crit)
+    return _pvalue_decision(boschloo.pvalue, crit)
 
 
 def modified_log_likelihood_test(
