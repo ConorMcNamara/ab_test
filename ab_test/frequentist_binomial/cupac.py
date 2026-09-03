@@ -257,7 +257,10 @@ class CupacExperiment:
 
             model = copy.deepcopy(self.estimator)
             model.fit(covariates[train_mask], y[train_mask])
-            y_hat[fold_idx] = model.predict(covariates[fold_idx])
+            if hasattr(model, "predict_proba"):
+                y_hat[fold_idx] = model.predict_proba(covariates[fold_idx])[:, 1]
+            else:
+                y_hat[fold_idx] = model.predict(covariates[fold_idx])
 
         return y_hat
 

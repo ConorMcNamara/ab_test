@@ -468,6 +468,46 @@ class TestCupacMlrateAnalyze:
         assert s["se"] < s["se_unadjusted"]
 
 
+class TestCupacMlratePredictProba:
+    @staticmethod
+    def test_classifier_uses_predict_proba():
+        """A classifier with predict_proba should yield better variance reduction than discrete predict."""
+        sklearn = pytest.importorskip("sklearn")
+        from sklearn.linear_model import LogisticRegression
+
+        df = _make_experiment_data(n_control=3000, n_treatment=3000, covariate_r_squared=0.3, seed=99)
+
+        exp_classifier = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LogisticRegression(),
+        ).fit()
+
+        assert exp_classifier.variance_reduction > 0
+
+    @staticmethod
+    def test_regressor_still_works():
+        """A regressor (no predict_proba) still produces valid results."""
+        df = _make_experiment_data(covariate_r_squared=0.3)
+        exp = CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["pre_visits"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=LinearRegression(),
+        ).fit()
+        assert exp.variance_reduction > 0
+        assert exp._results is not None
+
+
 class TestCupacMlrateCrossFitting:
     @staticmethod
     def test_custom_n_folds():
