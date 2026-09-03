@@ -105,6 +105,12 @@ class TestCupacExperiment:
         assert exp.method == "cupac"
 
     @staticmethod
+    def test_init_empty_covariate_cols():
+        df = _make_experiment_data()
+        with pytest.raises(ValueError, match="covariate_cols must not be empty"):
+            CupacExperiment(df, "converted", "group", [], "control", "treatment")
+
+    @staticmethod
     def test_init_missing_column():
         df = _make_experiment_data()
         with pytest.raises(ValueError, match="Columns not found"):
@@ -317,10 +323,17 @@ class TestCupacStatisticalProperties:
 # MLRATE tests — guarded by sklearn availability
 # ---------------------------------------------------------------------------
 
-sklearn = pytest.importorskip("sklearn")
-from sklearn.linear_model import LinearRegression  # noqa: E402
+try:
+    from sklearn.linear_model import LinearRegression
+
+    _HAS_SKLEARN = True
+except ImportError:
+    _HAS_SKLEARN = False
+
+needs_sklearn = pytest.mark.skipif(not _HAS_SKLEARN, reason="scikit-learn not installed")
 
 
+@needs_sklearn
 class TestCupacMlrateValidation:
     @staticmethod
     def test_mlrate_without_estimator_raises():
@@ -359,6 +372,7 @@ class TestCupacMlrateValidation:
         assert exp.method == "mlrate"
 
 
+@needs_sklearn
 class TestCupacMlrateAnalyze:
     @staticmethod
     def test_fit_returns_self():
@@ -468,6 +482,7 @@ class TestCupacMlrateAnalyze:
         assert s["se"] < s["se_unadjusted"]
 
 
+@needs_sklearn
 class TestCupacMlratePredictProba:
     @staticmethod
     def test_classifier_uses_predict_proba():
@@ -508,6 +523,7 @@ class TestCupacMlratePredictProba:
         assert exp._results is not None
 
 
+@needs_sklearn
 class TestCupacMlrateCrossFitting:
     @staticmethod
     def test_custom_n_folds():
@@ -551,6 +567,7 @@ class TestCupacMlrateCrossFitting:
         assert not np.allclose(y_hat_insample, y_hat_oof)
 
 
+@needs_sklearn
 class TestCupacMlrateStatisticalProperties:
     @staticmethod
     def test_type_i_error_control():

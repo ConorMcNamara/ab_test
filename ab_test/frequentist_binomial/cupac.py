@@ -200,6 +200,9 @@ class CupacExperiment:
         treatment_label: str | int,
     ) -> None:
         """Validate constructor inputs."""
+        if not covariate_cols:
+            raise ValueError("covariate_cols must not be empty. CUPAC and MLRATE require at least one covariate.")
+
         required_cols = [outcome_col, treatment_col, *covariate_cols]
         missing = [c for c in required_cols if c not in data.columns]
         if missing:
