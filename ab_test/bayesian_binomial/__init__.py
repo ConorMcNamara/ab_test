@@ -1,6 +1,11 @@
 """Evaluating the Performance of AB Tests for Binomial Distributions in Python."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("abtest-analysis")
+except PackageNotFoundError:
+    __version__ = "0.0.0.dev0"
 
 from ab_test.bayesian_binomial import (
     contingency,
