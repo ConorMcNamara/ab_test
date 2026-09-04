@@ -115,7 +115,7 @@ class BayesianContingencyTable(BaseContingencyTable):
 
         Parameters
         ----------
-        lift : {"relative", "absolute", "incremental", "roas", "revenue"}, optional
+        lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
             Type of lift to compute, by default ``"relative"``.
         cred_int_method : {"credible", "hdi"}, optional
             Method used to compute the credible interval, by default ``"credible"``.
@@ -144,7 +144,7 @@ class BayesianContingencyTable(BaseContingencyTable):
         Raises
         ------
         ValueError
-            If ``lift="roas"`` and ``spend`` was not set on the table.
+            If ``lift="roas"`` or ``lift="cpa"`` and ``spend`` was not set on the table.
         ValueError
             If ``lift="revenue"`` and ``msrp`` was not set on the table.
         ValueError
@@ -168,7 +168,7 @@ class BayesianContingencyTable(BaseContingencyTable):
                 n_samples,
                 cred_int_method,
             )
-        elif lift in ["incremental", "roas", "revenue"]:
+        elif lift in ["incremental", "roas", "revenue", "cpa"]:
             results = calculate_metrics(
                 self.successes,
                 self.trials,
@@ -197,7 +197,7 @@ class BayesianContingencyTable(BaseContingencyTable):
         pa = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
         pb = posterior_mean(self.successes[1], self.trials[1], self.alphas[1], self.betas[1])
         success_rate: list[int | float]
-        if lift in ["incremental", "roas", "revenue"]:
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
             if self.trials[0] > self.trials[1]:
                 pb = math.ceil(pb * self.trials[0])
                 pa = math.ceil(pa * self.trials[0])
@@ -217,6 +217,13 @@ class BayesianContingencyTable(BaseContingencyTable):
                 pb /= self.spend
                 lb /= self.spend
                 ub /= self.spend
+            elif lift == "cpa":
+                if self.spend is None:
+                    raise ValueError("spend must be set for CPA calculations")
+                test_lift = self.spend / test_lift if test_lift != 0 else np.inf
+                pa = self.spend / pa if pa > 0 else np.inf
+                pb = self.spend / pb if pb > 0 else np.inf
+                lb, ub = (self.spend / ub if ub > 0 else np.inf), (self.spend / lb if lb > 0 else np.inf)
             if lift == "revenue":
                 if self.msrp is None:
                     raise ValueError("msrp must be set for revenue calculations")

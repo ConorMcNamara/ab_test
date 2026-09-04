@@ -104,7 +104,7 @@ class ContingencyTable(BaseContingencyTable):
 
         Parameters
         ----------
-        lift : {'relative', 'absolute', 'incremental', 'roas', 'revenue'}
+        lift : {'relative', 'absolute', 'incremental', 'roas', 'revenue', 'cpa'}
             The kind of lift we are measuring for our campaign
         test_method : str
             The method we plan to use to assess whether our result is
@@ -145,7 +145,7 @@ class ContingencyTable(BaseContingencyTable):
                 test = z_test
             else:
                 test = cressie_read_test
-        if lift in ["incremental", "roas", "revenue"]:
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
             ci_lift = "absolute"
         else:
             ci_lift = lift
@@ -153,7 +153,7 @@ class ContingencyTable(BaseContingencyTable):
             self.trials, self.successes, test=test, alpha=alpha, lift=ci_lift, method=conf_int_method
         )
         success_rate: list[int | float]
-        if lift in ["incremental", "roas", "revenue"]:
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
             pa: int | float
             pb: int | float
             if self.trials[0] > self.trials[1]:
@@ -175,6 +175,13 @@ class ContingencyTable(BaseContingencyTable):
                 pb /= self.spend
                 lb /= self.spend
                 ub /= self.spend
+            elif lift == "cpa":
+                if self.spend is None:
+                    raise ValueError("spend must be set for CPA calculations")
+                test_lift = self.spend / test_lift if test_lift != 0 else np.inf
+                pa = self.spend / pa if pa > 0 else np.inf
+                pb = self.spend / pb if pb > 0 else np.inf
+                lb, ub = (self.spend / ub if ub > 0 else np.inf), (self.spend / lb if lb > 0 else np.inf)
             if lift == "revenue":
                 if self.msrp is None:
                     raise ValueError("msrp must be set for revenue calculations")

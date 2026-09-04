@@ -241,6 +241,28 @@ class TestContingencyTable:
         assert expected["ci_upper"] == pytest.approx(ct.incremental_results["ci_upper"])
 
     @staticmethod
+    def test_contingency_cpa():
+        ct = ContingencyTable(name="CPA Test", spend=100, metric_name="conversions")
+        ct.add("Holdout", 100, 1_000)
+        ct.add("Test", 110, 1_000)
+        ct.analyze(lift="cpa")
+        r = ct.incremental_results
+        assert r["lift_type"] == "cpa"
+        assert r["lift"] == pytest.approx(10.0)
+        assert r["Holdout"] == pytest.approx(1.0)
+        assert r["Test"] == pytest.approx(100 / 110)
+        assert r["ci_lower"] < r["lift"]
+        assert r["ci_upper"] > r["lift"]
+
+    @staticmethod
+    def test_contingency_cpa_requires_spend():
+        ct = ContingencyTable(name="No Spend", metric_name="conversions")
+        ct.add("Holdout", 100, 1_000)
+        ct.add("Test", 110, 1_000)
+        with pytest.raises(ValueError, match="spend must be set"):
+            ct.analyze(lift="cpa")
+
+    @staticmethod
     def test_contingency_analyze_individual_results():
         ct = ContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000)
