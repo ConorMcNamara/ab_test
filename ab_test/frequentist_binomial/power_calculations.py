@@ -507,12 +507,11 @@ def plot_sensitivity_curve(
     )
 
     y_label = f"Minimum detectable {lift} lift"
-    tick_format = ",.0%" if lift == "relative" else ".4f"
     fig.update_layout(
         title="Sensitivity Curve",
         xaxis_title="Total sample size",
         yaxis_title=y_label,
-        yaxis_tickformat=tick_format,
+        yaxis_tickformat=",.0%",
         template="plotly_white",
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
