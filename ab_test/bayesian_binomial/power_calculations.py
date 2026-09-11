@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
+import plotly.graph_objects as go
 
 __all__ = [
     "bayes_power_lift",
@@ -12,6 +13,8 @@ __all__ = [
     "bayes_minimum_sample_size_loss",
     "bayes_minimum_detectable_lift",
     "bayes_minimum_detectable_lift_loss",
+    "plot_bayes_power_curve",
+    "plot_bayes_sensitivity_curve",
 ]
 
 
@@ -710,3 +713,255 @@ def bayes_minimum_detectable_lift_loss(
             "Consider a smaller target power or larger group size."
         ),
     )
+
+
+def plot_bayes_power_curve(
+    alphas: np.ndarray[Any, Any] | list[Any],
+    betas: np.ndarray[Any, Any] | list[Any],
+    baseline: float,
+    alt_lift: float | None = None,
+    alt_rate: float | None = None,
+    lift: Literal["relative", "absolute"] = "relative",
+    decision: Literal["lift", "loss"] = "lift",
+    confidence_level: float = 0.95,
+    loss_threshold: float = 0.001,
+    n_samples: int = 10_000,
+    mc_samples: int = 500,
+    sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
+    n_points: int = 50,
+) -> go.Figure:
+    """Plot Bayesian power as a function of per-group sample size.
+
+    Parameters
+    ----------
+    alphas : np.ndarray or list
+        Alpha parameters of the Beta prior for each variant.
+    betas : np.ndarray or list
+        Beta parameters of the Beta prior for each variant.
+    baseline : float
+        Expected conversion rate of the control variant.
+    alt_lift : float, optional
+        Expected lift of the treatment over the control.
+    alt_rate : float, optional
+        Treatment conversion rate specified directly.
+    lift : {"relative", "absolute"}, optional
+        How ``alt_lift`` is applied to ``baseline``. Default is ``"relative"``.
+    decision : {"lift", "loss"}, optional
+        Decision rule to use: ``"lift"`` uses P(B > A) >= ``confidence_level``,
+        ``"loss"`` uses E[max(A-B, 0)] <= ``loss_threshold``. Default is
+        ``"lift"``.
+    confidence_level : float, optional
+        Posterior probability threshold when ``decision="lift"``. Default is 0.95.
+    loss_threshold : float, optional
+        Maximum acceptable expected loss when ``decision="loss"``. Default is
+        0.001.
+    n_samples : int, optional
+        Number of simulated experiments per power evaluation. Default is 10_000.
+    mc_samples : int, optional
+        Number of posterior draws per simulated experiment. Default is 500.
+    sample_sizes : array_like or None, optional
+        Explicit per-group sample sizes to evaluate. When ``None`` (default), an
+        evenly spaced sequence of ``n_points`` values is generated automatically.
+    n_points : int, optional
+        Number of sample-size points to evaluate when ``sample_sizes`` is
+        ``None``. Defaults to 50.
+
+    Returns
+    -------
+    go.Figure
+        An interactive Plotly figure with per-group sample size on the x-axis
+        and Bayesian power on the y-axis.
+    """
+    power_fn = bayes_power_lift if decision == "lift" else bayes_power_loss
+
+    if sample_sizes is None:
+        search_fn = bayes_minimum_sample_size if decision == "lift" else bayes_minimum_sample_size_loss
+        common: dict[str, Any] = {
+            "alphas": alphas,
+            "betas": betas,
+            "baseline": baseline,
+            "alt_lift": alt_lift,
+            "alt_rate": alt_rate,
+            "lift": lift,
+            "target_power": 0.8,
+            "n_samples": n_samples,
+            "mc_samples": mc_samples,
+        }
+        if decision == "lift":
+            common["confidence_level"] = confidence_level
+        else:
+            common["loss_threshold"] = loss_threshold
+        target_n = search_fn(**common)
+        max_n = int(target_n * 2)
+        sample_sizes = np.linspace(max(20, max_n // n_points), max_n, n_points, dtype=int)
+
+    powers = []
+    for n in sample_sizes:
+        kwargs: dict[str, Any] = {
+            "group_sizes": [int(n), int(n)],
+            "alphas": alphas,
+            "betas": betas,
+            "baseline": baseline,
+            "alt_lift": alt_lift,
+            "alt_rate": alt_rate,
+            "lift": lift,
+            "n_samples": n_samples,
+            "mc_samples": mc_samples,
+        }
+        if decision == "lift":
+            kwargs["confidence_level"] = confidence_level
+        else:
+            kwargs["loss_threshold"] = loss_threshold
+        powers.append(power_fn(**kwargs))
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=list(sample_sizes),
+            y=powers,
+            mode="lines",
+            line={"color": "#636EFA", "width": 2},
+            name="Power",
+        )
+    )
+    fig.add_hline(
+        y=0.8,
+        line_dash="dash",
+        line_color="gray",
+        annotation_text="80% power",
+        annotation_position="top left",
+    )
+
+    rule = f"P(B>A) ≥ {confidence_level}" if decision == "lift" else f"E[loss] ≤ {loss_threshold}"
+    fig.update_layout(
+        title=f"Bayesian Power Curve ({rule})",
+        xaxis_title="Per-group sample size",
+        yaxis_title="Power",
+        yaxis_range=[0, 1.05],
+        yaxis_tickformat=",.0%",
+        template="plotly_white",
+        hovermode="x unified",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    )
+    return fig
+
+
+def plot_bayes_sensitivity_curve(
+    alphas: np.ndarray[Any, Any] | list[Any],
+    betas: np.ndarray[Any, Any] | list[Any],
+    baseline: float,
+    lift: Literal["relative", "absolute"] = "relative",
+    decision: Literal["lift", "loss"] = "lift",
+    target_power: float = 0.80,
+    confidence_level: float = 0.95,
+    loss_threshold: float = 0.001,
+    n_samples: int = 10_000,
+    mc_samples: int = 500,
+    sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
+    n_points: int = 50,
+) -> go.Figure:
+    """Plot minimum detectable lift as a function of per-group sample size.
+
+    Parameters
+    ----------
+    alphas : np.ndarray or list
+        Alpha parameters of the Beta prior for each variant.
+    betas : np.ndarray or list
+        Beta parameters of the Beta prior for each variant.
+    baseline : float
+        Expected conversion rate of the control variant.
+    lift : {"relative", "absolute"}, optional
+        How the lift is applied to ``baseline``. Default is ``"relative"``.
+    decision : {"lift", "loss"}, optional
+        Decision rule to use: ``"lift"`` uses P(B > A) >= ``confidence_level``,
+        ``"loss"`` uses E[max(A-B, 0)] <= ``loss_threshold``. Default is
+        ``"lift"``.
+    target_power : float, optional
+        Minimum acceptable Bayesian power. Default is 0.80.
+    confidence_level : float, optional
+        Posterior probability threshold when ``decision="lift"``. Default is 0.95.
+    loss_threshold : float, optional
+        Maximum acceptable expected loss when ``decision="loss"``. Default is
+        0.001.
+    n_samples : int, optional
+        Number of simulated experiments per power evaluation. Default is 10_000.
+    mc_samples : int, optional
+        Number of posterior draws per simulated experiment. Default is 500.
+    sample_sizes : array_like or None, optional
+        Explicit per-group sample sizes to evaluate. When ``None`` (default), an
+        evenly spaced sequence of ``n_points`` values is generated automatically.
+    n_points : int, optional
+        Number of sample-size points to evaluate when ``sample_sizes`` is
+        ``None``. Defaults to 50.
+
+    Returns
+    -------
+    go.Figure
+        An interactive Plotly figure with per-group sample size on the x-axis
+        and minimum detectable lift on the y-axis.
+    """
+    mdl_fn = bayes_minimum_detectable_lift if decision == "lift" else bayes_minimum_detectable_lift_loss
+
+    if sample_sizes is None:
+        search_fn = bayes_minimum_sample_size if decision == "lift" else bayes_minimum_sample_size_loss
+        common: dict[str, Any] = {
+            "alphas": alphas,
+            "betas": betas,
+            "baseline": baseline,
+            "alt_lift": 0.05,
+            "lift": lift,
+            "target_power": target_power,
+            "n_samples": n_samples,
+            "mc_samples": mc_samples,
+        }
+        if decision == "lift":
+            common["confidence_level"] = confidence_level
+        else:
+            common["loss_threshold"] = loss_threshold
+        target_n = search_fn(**common)
+        min_n = max(100, target_n // 10)
+        max_n = target_n * 5
+        sample_sizes = np.linspace(min_n, max_n, n_points, dtype=int)
+
+    mdls = []
+    for n in sample_sizes:
+        kwargs: dict[str, Any] = {
+            "group_size": int(n),
+            "alphas": alphas,
+            "betas": betas,
+            "baseline": baseline,
+            "lift": lift,
+            "target_power": target_power,
+            "n_samples": n_samples,
+            "mc_samples": mc_samples,
+        }
+        if decision == "lift":
+            kwargs["confidence_level"] = confidence_level
+        else:
+            kwargs["loss_threshold"] = loss_threshold
+        mdls.append(mdl_fn(**kwargs))
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=list(sample_sizes),
+            y=mdls,
+            mode="lines",
+            line={"color": "#636EFA", "width": 2},
+            name="MDL",
+        )
+    )
+
+    y_label = f"Minimum detectable {lift} lift"
+    tick_format = ",.0%" if lift == "relative" else ".4f"
+    rule = f"P(B>A) ≥ {confidence_level}" if decision == "lift" else f"E[loss] ≤ {loss_threshold}"
+    fig.update_layout(
+        title=f"Bayesian Sensitivity Curve ({rule})",
+        xaxis_title="Per-group sample size",
+        yaxis_title=y_label,
+        yaxis_tickformat=tick_format,
+        template="plotly_white",
+        hovermode="x unified",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    )
+    return fig

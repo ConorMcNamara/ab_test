@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+import plotly.graph_objects as go
 import scipy.stats as ss
 
 from ab_test.frequentist_binomial.utils import simple_hypothesis_from_composite
@@ -13,6 +14,8 @@ __all__ = [
     "abtest_power",
     "minimum_detectable_lift",
     "required_sample_size",
+    "plot_power_curve",
+    "plot_sensitivity_curve",
 ]
 
 
@@ -311,3 +314,207 @@ def required_sample_size(
             ss_upper = ss
 
     return ss_upper
+
+
+def plot_power_curve(
+    baseline: float,
+    alt_lift: float,
+    alpha: float = 0.05,
+    null_lift: float = 0.0,
+    power: Callable[..., float] = score_power,
+    lift: str = "relative",
+    sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
+    group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
+    n_points: int = 100,
+) -> go.Figure:
+    """Plot statistical power as a function of total sample size.
+
+    Parameters
+    ----------
+    baseline : float
+        Baseline success rate associated with the first experiment group.
+    alt_lift : float
+        Lift associated with the alternative hypothesis.
+    alpha : float, optional
+        Type-I error rate threshold. Defaults to 0.05.
+    null_lift : float, optional
+        Lift associated with the null hypothesis. Defaults to 0.0.
+    power : function, optional
+        Function that computes power, such as ``score_power`` (default).
+    lift : {"relative", "absolute"}, optional
+        Whether to interpret the null/alternative lift relative to the baseline
+        success rate, or in absolute terms. Defaults to ``"relative"``.
+    sample_sizes : array_like or None, optional
+        Explicit total sample sizes to evaluate. When ``None`` (default), an
+        evenly spaced sequence of ``n_points`` values is generated automatically.
+    group_proportions : array_like or None, optional
+        Fraction of experimental units in each group. Defaults to ``[0.5, 0.5]``.
+    n_points : int, optional
+        Number of sample-size points to evaluate when ``sample_sizes`` is
+        ``None``. Defaults to 100.
+
+    Returns
+    -------
+    go.Figure
+        An interactive Plotly figure with total sample size on the x-axis and
+        power on the y-axis.
+    """
+    if group_proportions is None:
+        group_proportions = [0.5, 0.5]
+
+    if sample_sizes is None:
+        beta = 0.2
+        target_ss = required_sample_size(
+            baseline,
+            alt_lift,
+            alpha=alpha,
+            beta=beta,
+            group_proportions=group_proportions,
+            null_lift=null_lift,
+            power=power,
+            lift=lift,
+        )
+        max_ss = int(target_ss * 2)
+        sample_sizes = np.linspace(max(20, max_ss // n_points), max_ss, n_points, dtype=int)
+
+    powers = [
+        abtest_power(
+            [int(ss * g) for g in group_proportions],
+            baseline,
+            alt_lift,
+            alpha=alpha,
+            null_lift=null_lift,
+            power=power,
+            lift=lift,
+        )
+        for ss in sample_sizes
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=list(sample_sizes),
+            y=powers,
+            mode="lines",
+            line={"color": "#636EFA", "width": 2},
+            name="Power",
+        )
+    )
+    fig.add_hline(
+        y=0.8,
+        line_dash="dash",
+        line_color="gray",
+        annotation_text="80% power",
+        annotation_position="top left",
+    )
+
+    fig.update_layout(
+        title="Power Curve",
+        xaxis_title="Total sample size",
+        yaxis_title="Power",
+        yaxis_range=[0, 1.05],
+        yaxis_tickformat=",.0%",
+        template="plotly_white",
+        hovermode="x unified",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    )
+    return fig
+
+
+def plot_sensitivity_curve(
+    baseline: float,
+    alpha: float = 0.05,
+    beta: float = 0.2,
+    null_lift: float = 0.0,
+    power: Callable[..., float] = score_power,
+    lift: str = "relative",
+    sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
+    group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
+    n_points: int = 100,
+) -> go.Figure:
+    """Plot minimum detectable lift as a function of total sample size.
+
+    Parameters
+    ----------
+    baseline : float
+        Baseline success rate associated with the first experiment group.
+    alpha : float, optional
+        Type-I error rate threshold. Defaults to 0.05.
+    beta : float, optional
+        Type-II error rate threshold (1 - power). Defaults to 0.2.
+    null_lift : float, optional
+        Lift associated with the null hypothesis. Defaults to 0.0.
+    power : function, optional
+        Function that computes power, such as ``score_power`` (default).
+    lift : {"relative", "absolute"}, optional
+        Whether to interpret the null/alternative lift relative to the baseline
+        success rate, or in absolute terms. Defaults to ``"relative"``.
+    sample_sizes : array_like or None, optional
+        Explicit total sample sizes to evaluate. When ``None`` (default), an
+        evenly spaced sequence of ``n_points`` values is generated automatically.
+    group_proportions : array_like or None, optional
+        Fraction of experimental units in each group. Defaults to ``[0.5, 0.5]``.
+    n_points : int, optional
+        Number of sample-size points to evaluate when ``sample_sizes`` is
+        ``None``. Defaults to 100.
+
+    Returns
+    -------
+    go.Figure
+        An interactive Plotly figure with total sample size on the x-axis and
+        minimum detectable lift on the y-axis.
+    """
+    if group_proportions is None:
+        group_proportions = [0.5, 0.5]
+
+    if sample_sizes is None:
+        target_ss = required_sample_size(
+            baseline,
+            alt_lift=0.05,
+            alpha=alpha,
+            beta=beta,
+            group_proportions=group_proportions,
+            null_lift=null_lift,
+            power=power,
+            lift=lift,
+        )
+        min_ss = max(20, target_ss // 10)
+        max_ss = target_ss * 5
+        sample_sizes = np.linspace(min_ss, max_ss, n_points, dtype=int)
+
+    mdls = [
+        minimum_detectable_lift(
+            [int(ss * g) for g in group_proportions],
+            baseline,
+            alpha=alpha,
+            beta=beta,
+            null_lift=null_lift,
+            power=power,
+            lift=lift,
+        )
+        for ss in sample_sizes
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=list(sample_sizes),
+            y=mdls,
+            mode="lines",
+            line={"color": "#636EFA", "width": 2},
+            name="MDL",
+        )
+    )
+
+    y_label = f"Minimum detectable {lift} lift"
+    tick_format = ",.0%" if lift == "relative" else ".4f"
+    fig.update_layout(
+        title="Sensitivity Curve",
+        xaxis_title="Total sample size",
+        yaxis_title=y_label,
+        yaxis_tickformat=tick_format,
+        template="plotly_white",
+        hovermode="x unified",
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    )
+    return fig
