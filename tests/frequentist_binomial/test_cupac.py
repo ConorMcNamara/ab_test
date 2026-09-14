@@ -11,6 +11,8 @@ from ab_test.frequentist_binomial.cupac import (
     cupac_adjusted_power,
     cupac_minimum_detectable_lift,
     cupac_required_sample_size,
+    plot_cupac_power_curve,
+    plot_cupac_sensitivity_curve,
 )
 from ab_test.frequentist_binomial.power_calculations import abtest_power, minimum_detectable_lift, required_sample_size
 
@@ -624,3 +626,47 @@ class TestCupacMlrateStatisticalProperties:
 
         mean_ate = np.mean(ates)
         assert mean_ate == pytest.approx(true_effect, abs=0.005)
+
+
+class TestCupacPlotCurves:
+    @staticmethod
+    def test_power_curve_returns_figure():
+        fig = plot_cupac_power_curve(baseline=0.10, alt_lift=0.20, r_squared=0.3)
+        assert fig is not None
+        assert len(fig.data) == 2
+        assert fig.data[0].name == "CUPAC-adjusted (R²=0.30)"
+        assert fig.data[1].name == "Unadjusted"
+
+    @staticmethod
+    def test_power_curve_adjusted_above_unadjusted():
+        fig = plot_cupac_power_curve(baseline=0.10, alt_lift=0.20, r_squared=0.3)
+        adjusted_y = fig.data[0].y
+        unadjusted_y = fig.data[1].y
+        assert all(a >= u - 1e-9 for a, u in zip(adjusted_y, unadjusted_y))
+
+    @staticmethod
+    def test_power_curve_custom_sample_sizes():
+        sizes = [500, 1000, 2000, 4000]
+        fig = plot_cupac_power_curve(baseline=0.10, alt_lift=0.20, r_squared=0.3, sample_sizes=sizes)
+        assert list(fig.data[0].x) == sizes
+
+    @staticmethod
+    def test_sensitivity_curve_returns_figure():
+        fig = plot_cupac_sensitivity_curve(baseline=0.10, r_squared=0.3)
+        assert fig is not None
+        assert len(fig.data) == 2
+        assert fig.data[0].name == "CUPAC-adjusted (R²=0.30)"
+        assert fig.data[1].name == "Unadjusted"
+
+    @staticmethod
+    def test_sensitivity_curve_adjusted_below_unadjusted():
+        fig = plot_cupac_sensitivity_curve(baseline=0.10, r_squared=0.3)
+        adjusted_y = fig.data[0].y
+        unadjusted_y = fig.data[1].y
+        assert all(a <= u + 1e-9 for a, u in zip(adjusted_y, unadjusted_y))
+
+    @staticmethod
+    def test_sensitivity_curve_custom_sample_sizes():
+        sizes = [500, 1000, 2000, 4000]
+        fig = plot_cupac_sensitivity_curve(baseline=0.10, r_squared=0.3, sample_sizes=sizes)
+        assert list(fig.data[0].x) == sizes
