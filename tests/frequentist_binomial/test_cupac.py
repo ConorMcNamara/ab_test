@@ -6,6 +6,7 @@ import pytest
 
 from ab_test.frequentist_binomial.cupac import (
     CupacExperiment,
+    _cr2_standard_errors,
     _hc2_standard_errors,
     _ols_fit,
     cupac_adjusted_power,
@@ -132,10 +133,10 @@ class TestCupacExperiment:
             CupacExperiment(df, "converted", "group", ["pre_visits"], "A", "B")
 
     @staticmethod
-    def test_init_method_lin_raises():
+    def test_init_method_lin_valid():
         df = _make_experiment_data()
-        with pytest.raises(NotImplementedError, match="not supported"):
-            CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin")
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin")
+        assert exp.method == "lin"
 
     @staticmethod
     def test_fit_returns_self():
@@ -190,6 +191,10 @@ class TestCupacExperiment:
             "theta",
             "n_control",
             "n_treatment",
+            "df",
+            "n_clusters",
+            "ci_lower",
+            "ci_upper",
         }
         assert set(s.keys()) == expected_keys
 
@@ -434,6 +439,10 @@ class TestCupacMlrateAnalyze:
             "theta",
             "n_control",
             "n_treatment",
+            "df",
+            "n_clusters",
+            "ci_lower",
+            "ci_upper",
         }
         assert set(s.keys()) == expected_keys
 
@@ -670,3 +679,366 @@ class TestCupacPlotCurves:
         sizes = [500, 1000, 2000, 4000]
         fig = plot_cupac_sensitivity_curve(baseline=0.10, r_squared=0.3, sample_sizes=sizes)
         assert list(fig.data[0].x) == sizes
+
+
+
+# ---------------------------------------------------------------------------
+# Confidence interval tests
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceInterval:
+    @staticmethod
+    def test_before_fit_raises():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment")
+        with pytest.raises(RuntimeError, match="fit"):
+            exp.confidence_interval()
+
+    @staticmethod
+    def test_default_alpha():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment").fit()
+        lo, hi = exp.confidence_interval()
+        assert lo < hi
+
+    @staticmethod
+    def test_custom_alpha():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment").fit()
+        lo_99, hi_99 = exp.confidence_interval(alpha=0.01)
+        lo_95, hi_95 = exp.confidence_interval(alpha=0.05)
+        assert hi_99 - lo_99 > hi_95 - lo_95
+
+    @staticmethod
+    def test_contains_ate():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment").fit()
+        lo, hi = exp.confidence_interval()
+        assert lo <= exp.ate <= hi
+
+    @staticmethod
+    def test_properties_match_method():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment").fit()
+        lo, hi = exp.confidence_interval(0.05)
+        assert exp.ci_lower == pytest.approx(lo)
+        assert exp.ci_upper == pytest.approx(hi)
+
+    @staticmethod
+    def test_summary_includes_ci():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment").fit()
+        s = exp.summary()
+        assert "ci_lower" in s
+        assert "ci_upper" in s
+        assert s["ci_lower"] < s["ci_upper"]
+
+    @staticmethod
+    def test_ci_lower_property_before_fit():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment")
+        with pytest.raises(RuntimeError, match="fit"):
+            _ = exp.ci_lower
+
+
+# ---------------------------------------------------------------------------
+# Lin's method tests
+# ---------------------------------------------------------------------------
+
+
+class TestLinMethod:
+    @staticmethod
+    def test_fit_returns_self():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin")
+        result = exp.fit()
+        assert result is exp
+
+    @staticmethod
+    def test_known_effect_recovery():
+        df = _make_experiment_data(n_control=5000, n_treatment=5000, treatment_effect=0.03, seed=123)
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
+        assert exp.ate == pytest.approx(0.03, abs=0.015)
+
+    @staticmethod
+    def test_variance_reduction_positive():
+        df = _make_experiment_data(covariate_r_squared=0.3)
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
+        assert exp.variance_reduction > 0
+
+    @staticmethod
+    def test_se_smaller_than_unadjusted():
+        df = _make_experiment_data(covariate_r_squared=0.3)
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
+        s = exp.summary()
+        assert s["se"] < s["se_unadjusted"]
+
+    @staticmethod
+    def test_analyze_shows_lin():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin")
+        result = exp.analyze()
+        assert "Lin" in result
+
+    @staticmethod
+    def test_summary_keys():
+        df = _make_experiment_data()
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
+        s = exp.summary()
+        assert "ci_lower" in s
+        assert "ci_upper" in s
+        assert s["df"] is None
+        assert s["n_clusters"] is None
+
+
+# ---------------------------------------------------------------------------
+# Cluster-robust SE tests
+# ---------------------------------------------------------------------------
+
+
+def _make_clustered_experiment_data(
+    n_clusters: int = 50,
+    cluster_size: int = 40,
+    baseline: float = 0.3,
+    treatment_effect: float = 0.0,
+    icc: float = 0.3,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Generate data with cluster-level random intercepts."""
+    rng = np.random.default_rng(seed)
+    n = n_clusters * cluster_size
+    cluster_ids = np.repeat(np.arange(n_clusters), cluster_size)
+
+    cluster_effects = rng.normal(0, np.sqrt(icc), n_clusters)
+    individual_noise = rng.normal(0, np.sqrt(1 - icc), n)
+
+    treatment = np.zeros(n)
+    treatment_clusters = rng.choice(n_clusters, n_clusters // 2, replace=False)
+    for c in treatment_clusters:
+        treatment[cluster_ids == c] = 1.0
+
+    latent = cluster_effects[cluster_ids] + individual_noise
+    covariate = latent + rng.normal(0, 0.5, n)
+    prob = baseline + treatment_effect * treatment + 0.15 * cluster_effects[cluster_ids]
+    prob = np.clip(prob, 0.01, 0.99)
+    outcome = rng.binomial(1, prob)
+
+    group = np.where(treatment == 1.0, "treatment", "control")
+
+    return pd.DataFrame(
+        {
+            "group": group,
+            "converted": outcome,
+            "pre_visits": covariate,
+            "cluster_id": cluster_ids,
+        }
+    )
+
+
+class TestClusterRobustSE:
+    @staticmethod
+    def test_invalid_cluster_col_raises():
+        df = _make_experiment_data()
+        with pytest.raises(ValueError, match="not found in data"):
+            CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="nonexistent")
+
+    @staticmethod
+    def test_fit_succeeds():
+        df = _make_clustered_experiment_data()
+        exp = CupacExperiment(
+            df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+        ).fit()
+        assert exp._results is not None
+
+    @staticmethod
+    def test_cr2_se_larger_than_hc2():
+        df = _make_clustered_experiment_data(n_clusters=20, cluster_size=100, icc=0.5, seed=42)
+        exp_hc2 = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment").fit()
+        exp_cr2 = CupacExperiment(
+            df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+        ).fit()
+        assert exp_cr2.se > exp_hc2.se
+
+    @staticmethod
+    def test_summary_includes_cluster_info():
+        df = _make_clustered_experiment_data()
+        exp = CupacExperiment(
+            df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+        ).fit()
+        s = exp.summary()
+        assert s["n_clusters"] == 50
+        assert s["df"] is not None
+        assert s["df"] > 0
+
+    @staticmethod
+    def test_analyze_shows_cr2():
+        df = _make_clustered_experiment_data()
+        exp = CupacExperiment(
+            df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+        )
+        result = exp.analyze()
+        assert "CR2" in result
+        assert "clusters" in result.lower()
+
+    @staticmethod
+    def test_confidence_interval_uses_t():
+        import scipy.stats as ss
+
+        df = _make_clustered_experiment_data()
+        exp = CupacExperiment(
+            df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+        ).fit()
+        results = exp._results
+        lo, hi = exp.confidence_interval(alpha=0.05)
+        t_crit = ss.t.ppf(0.975, df=results["df"])
+        expected_lo = results["ate"] - t_crit * results["se"]
+        expected_hi = results["ate"] + t_crit * results["se"]
+        assert lo == pytest.approx(expected_lo)
+        assert hi == pytest.approx(expected_hi)
+
+
+class TestCR2StandardErrors:
+    @staticmethod
+    def test_returns_se_and_df():
+        rng = np.random.default_rng(42)
+        n = 200
+        X = np.column_stack([np.ones(n), rng.binomial(1, 0.5, n), rng.normal(0, 1, n)])
+        y = X @ [0.1, 0.02, 0.01] + rng.normal(0, 0.3, n)
+        beta = _ols_fit(X, y)
+        cluster_ids = np.repeat(np.arange(20), 10)
+        se, df_val = _cr2_standard_errors(X, y, beta, cluster_ids)
+        assert len(se) == 3
+        assert all(s > 0 for s in se)
+        assert df_val > 0
+
+    @staticmethod
+    def test_df_bounded_by_n_clusters():
+        rng = np.random.default_rng(42)
+        n = 200
+        X = np.column_stack([np.ones(n), rng.binomial(1, 0.5, n)])
+        y = X @ [0.1, 0.02] + rng.normal(0, 0.3, n)
+        beta = _ols_fit(X, y)
+        n_clusters = 20
+        cluster_ids = np.repeat(np.arange(n_clusters), 10)
+        _, df_val = _cr2_standard_errors(X, y, beta, cluster_ids)
+        assert df_val <= n_clusters
+
+
+# ---------------------------------------------------------------------------
+# Slow statistical property tests (Monte Carlo)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+class TestLinStatisticalProperties:
+    @staticmethod
+    def test_type_i_error_control():
+        rng = np.random.default_rng(42)
+        alpha = 0.05
+        n_sims = 500
+        rejections = 0
+
+        for i in range(n_sims):
+            n = 2000
+            df = pd.DataFrame(
+                {
+                    "group": ["control"] * 1000 + ["treatment"] * 1000,
+                    "converted": rng.binomial(1, 0.1, n),
+                    "cov": rng.normal(0, 1, n),
+                }
+            )
+            exp = CupacExperiment(df, "converted", "group", ["cov"], "control", "treatment", method="lin").fit()
+            if exp.p_value < alpha:
+                rejections += 1
+
+        rejection_rate = rejections / n_sims
+        assert rejection_rate < alpha + 0.03
+
+    @staticmethod
+    def test_ate_unbiased():
+        true_effect = 0.02
+        ates = []
+
+        for seed in range(200):
+            df = _make_experiment_data(n_control=1000, n_treatment=1000, treatment_effect=true_effect, seed=seed)
+            exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
+            ates.append(exp.ate)
+
+        mean_ate = np.mean(ates)
+        assert mean_ate == pytest.approx(true_effect, abs=0.005)
+
+    @staticmethod
+    def test_ci_coverage():
+        true_effect = 0.02
+        covered = 0
+        n_sims = 300
+
+        for seed in range(n_sims):
+            df = _make_experiment_data(n_control=1000, n_treatment=1000, treatment_effect=true_effect, seed=seed)
+            exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
+            lo, hi = exp.confidence_interval(0.05)
+            if lo <= true_effect <= hi:
+                covered += 1
+
+        coverage = covered / n_sims
+        assert coverage >= 0.92
+
+
+@pytest.mark.slow
+class TestClusterRobustStatisticalProperties:
+    @staticmethod
+    def test_type_i_error_control():
+        alpha = 0.05
+        n_sims = 300
+        rejections = 0
+
+        for seed in range(n_sims):
+            df = _make_clustered_experiment_data(
+                n_clusters=30, cluster_size=40, treatment_effect=0.0, icc=0.3, seed=seed
+            )
+            exp = CupacExperiment(
+                df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+            ).fit()
+            if exp.p_value < alpha:
+                rejections += 1
+
+        rejection_rate = rejections / n_sims
+        assert rejection_rate < alpha + 0.04
+
+    @staticmethod
+    def test_ate_unbiased():
+        true_effect = 0.03
+        ates = []
+
+        for seed in range(200):
+            df = _make_clustered_experiment_data(
+                n_clusters=50, cluster_size=40, treatment_effect=true_effect, icc=0.3, seed=seed
+            )
+            exp = CupacExperiment(
+                df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+            ).fit()
+            ates.append(exp.ate)
+
+        mean_ate = np.mean(ates)
+        assert mean_ate == pytest.approx(true_effect, abs=0.01)
+
+    @staticmethod
+    def test_ci_coverage():
+        true_effect = 0.03
+        covered = 0
+        n_sims = 300
+
+        for seed in range(n_sims):
+            df = _make_clustered_experiment_data(
+                n_clusters=30, cluster_size=40, treatment_effect=true_effect, icc=0.3, seed=seed
+            )
+            exp = CupacExperiment(
+                df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+            ).fit()
+            lo, hi = exp.confidence_interval(0.05)
+            if lo <= true_effect <= hi:
+                covered += 1
+
+        coverage = covered / n_sims
+        assert coverage >= 0.92
