@@ -1,16 +1,21 @@
-"""CUPAC and MLRATE variance reduction for A/B tests.
+"""CUPAC, Lin, and MLRATE variance reduction for A/B tests.
 
 Provides variance reduction for A/B tests by fitting a predictive model
-on covariates and adjusting outcomes via the CUPED framework.  Two methods
-are supported:
+on covariates and adjusting outcomes via the CUPED framework.  Three
+methods are supported:
 
 * **CUPAC** fits OLS on control-group covariates and predicts for all users.
+* **Lin** extends CUPAC by adding treatment-by-demeaned-covariate
+  interactions to the final regression, making the estimator
+  asymptotically efficient under heterogeneous treatment effects.
 * **MLRATE** accepts any scikit-learn-compatible estimator and uses K-fold
   cross-fitting so that flexible models (random forests, gradient boosting,
   etc.) produce valid inference without overfitting bias.
 
-Both methods use HC2 robust standard errors for the final treatment-effect
-estimate.
+All methods use HC2 robust standard errors by default.  When a
+``cluster_col`` is provided, CR2 (Bell-McCaffrey) cluster-robust standard
+errors are used instead, with Satterthwaite degrees of freedom for
+t-based inference.
 
 References
 ----------
@@ -22,6 +27,11 @@ Lin, W. (2013). "Agnostic notes on regression adjustments to experimental
     data: Reexamining Freedman's critique."
 Guo, Y. et al. (2021). "Machine Learning for Variance Reduction in Online
     Experiments."
+Bell, R. M. & McCaffrey, D. F. (2002). "Bias reduction in standard errors
+    for linear regression with multi-stage samples."
+Pustejovsky, J. E. & Tipton, E. (2018). "Small-sample methods for
+    cluster-robust variance estimation and hypothesis testing in fixed
+    effects models."
 """
 
 from __future__ import annotations
@@ -103,16 +113,86 @@ def _hc2_standard_errors(
     return np.sqrt(np.diag(cov))
 
 
+def _cr2_standard_errors(
+    X: np.ndarray[Any, Any],
+    y: np.ndarray[Any, Any],
+    beta: np.ndarray[Any, Any],
+    cluster_ids: np.ndarray[Any, Any],
+) -> tuple[np.ndarray[Any, Any], float]:
+    """CR2 (Bell-McCaffrey) cluster-robust standard errors.
+
+    Parameters
+    ----------
+    X : ndarray of shape (n, p)
+        Design matrix.
+    y : ndarray of shape (n,)
+        Response vector.
+    beta : ndarray of shape (p,)
+        OLS coefficient vector.
+    cluster_ids : ndarray of shape (n,)
+        Cluster membership for each observation.
+
+    Returns
+    -------
+    se : ndarray of shape (p,)
+        CR2 standard errors for each coefficient.
+    df : float
+        Satterthwaite degrees of freedom for the treatment coefficient
+        (index 1).
+    """
+    p = X.shape[1]
+    residuals = y - X @ beta
+    XtX_inv = np.linalg.inv(X.T @ X)
+
+    clusters = np.unique(cluster_ids)
+    meat = np.zeros((p, p))
+
+    c = XtX_inv[:, 1]
+    m_g_list: list[float] = []
+
+    for g in clusters:
+        idx = np.where(cluster_ids == g)[0]
+        X_g = X[idx]
+        e_g = residuals[idx]
+        n_g = len(idx)
+
+        H_gg = X_g @ XtX_inv @ X_g.T
+        I_g = np.eye(n_g)
+        diff = I_g - H_gg
+
+        eigvals, eigvecs = np.linalg.eigh(diff)
+        eigvals = np.maximum(eigvals, 1e-12)
+        A_g = eigvecs @ np.diag(1.0 / np.sqrt(eigvals)) @ eigvecs.T
+
+        e_g_adj = A_g @ e_g
+        meat += X_g.T @ np.outer(e_g_adj, e_g_adj) @ X_g
+
+        m_g = float(c @ X_g.T @ A_g.T @ A_g @ X_g @ c)
+        m_g_list.append(m_g)
+
+    cov = XtX_inv @ meat @ XtX_inv
+    se = np.sqrt(np.diag(cov))
+
+    v_hat = sum(m_g_list)
+    sum_m_sq = sum(m**2 for m in m_g_list)
+    df = float(v_hat**2 / sum_m_sq) if sum_m_sq > 0 else float(len(clusters) - 1)
+
+    return se, df
+
+
 class CupacExperiment:
-    """Analyze an A/B test with CUPAC or MLRATE variance reduction.
+    """Analyze an A/B test with CUPAC, Lin, or MLRATE variance reduction.
 
     CUPAC fits OLS on control-group pre-experiment covariates and adjusts
-    outcomes via CUPED.  MLRATE generalises this by accepting any
-    scikit-learn-compatible estimator and using K-fold cross-fitting so
-    flexible models produce valid inference without overfitting bias.
+    outcomes via CUPED.  Lin extends this by adding treatment-by-covariate
+    interactions to the final regression for asymptotic efficiency.
+    MLRATE generalises by accepting any scikit-learn-compatible estimator
+    and using K-fold cross-fitting so flexible models produce valid
+    inference without overfitting bias.
 
-    Both methods estimate the treatment effect with HC2 robust standard
-    errors.
+    All methods estimate the treatment effect with HC2 robust standard
+    errors by default, or CR2 cluster-robust standard errors when
+    ``cluster_col`` is provided.
 
     Parameters
     ----------
@@ -137,13 +217,16 @@ class CupacExperiment:
     metric_name : str
         Display name for the outcome metric.
     method : str
-        Adjustment method: ``"cupac"`` or ``"mlrate"``.
+        Adjustment method: ``"cupac"``, ``"lin"``, or ``"mlrate"``.
     estimator : object or None
         A scikit-learn-compatible estimator with ``fit`` and ``predict``
         methods.  Required when ``method="mlrate"``, ignored otherwise.
     n_folds : int
         Number of cross-fitting folds for MLRATE.  Ignored when
-        ``method="cupac"``.
+        ``method="cupac"`` or ``method="lin"``.
+    cluster_col : str or None
+        Column identifying clusters for CR2 cluster-robust standard
+        errors.  When ``None`` (default), HC2 standard errors are used.
     """
 
     def __init__(
@@ -159,6 +242,7 @@ class CupacExperiment:
         method: str = "cupac",
         estimator: Any = None,
         n_folds: int = 5,
+        cluster_col: str | None = None,
     ) -> None:
         try:
             import polars as pl
@@ -170,6 +254,9 @@ class CupacExperiment:
 
         self._validate_inputs(data, outcome_col, treatment_col, covariate_cols, control_label, treatment_label)
 
+        if cluster_col is not None and cluster_col not in data.columns:
+            raise ValueError(f"cluster_col {cluster_col!r} not found in data")
+
         self.data = data
         self.outcome_col = outcome_col
         self.treatment_col = treatment_col
@@ -178,10 +265,11 @@ class CupacExperiment:
         self.treatment_label = treatment_label
         self.experiment_name = experiment_name
         self.metric_name = metric_name
+        self.cluster_col = cluster_col
 
         method = method.casefold()
-        if method not in ("cupac", "mlrate"):
-            raise NotImplementedError(f"Method {method!r} is not supported. Use 'cupac' or 'mlrate'.")
+        if method not in ("cupac", "mlrate", "lin"):
+            raise NotImplementedError(f"Method {method!r} is not supported. Use 'cupac', 'lin', or 'mlrate'.")
         if method == "mlrate":
             if estimator is None:
                 raise ValueError("estimator is required when method='mlrate'")
@@ -270,8 +358,32 @@ class CupacExperiment:
 
         return y_hat
 
+    @staticmethod
+    def _build_lin_design_matrix(
+        treatment_indicator: np.ndarray[Any, Any],
+        covariates: np.ndarray[Any, Any],
+    ) -> np.ndarray[Any, Any]:
+        """Build Lin's interacted design matrix.
+
+        Parameters
+        ----------
+        treatment_indicator : ndarray of shape (n,)
+            Binary treatment assignment (0/1).
+        covariates : ndarray of shape (n, k)
+            Pre-experiment covariates.
+
+        Returns
+        -------
+        X : ndarray of shape (n, 2 + 2k)
+            ``[intercept, treatment, X_centered, treatment * X_centered]``.
+        """
+        n = len(treatment_indicator)
+        X_centered = covariates - covariates.mean(axis=0)
+        interactions = treatment_indicator[:, np.newaxis] * X_centered
+        return np.column_stack([np.ones(n), treatment_indicator, X_centered, interactions])
+
     def fit(self) -> CupacExperiment:
-        """Run the CUPAC or MLRATE analysis pipeline.
+        """Run the variance-reduction analysis pipeline.
 
         Returns
         -------
@@ -308,11 +420,23 @@ class CupacExperiment:
         tau_hat = float(np.mean(y_adj[is_treatment]) - np.mean(y_adj[is_control]))
         tau_unadj = float(np.mean(y[is_treatment]) - np.mean(y[is_control]))
 
-        # HC2 robust SEs via full regression
+        # Final regression design matrix
         treatment_indicator = is_treatment.astype(float)
-        X_full = np.column_stack([np.ones(len(y_adj)), treatment_indicator, covariates])
+        if self.method == "lin":
+            X_full = self._build_lin_design_matrix(treatment_indicator, covariates)
+        else:
+            X_full = np.column_stack([np.ones(len(y_adj)), treatment_indicator, covariates])
         beta_full = _ols_fit(X_full, y_adj)
-        se_full = _hc2_standard_errors(X_full, y_adj, beta_full)
+
+        # Robust SEs
+        df: float | None = None
+        n_clusters: int | None = None
+        if self.cluster_col is not None:
+            cluster_ids = self.data[self.cluster_col].to_numpy()
+            n_clusters = int(len(np.unique(cluster_ids)))
+            se_full, df = _cr2_standard_errors(X_full, y_adj, beta_full, cluster_ids)
+        else:
+            se_full = _hc2_standard_errors(X_full, y_adj, beta_full)
         se_tau = float(se_full[1])
 
         # Unadjusted SE for comparison
@@ -320,7 +444,10 @@ class CupacExperiment:
 
         # Inference
         z_stat = tau_hat / se_tau if se_tau > 0 else 0.0
-        p_value = float(2 * ss.norm.sf(abs(z_stat)))
+        if df is not None:
+            p_value = float(2 * ss.t.sf(abs(z_stat), df=df))
+        else:
+            p_value = float(2 * ss.norm.sf(abs(z_stat)))
 
         # Variance reduction
         var_raw = np.var(y, ddof=1)
@@ -338,6 +465,8 @@ class CupacExperiment:
             "theta": theta,
             "n_control": n_ctrl,
             "n_treatment": n_treat,
+            "df": df,
+            "n_clusters": n_clusters,
         }
         return self
 
@@ -354,7 +483,7 @@ class CupacExperiment:
 
     @property
     def se(self) -> float:
-        """HC2 robust standard error of the treatment effect."""
+        """Robust standard error of the treatment effect (HC2 or CR2)."""
         return self._check_fitted()["se"]
 
     @property
@@ -367,17 +496,59 @@ class CupacExperiment:
         """R-squared: fraction of variance explained by the covariates."""
         return self._check_fitted()["r_squared"]
 
-    def summary(self) -> dict[str, Any]:
+    def confidence_interval(self, alpha: float = 0.05) -> tuple[float, float]:
+        """Confidence interval for the average treatment effect.
+
+        Parameters
+        ----------
+        alpha : float
+            Significance level. Defaults to 0.05 (95 % CI).
+
+        Returns
+        -------
+        tuple of float
+            ``(lower, upper)`` bounds of the ``(1 - alpha)`` CI.
+        """
+        results = self._check_fitted()
+        df = results["df"]
+        if df is not None:
+            crit = float(ss.t.ppf(1 - alpha / 2, df=df))
+        else:
+            crit = float(ss.norm.ppf(1 - alpha / 2))
+        half_width = crit * results["se"]
+        return (results["ate"] - half_width, results["ate"] + half_width)
+
+    @property
+    def ci_lower(self) -> float:
+        """Lower bound of the 95 % confidence interval for the ATE."""
+        return self.confidence_interval(0.05)[0]
+
+    @property
+    def ci_upper(self) -> float:
+        """Upper bound of the 95 % confidence interval for the ATE."""
+        return self.confidence_interval(0.05)[1]
+
+    def summary(self, alpha: float = 0.05) -> dict[str, Any]:
         """Return results as a dict for programmatic access.
+
+        Parameters
+        ----------
+        alpha : float
+            Significance level for CI bounds. Defaults to 0.05.
 
         Returns
         -------
         dict
             Keys: ``ate``, ``ate_unadjusted``, ``se``, ``se_unadjusted``,
             ``z_stat``, ``p_value``, ``r_squared``, ``theta``,
-            ``n_control``, ``n_treatment``.
+            ``n_control``, ``n_treatment``, ``df``, ``n_clusters``,
+            ``ci_lower``, ``ci_upper``.
         """
-        return dict(self._check_fitted())
+        d = dict(self._check_fitted())
+        ci_lo, ci_hi = self.confidence_interval(alpha)
+        d["ci_lower"] = ci_lo
+        d["ci_upper"] = ci_hi
+        return d
 
     def analyze(self, alpha: float = 0.05) -> str:
         """Run the analysis and return a formatted results table.
@@ -396,20 +567,29 @@ class CupacExperiment:
             self.fit()
         results = self._check_fitted()
 
-        z_crit = float(ss.norm.ppf(1 - alpha / 2))
-        ci_lower = results["ate"] - z_crit * results["se"]
-        ci_upper = results["ate"] + z_crit * results["se"]
+        ci_lower, ci_upper = self.confidence_interval(alpha)
 
         str_pvalue = f"{results['p_value']}" if results["p_value"] >= alpha else f"{results['p_value']}*"
+
+        method_labels = {"cupac": "CUPAC", "mlrate": "MLRATE", "lin": "Lin"}
+        method_label = method_labels[self.method]
+        se_label = "CR2" if self.cluster_col is not None else "HC2"
 
         from tabulate import tabulate
 
         table = [
             ["Experiment", self.experiment_name],
             ["Metric", self.metric_name],
-            ["Method", "MLRATE" if self.method == "mlrate" else "CUPAC"],
+            ["Method", method_label],
+            ["SE Type", se_label],
             ["N (control)", f"{results['n_control']:,}"],
             ["N (treatment)", f"{results['n_treatment']:,}"],
+        ]
+        if results["n_clusters"] is not None:
+            table.append(["N (clusters)", f"{results['n_clusters']:,}"])
+        if results["df"] is not None:
+            table.append(["Satterthwaite df", f"{results['df']:.1f}"])
+        table += [
             ["Unadj. ATE", f"{results['ate_unadjusted']:.4%}"],
             ["Adjusted ATE", f"{results['ate']:.4%}"],
             ["Std. Error", f"{results['se']:.4%}"],
@@ -438,19 +618,25 @@ class CupacExperiment:
             self.fit()
         results = self._check_fitted()
 
+        ci_lower, ci_upper = self.confidence_interval()
+        adj_ci_lo = results["ate"] - ci_lower
+        adj_ci_hi = ci_upper - results["ate"]
+
         z_crit = float(ss.norm.ppf(0.975))
         unadj_ci = z_crit * results["se_unadjusted"]
-        adj_ci = z_crit * results["se"]
+
+        method_labels = {"cupac": "CUPAC", "mlrate": "MLRATE", "lin": "Lin"}
+        method_label = method_labels[self.method]
 
         plot_color = resolve_plot_color(color) or ["#636EFA", "#EF553B"]
         c_unadj = plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0]
         c_adj = plot_color[1] if isinstance(plot_color, list) else list(plot_color.values())[1]
 
         fig = go.Figure()
-        adj_label = "Adjusted (MLRATE)" if self.method == "mlrate" else "Adjusted (CUPAC)"
-        for label, ate, ci_half, c in [
-            ("Unadjusted", results["ate_unadjusted"], unadj_ci, c_unadj),
-            (adj_label, results["ate"], adj_ci, c_adj),
+        adj_label = f"Adjusted ({method_label})"
+        for label, ate, ci_minus, ci_plus, c in [
+            ("Unadjusted", results["ate_unadjusted"], unadj_ci, unadj_ci, c_unadj),
+            (adj_label, results["ate"], adj_ci_lo, adj_ci_hi, c_adj),
         ]:
             fig.add_trace(
                 go.Scatter(
@@ -460,8 +646,8 @@ class CupacExperiment:
                     error_x={
                         "type": "data",
                         "symmetric": False,
-                        "array": [ci_half],
-                        "arrayminus": [ci_half],
+                        "array": [ci_plus],
+                        "arrayminus": [ci_minus],
                         "visible": True,
                         "color": c,
                     },
@@ -470,7 +656,7 @@ class CupacExperiment:
             )
         fig.add_vline(x=0, line_dash="dash", line_color="gray")
         fig.update_layout(
-            title=f"{self.experiment_name}: Unadjusted vs {'MLRATE' if self.method == 'mlrate' else 'CUPAC'}-Adjusted",
+            title=f"{self.experiment_name}: Unadjusted vs {method_label}-Adjusted",
             xaxis_title="Treatment Effect",
             xaxis_tickformat=",.2%",
             template="plotly_white",
