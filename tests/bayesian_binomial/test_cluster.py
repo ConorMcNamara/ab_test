@@ -187,9 +187,15 @@ class TestBayesianCRTAnalyze:
         crt.analyze()
         assert crt.pooled_results is not None
         expected_keys = {
-            "lift_type", "lift", "ci_lower", "ci_upper",
-            "p_control", "p_treatment", "prob_t_gt_c",
-            "expected_loss", "prob_rope",
+            "lift_type",
+            "lift",
+            "ci_lower",
+            "ci_upper",
+            "p_control",
+            "p_treatment",
+            "prob_t_gt_c",
+            "expected_loss",
+            "prob_rope",
         }
         assert set(crt.pooled_results.keys()) == expected_keys
 
@@ -321,9 +327,13 @@ class TestClusterBayesPowerLift:
     def test_returns_float_in_range():
         np.random.seed(42)
         p = cluster_bayes_power_lift(
-            n_clusters=20, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.20,
-            n_samples=500, mc_samples=200,
+            n_clusters=20,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.20,
+            n_samples=500,
+            mc_samples=200,
         )
         assert isinstance(p, float)
         assert 0 <= p <= 1
@@ -332,14 +342,22 @@ class TestClusterBayesPowerLift:
     def test_higher_effect_higher_power():
         np.random.seed(42)
         p_small = cluster_bayes_power_lift(
-            n_clusters=15, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.05,
-            n_samples=500, mc_samples=200,
+            n_clusters=15,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.05,
+            n_samples=500,
+            mc_samples=200,
         )
         p_large = cluster_bayes_power_lift(
-            n_clusters=15, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.50,
-            n_samples=500, mc_samples=200,
+            n_clusters=15,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.50,
+            n_samples=500,
+            mc_samples=200,
         )
         assert p_large > p_small
 
@@ -347,14 +365,22 @@ class TestClusterBayesPowerLift:
     def test_more_clusters_higher_power():
         np.random.seed(42)
         p_few = cluster_bayes_power_lift(
-            n_clusters=5, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.30,
-            n_samples=2000, mc_samples=500,
+            n_clusters=5,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.30,
+            n_samples=2000,
+            mc_samples=500,
         )
         p_many = cluster_bayes_power_lift(
-            n_clusters=50, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.30,
-            n_samples=2000, mc_samples=500,
+            n_clusters=50,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.30,
+            n_samples=2000,
+            mc_samples=500,
         )
         assert p_many > p_few
 
@@ -364,9 +390,13 @@ class TestClusterBayesPowerLoss:
     def test_returns_float_in_range():
         np.random.seed(42)
         p = cluster_bayes_power_loss(
-            n_clusters=20, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.20,
-            n_samples=500, mc_samples=200,
+            n_clusters=20,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.20,
+            n_samples=500,
+            mc_samples=200,
         )
         assert isinstance(p, float)
         assert 0 <= p <= 1
@@ -375,14 +405,22 @@ class TestClusterBayesPowerLoss:
     def test_higher_effect_higher_power():
         np.random.seed(42)
         p_small = cluster_bayes_power_loss(
-            n_clusters=15, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.05,
-            n_samples=500, mc_samples=200,
+            n_clusters=15,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.05,
+            n_samples=500,
+            mc_samples=200,
         )
         p_large = cluster_bayes_power_loss(
-            n_clusters=15, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.50,
-            n_samples=500, mc_samples=200,
+            n_clusters=15,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.50,
+            n_samples=500,
+            mc_samples=200,
         )
         assert p_large > p_small
 
@@ -392,8 +430,12 @@ class TestClusterBayesMinimumClusters:
     def test_returns_int():
         np.random.seed(42)
         k = cluster_bayes_minimum_clusters(
-            icc=0.02, cluster_size=500, baseline=0.10,
-            alt_lift=0.50, n_samples=2000, mc_samples=500,
+            icc=0.02,
+            cluster_size=500,
+            baseline=0.10,
+            alt_lift=0.50,
+            n_samples=2000,
+            mc_samples=500,
         )
         assert isinstance(k, int)
         assert k >= 2
@@ -402,12 +444,20 @@ class TestClusterBayesMinimumClusters:
     def test_higher_icc_more_clusters():
         np.random.seed(42)
         k_low = cluster_bayes_minimum_clusters(
-            icc=0.01, cluster_size=500, baseline=0.10,
-            alt_lift=0.50, n_samples=2000, mc_samples=500,
+            icc=0.01,
+            cluster_size=500,
+            baseline=0.10,
+            alt_lift=0.50,
+            n_samples=2000,
+            mc_samples=500,
         )
         k_high = cluster_bayes_minimum_clusters(
-            icc=0.05, cluster_size=500, baseline=0.10,
-            alt_lift=0.50, n_samples=2000, mc_samples=500,
+            icc=0.05,
+            cluster_size=500,
+            baseline=0.10,
+            alt_lift=0.50,
+            n_samples=2000,
+            mc_samples=500,
         )
         assert k_high >= k_low
 
@@ -417,8 +467,12 @@ class TestClusterBayesMinimumClustersLoss:
     def test_returns_int():
         np.random.seed(42)
         k = cluster_bayes_minimum_clusters_loss(
-            icc=0.02, cluster_size=500, baseline=0.10,
-            alt_lift=0.50, n_samples=2000, mc_samples=500,
+            icc=0.02,
+            cluster_size=500,
+            baseline=0.10,
+            alt_lift=0.50,
+            n_samples=2000,
+            mc_samples=500,
         )
         assert isinstance(k, int)
         assert k >= 2
@@ -429,8 +483,12 @@ class TestClusterBayesMinimumDetectableLift:
     def test_returns_float():
         np.random.seed(42)
         mdl = cluster_bayes_minimum_detectable_lift(
-            n_clusters=30, cluster_size=500, icc=0.02,
-            baseline=0.10, n_samples=500, mc_samples=200,
+            n_clusters=30,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            n_samples=500,
+            mc_samples=200,
         )
         assert isinstance(mdl, float)
         assert mdl > 0
@@ -439,12 +497,20 @@ class TestClusterBayesMinimumDetectableLift:
     def test_more_clusters_smaller_mdl():
         np.random.seed(42)
         mdl_few = cluster_bayes_minimum_detectable_lift(
-            n_clusters=10, cluster_size=500, icc=0.02,
-            baseline=0.10, n_samples=500, mc_samples=200,
+            n_clusters=10,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            n_samples=500,
+            mc_samples=200,
         )
         mdl_many = cluster_bayes_minimum_detectable_lift(
-            n_clusters=50, cluster_size=500, icc=0.02,
-            baseline=0.10, n_samples=500, mc_samples=200,
+            n_clusters=50,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            n_samples=500,
+            mc_samples=200,
         )
         assert mdl_many < mdl_few
 
@@ -454,8 +520,12 @@ class TestClusterBayesMinimumDetectableLiftLoss:
     def test_returns_float():
         np.random.seed(42)
         mdl = cluster_bayes_minimum_detectable_lift_loss(
-            n_clusters=30, cluster_size=500, icc=0.02,
-            baseline=0.10, n_samples=500, mc_samples=200,
+            n_clusters=30,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            n_samples=500,
+            mc_samples=200,
         )
         assert isinstance(mdl, float)
         assert mdl > 0
@@ -471,9 +541,13 @@ class TestPlotClusterBayesPowerCurve:
     def test_returns_figure():
         np.random.seed(42)
         fig = plot_cluster_bayes_power_curve(
-            icc=0.02, cluster_size=500, baseline=0.10,
-            alt_lift=0.20, cluster_counts=[5, 10, 15],
-            n_samples=200, mc_samples=100,
+            icc=0.02,
+            cluster_size=500,
+            baseline=0.10,
+            alt_lift=0.20,
+            cluster_counts=[5, 10, 15],
+            n_samples=200,
+            mc_samples=100,
         )
         assert isinstance(fig, go.Figure)
 
@@ -481,10 +555,14 @@ class TestPlotClusterBayesPowerCurve:
     def test_loss_decision():
         np.random.seed(42)
         fig = plot_cluster_bayes_power_curve(
-            icc=0.02, cluster_size=500, baseline=0.10,
-            alt_lift=0.20, decision="loss",
+            icc=0.02,
+            cluster_size=500,
+            baseline=0.10,
+            alt_lift=0.20,
+            decision="loss",
             cluster_counts=[5, 10, 15],
-            n_samples=200, mc_samples=100,
+            n_samples=200,
+            mc_samples=100,
         )
         assert isinstance(fig, go.Figure)
 
@@ -494,9 +572,12 @@ class TestPlotClusterBayesSensitivityCurve:
     def test_returns_figure():
         np.random.seed(42)
         fig = plot_cluster_bayes_sensitivity_curve(
-            icc=0.02, cluster_size=500, baseline=0.10,
+            icc=0.02,
+            cluster_size=500,
+            baseline=0.10,
             cluster_counts=[10, 20, 30],
-            n_samples=200, mc_samples=100,
+            n_samples=200,
+            mc_samples=100,
         )
         assert isinstance(fig, go.Figure)
 
@@ -504,9 +585,12 @@ class TestPlotClusterBayesSensitivityCurve:
     def test_loss_decision():
         np.random.seed(42)
         fig = plot_cluster_bayes_sensitivity_curve(
-            icc=0.02, cluster_size=500, baseline=0.10,
+            icc=0.02,
+            cluster_size=500,
+            baseline=0.10,
             decision="loss",
             cluster_counts=[10, 20, 30],
-            n_samples=200, mc_samples=100,
+            n_samples=200,
+            mc_samples=100,
         )
         assert isinstance(fig, go.Figure)

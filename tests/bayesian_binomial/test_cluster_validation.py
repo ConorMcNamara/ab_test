@@ -43,13 +43,21 @@ class TestBayesianCRTPowerCalibration:
     def test_power_increases_with_clusters():
         np.random.seed(2024)
         p_10 = cluster_bayes_power_lift(
-            n_clusters=10, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.20,
-            n_samples=2000, mc_samples=500,
+            n_clusters=10,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.20,
+            n_samples=2000,
+            mc_samples=500,
         )
         p_40 = cluster_bayes_power_lift(
-            n_clusters=40, cluster_size=500, icc=0.02,
-            baseline=0.10, alt_lift=0.20,
-            n_samples=2000, mc_samples=500,
+            n_clusters=40,
+            cluster_size=500,
+            icc=0.02,
+            baseline=0.10,
+            alt_lift=0.20,
+            n_samples=2000,
+            mc_samples=500,
         )
         assert p_40 > p_10 + 0.1
