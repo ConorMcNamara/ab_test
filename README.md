@@ -23,6 +23,7 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 | **Diff-in-diff** | Multi-period heterogeneity testing, pairwise comparisons, Cochran's Q | [frequentist](docs/frequentist_binomial/diff_in_diff.rst) · [bayesian](docs/bayesian_binomial/diff_in_diff.rst) |
 | **Bayesian inference** | P(B > A), expected loss, ROPE analysis, lift probability thresholds | [docs](docs/bayesian_binomial/stats_tests.rst) |
 | **Multiple testing** | Bonferroni, Sidak, Holm (FWER), Benjamini-Hochberg (FDR) | [docs](docs/corrections.rst) |
+| **Cluster-randomized trials** | Bayesian beta-binomial hierarchical model with ICC estimation, design-effect-adjusted posteriors, and simulation-based assurance | [bayesian](docs/bayesian_binomial/cluster.rst) |
 | **Diagnostics** | Sample ratio mismatch (SRM) detection | [docs](docs/diagnostics.rst) |
 | **Lift types** | Relative, absolute, incremental, ROAS, CPA, and revenue — all methods | — |
 
@@ -96,6 +97,10 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 ### Color palettes (`.plot`)
 
 `"ibm"`, `"wong"`, `"ito"`, `"tol"`, `"tol_bright"`, `"tol_vibrant"`, `"tol_muted"`, `"tol_light"`
+
+## Acknowledgements
+
+Special thanks to [abtesting-public](https://github.com/rwilson4/abtesting-public) by [@rwilson4](https://github.com/rwilson4) for being the inspiration for this package.
 
 ## Contributing
 

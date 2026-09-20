@@ -8,6 +8,7 @@ except PackageNotFoundError:
     __version__ = "0.0.0.dev0"
 
 from ab_test.bayesian_binomial import (
+    cluster,
     contingency,
     credible_intervals,
     diff_in_diff,
@@ -18,6 +19,7 @@ from ab_test.bayesian_binomial import (
 )
 
 __all__: list[str] = [
+    "cluster",
     "contingency",
     "credible_intervals",
     "diff_in_diff",
