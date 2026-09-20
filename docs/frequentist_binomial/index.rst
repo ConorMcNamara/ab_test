@@ -15,6 +15,7 @@ and difference-in-differences analysis for heterogeneous treatment effects.
    confidence_intervals
    power_calculations
    msprt
+   gst
    cupac
    stratified
    diff_in_diff
