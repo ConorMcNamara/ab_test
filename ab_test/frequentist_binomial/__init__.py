@@ -8,6 +8,7 @@ except PackageNotFoundError:
     __version__ = "0.0.0.dev0"
 
 from ab_test.frequentist_binomial import (
+    cluster,
     confidence_intervals,
     contingency,
     cupac,
@@ -21,6 +22,7 @@ from ab_test.frequentist_binomial import (
 )
 
 __all__: list[str] = [
+    "cluster",
     "confidence_intervals",
     "contingency",
     "cupac",

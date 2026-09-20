@@ -10,6 +10,7 @@ and difference-in-differences analysis for heterogeneous treatment effects.
 .. toctree::
    :maxdepth: 1
 
+   cluster
    contingency
    stats_tests
    confidence_intervals
