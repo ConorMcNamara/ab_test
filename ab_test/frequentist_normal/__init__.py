@@ -1,4 +1,4 @@
-"""Evaluating the Performance of AB Tests for Binomial Distributions in Python."""
+"""Evaluating the Performance of AB Tests for Normal Distributions in Python."""
 
 from importlib.metadata import PackageNotFoundError, version
 
@@ -8,11 +8,15 @@ except PackageNotFoundError:
     __version__ = "0.0.0.dev0"
 
 from ab_test.frequentist_normal import (
-    normal_table
+    normal_table,
+    stats_tests,
+    utils,
 )
 
 __all__: list[str] = [
-    "normal_table"
+    "normal_table",
+    "stats_tests",
+    "utils",
 ]
 
 
