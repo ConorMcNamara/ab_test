@@ -40,3 +40,33 @@ def validate_two_group(
         raise NotImplementedError("Only supports a 2x2 continuous table")
     if not allow_relative_null and lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
+
+
+def observed_lift(
+    means: np.ndarray[Any, Any] | list[Any], trials: np.ndarray[Any, Any] | list[Any], lift: str = "relative"
+) -> float:
+    """Calculate the lift from our experiment.
+
+    Parameters
+    ----------
+    means : numpy array
+        The mean for each iteration of an AB test
+    trials : numpy array
+        The number of trials for each iteration of an AB test
+    lift : {'relative', 'absolute', 'incremental'}
+        The lift we are measuring
+
+    Returns
+    -------
+    ote : float
+        The observed treatment effect, i.e., lift of our experiment
+    """
+    mean_a, mean_b = means[0], means[1]
+    if lift == "relative":
+        ote = (mean_b - mean_a) / mean_a
+    elif lift == "incremental":
+        scale = max(trials[0], trials[1])
+        ote = (mean_b - mean_a) * scale
+    else:
+        ote = mean_b - mean_a
+    return float(ote)
