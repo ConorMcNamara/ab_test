@@ -22,21 +22,36 @@ class NormalTable(BaseContinuousTable):
         "trials": "IntegerType",
     }
 
+    def _total_variance(self) -> float:
+        """Compute the combined variance using the law of total variance."""
+        means = np.array(self.means)
+        variances = np.array(self.variances)
+        trials = np.array(self.trials)
+        total_n = np.sum(trials)
+        total_mean = np.sum(means * trials) / total_n
+        within = np.sum(trials * variances) / total_n
+        between = np.sum(trials * (means - total_mean) ** 2) / total_n
+        return float(within + between)
+
     def _total_row(self) -> list[Any]:
         """Return the ``"Total"`` row appended to :meth:`to_list`."""
+        total_n = np.sum(self.trials)
+        total_mean = np.sum(np.array(self.means) * np.array(self.trials)) / total_n
         return [
             "Total",
-            np.sum(np.array(self.means) * np.array(self.trials)) / np.sum(self.trials),
-            np.nan,
-            np.sum(self.trials),
+            total_mean,
+            self._total_variance(),
+            total_n,
         ]
 
     def _total_cell(self) -> dict[str, Any]:
         """Return the ``"Total"`` cell dict appended to :meth:`serialize`."""
+        total_n = int(np.sum(self.trials))
+        total_mean = float(np.sum(np.array(self.means) * np.array(self.trials)) / total_n)
         return {
-            "means": float(np.sum(np.array(self.means) * np.array(self.trials))) / np.sum(self.trials),
-            "variances": np.nan,
-            "trials": int(np.sum(self.trials)),
+            "means": total_mean,
+            "variances": self._total_variance(),
+            "trials": total_n,
         }
 
     def add(self, cell_name: str, means: float, variances: float, trials: int) -> "NormalTable":

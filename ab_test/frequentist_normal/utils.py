@@ -5,6 +5,7 @@ import numpy as np
 
 __all__ = [
     "validate_two_group",
+    "observed_lift",
 ]
 
 
