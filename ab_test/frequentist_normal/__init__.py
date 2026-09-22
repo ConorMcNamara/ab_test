@@ -8,12 +8,14 @@ except PackageNotFoundError:
     __version__ = "0.0.0.dev0"
 
 from ab_test.frequentist_normal import (
+    confidence_intervals,
     normal_table,
     stats_tests,
     utils,
 )
 
 __all__: list[str] = [
+    "confidence_intervals",
     "normal_table",
     "stats_tests",
     "utils",

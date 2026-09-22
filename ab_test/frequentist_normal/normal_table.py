@@ -1,16 +1,16 @@
 """Our wrapper for analyzing experiment results."""
 from __future__ import annotations
 
-import math
 from typing import Any, ClassVar
 
 import numpy as np
-import scipy.stats as ss
 from tabulate import tabulate
 
 from ab_test._continuous_table import BaseContinuousTable
 from ab_test._display import convert_to_tabulate_str
 from ab_test.frequentist_normal.stats_tests import welch_test
+from ab_test.frequentist_normal.confidence_intervals import confidence_interval
+from ab_test.frequentist_normal.utils import observed_lift
 
 
 class NormalTable(BaseContinuousTable):
@@ -119,23 +119,20 @@ class NormalTable(BaseContinuousTable):
             raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
         lift = lift.casefold()
         mean_a, mean_b = self.means[0], self.means[1]
-        var_a, var_b = self.variances[0], self.variances[1]
         n_a, n_b = self.trials[0], self.trials[1]
         p_value = welch_test(self.means, self.variances, self.trials, null_lift, lift)
-        se = math.sqrt(var_a / n_a + var_b / n_b)
-        df = (var_a / n_a + var_b / n_b) ** 2 / (
-            (var_a / n_a) ** 2 / (n_a - 1) + (var_b / n_b) ** 2 / (n_b - 1)
-        )
-        t_crit = ss.t.ppf(1 - alpha / 2, df)
-        abs_diff = mean_b - mean_a
-        lb_abs = abs_diff - t_crit * se
-        ub_abs = abs_diff + t_crit * se
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
+            ci_lift = "absolute"
+        else:
+            ci_lift = lift
+        lb, ub = confidence_interval(self.means, self.variances, self.trials, test_method, alpha, ci_lift)
+        test_lift = observed_lift(self.means, self.trials, lift=ci_lift)
         cell_values: list[float]
         if lift in ["incremental", "roas", "revenue", "cpa"]:
             scale = max(n_a, n_b)
-            test_lift = abs_diff * scale
-            lb = lb_abs * scale
-            ub = ub_abs * scale
+            test_lift *= scale
+            lb *= scale
+            ub *= scale
             total_a = mean_a * scale
             total_b = mean_b * scale
             if lift == "roas":
@@ -165,15 +162,7 @@ class NormalTable(BaseContinuousTable):
                 lb *= self.msrp
                 ub *= self.msrp
             cell_values = [total_a, total_b]
-        elif lift == "relative":
-            test_lift = abs_diff / mean_a
-            lb = lb_abs / mean_a
-            ub = ub_abs / mean_a
-            cell_values = [mean_a, mean_b]
         else:
-            test_lift = abs_diff
-            lb = lb_abs
-            ub = ub_abs
             cell_values = [mean_a, mean_b]
         self.incremental_results = {
             "lift_type": lift,
