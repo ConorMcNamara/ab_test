@@ -91,8 +91,10 @@ class TestClusterRandomizationTest:
     @staticmethod
     def test_returns_float():
         p = cluster_randomization_test(
-            [10, 8, 12], [100, 100, 100],
-            [15, 18, 20], [100, 100, 100],
+            [10, 8, 12],
+            [100, 100, 100],
+            [15, 18, 20],
+            [100, 100, 100],
             seed=0,
         )
         assert isinstance(p, float)

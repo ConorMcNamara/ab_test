@@ -491,8 +491,13 @@ class ClusterRandomizedTrial:
 
         if method == "randomization":
             p_value = cluster_randomization_test(
-                s_ctrl, m_ctrl, s_treat, m_treat,
-                n_permutations=n_permutations, seed=seed, exact=exact,
+                s_ctrl,
+                m_ctrl,
+                s_treat,
+                m_treat,
+                n_permutations=n_permutations,
+                seed=seed,
+                exact=exact,
             )
             ci_lower_abs = -math.inf
             ci_upper_abs = math.inf
@@ -582,10 +587,7 @@ class ClusterRandomizedTrial:
         ]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
         ctrl_name, treat_name = self._group_names
-        footer = (
-            f"\nICC: {icc_val:.4f} | DEFF: {deff_val:.2f}"
-            f" | Clusters: {K_ctrl} {ctrl_name}, {K_treat} {treat_name}"
-        )
+        footer = f"\nICC: {icc_val:.4f} | DEFF: {deff_val:.2f} | Clusters: {K_ctrl} {ctrl_name}, {K_treat} {treat_name}"
         if method == "welch":
             footer += f" | Welch df: {welch_df:.1f}"
         return_string += footer
