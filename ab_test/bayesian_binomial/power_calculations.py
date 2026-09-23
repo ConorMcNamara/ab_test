@@ -78,7 +78,7 @@ def _resolve_alt_rate(
     baseline: float,
     alt_lift: float | None,
     alt_rate: float | None,
-    lift: Literal["relative", "absolute"],
+    lift: str,
 ) -> float:
     """Resolve the treatment conversion rate from either ``alt_rate`` or ``alt_lift``.
 

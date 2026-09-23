@@ -470,8 +470,6 @@ def plot_power_curve(
             null_lift=null_lift,
             power=power,
             lift=lift,
-            spend=spend,
-            msrp=msrp,
         )
         max_ss = int(target_ss * 2)
         sample_sizes = np.linspace(max(20, max_ss // n_points), max_ss, n_points, dtype=int)
