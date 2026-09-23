@@ -10,6 +10,7 @@ from ab_test.bayesian_binomial.power_calculations import (
     bayes_power_loss,
 )
 
+
 @pytest.mark.slow
 class TestBayesPowerLift:
     @staticmethod
@@ -326,13 +327,25 @@ class TestScaledLiftPowerLift:
     def test_incremental_matches_absolute():
         np.random.seed(42)
         abs_pwr = bayes_power_lift(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=0.04, lift="absolute",
-            n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=0.04,
+            lift="absolute",
+            n_samples=5000,
+            mc_samples=500,
         )
         np.random.seed(42)
         inc_pwr = bayes_power_lift(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=40, lift="incremental",
-            n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=40,
+            lift="incremental",
+            n_samples=5000,
+            mc_samples=500,
         )
         assert inc_pwr == pytest.approx(abs_pwr)
 
@@ -340,13 +353,26 @@ class TestScaledLiftPowerLift:
     def test_roas_matches_absolute():
         np.random.seed(42)
         abs_pwr = bayes_power_lift(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=0.04, lift="absolute",
-            n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=0.04,
+            lift="absolute",
+            n_samples=5000,
+            mc_samples=500,
         )
         np.random.seed(42)
         roas_pwr = bayes_power_lift(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=0.008, lift="roas",
-            spend=5000.0, n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=0.008,
+            lift="roas",
+            spend=5000.0,
+            n_samples=5000,
+            mc_samples=500,
         )
         assert roas_pwr == pytest.approx(abs_pwr)
 
@@ -354,13 +380,26 @@ class TestScaledLiftPowerLift:
     def test_revenue_matches_absolute():
         np.random.seed(42)
         abs_pwr = bayes_power_lift(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=0.04, lift="absolute",
-            n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=0.04,
+            lift="absolute",
+            n_samples=5000,
+            mc_samples=500,
         )
         np.random.seed(42)
         rev_pwr = bayes_power_lift(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=2000, lift="revenue",
-            msrp=50.0, n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=2000,
+            lift="revenue",
+            msrp=50.0,
+            n_samples=5000,
+            mc_samples=500,
         )
         assert rev_pwr == pytest.approx(abs_pwr)
 
@@ -368,13 +407,26 @@ class TestScaledLiftPowerLift:
     def test_cpa_matches_absolute():
         np.random.seed(42)
         abs_pwr = bayes_power_lift(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=0.04, lift="absolute",
-            n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=0.04,
+            lift="absolute",
+            n_samples=5000,
+            mc_samples=500,
         )
         np.random.seed(42)
         cpa_pwr = bayes_power_lift(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=125, lift="cpa",
-            spend=5000.0, n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=125,
+            lift="cpa",
+            spend=5000.0,
+            n_samples=5000,
+            mc_samples=500,
         )
         assert cpa_pwr == pytest.approx(abs_pwr)
 
@@ -382,24 +434,42 @@ class TestScaledLiftPowerLift:
     def test_roas_requires_spend():
         with pytest.raises(ValueError, match="spend must be set"):
             bayes_power_lift(
-                [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=0.01, lift="roas",
-                n_samples=100, mc_samples=10,
+                [1000, 1000],
+                [1, 1],
+                [1, 1],
+                0.10,
+                alt_lift=0.01,
+                lift="roas",
+                n_samples=100,
+                mc_samples=10,
             )
 
     @staticmethod
     def test_cpa_requires_spend():
         with pytest.raises(ValueError, match="spend must be set"):
             bayes_power_lift(
-                [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=100, lift="cpa",
-                n_samples=100, mc_samples=10,
+                [1000, 1000],
+                [1, 1],
+                [1, 1],
+                0.10,
+                alt_lift=100,
+                lift="cpa",
+                n_samples=100,
+                mc_samples=10,
             )
 
     @staticmethod
     def test_revenue_requires_msrp():
         with pytest.raises(ValueError, match="msrp must be set"):
             bayes_power_lift(
-                [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=2000, lift="revenue",
-                n_samples=100, mc_samples=10,
+                [1000, 1000],
+                [1, 1],
+                [1, 1],
+                0.10,
+                alt_lift=2000,
+                lift="revenue",
+                n_samples=100,
+                mc_samples=10,
             )
 
 
@@ -408,13 +478,25 @@ class TestScaledLiftPowerLoss:
     def test_incremental_matches_absolute():
         np.random.seed(42)
         abs_pwr = bayes_power_loss(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=0.04, lift="absolute",
-            n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=0.04,
+            lift="absolute",
+            n_samples=5000,
+            mc_samples=500,
         )
         np.random.seed(42)
         inc_pwr = bayes_power_loss(
-            [1000, 1000], [1, 1], [1, 1], 0.10, alt_lift=40, lift="incremental",
-            n_samples=5000, mc_samples=500,
+            [1000, 1000],
+            [1, 1],
+            [1, 1],
+            0.10,
+            alt_lift=40,
+            lift="incremental",
+            n_samples=5000,
+            mc_samples=500,
         )
         assert inc_pwr == pytest.approx(abs_pwr)
 
@@ -424,14 +506,22 @@ class TestScaledLiftMinSampleSizeRejects:
     def test_minimum_sample_size_rejects(self, lift_type):
         with pytest.raises(ValueError, match="not supported"):
             bayes_minimum_sample_size(
-                [1, 1], [1, 1], 0.10, alt_lift=0.04, lift=lift_type,
+                [1, 1],
+                [1, 1],
+                0.10,
+                alt_lift=0.04,
+                lift=lift_type,
             )
 
     @pytest.mark.parametrize("lift_type", ["incremental", "roas", "revenue", "cpa"])
     def test_minimum_sample_size_loss_rejects(self, lift_type):
         with pytest.raises(ValueError, match="not supported"):
             bayes_minimum_sample_size_loss(
-                [1, 1], [1, 1], 0.10, alt_lift=0.04, lift=lift_type,
+                [1, 1],
+                [1, 1],
+                0.10,
+                alt_lift=0.04,
+                lift=lift_type,
             )
 
 
