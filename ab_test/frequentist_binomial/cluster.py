@@ -24,6 +24,7 @@ import plotly.graph_objects as go
 import scipy.stats as ss
 
 from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test.frequentist_binomial.randomization_inference import cluster_randomization_test
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
@@ -432,12 +433,17 @@ class ClusterRandomizedTrial:
             np.array(treat_m, dtype=float),
         )
 
-    def analyze(self, lift: str = "relative", alpha: float = 0.05) -> str:
+    def analyze(
+        self,
+        lift: str = "relative",
+        alpha: float = 0.05,
+        *,
+        method: str = "welch",
+        n_permutations: int = 10_000,
+        seed: int | None = None,
+        exact: bool = False,
+    ) -> str:
         """Analyze the cluster-randomized trial.
-
-        Runs a cluster-summary Welch t-test on per-cluster proportions
-        and reports the treatment effect, confidence interval, ICC, and
-        design effect.
 
         Parameters
         ----------
@@ -445,6 +451,17 @@ class ClusterRandomizedTrial:
             ``"relative"`` or ``"absolute"``.
         alpha : float
             Significance level. Defaults to 0.05.
+        method : str
+            ``"welch"`` for a cluster-summary Welch t-test (default), or
+            ``"randomization"`` for randomization inference.
+        n_permutations : int
+            Number of Monte Carlo permutations.  Only used when
+            ``method="randomization"`` and ``exact=False``.
+        seed : int or None
+            Random seed.  Only used when ``method="randomization"``.
+        exact : bool
+            Enumerate all possible cluster assignments instead of Monte
+            Carlo.  Only used when ``method="randomization"``.
 
         Returns
         -------
@@ -456,6 +473,10 @@ class ClusterRandomizedTrial:
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
+        method = method.casefold()
+        _valid_methods = {"welch", "randomization"}
+        if method not in _valid_methods:
+            raise ValueError(f"method must be one of {sorted(_valid_methods)}, got {method!r}")
 
         s_ctrl, m_ctrl, s_treat, m_treat = self._build_arm_data()
 
@@ -466,31 +487,42 @@ class ClusterRandomizedTrial:
 
         mean_ctrl = float(np.mean(p_ctrl))
         mean_treat = float(np.mean(p_treat))
-        var_ctrl = float(np.var(p_ctrl, ddof=1))
-        var_treat = float(np.var(p_treat, ddof=1))
-
-        se_ctrl = var_ctrl / K_ctrl
-        se_treat = var_treat / K_treat
-        se_sum = se_ctrl + se_treat
-
-        if se_sum == 0:
-            t_stat = 0.0 if mean_treat == mean_ctrl else math.copysign(math.inf, mean_treat - mean_ctrl)
-            welch_df = float(K_ctrl + K_treat - 2)
-            se = 0.0
-        else:
-            se = math.sqrt(se_sum)
-            t_stat = (mean_treat - mean_ctrl) / se
-            welch_df = se_sum**2 / (se_ctrl**2 / (K_ctrl - 1) + se_treat**2 / (K_treat - 1))
-
-        if math.isinf(t_stat):
-            p_value = 0.0
-        else:
-            p_value = float(2 * ss.t.sf(abs(t_stat), df=welch_df))
-
-        t_crit = float(ss.t.ppf(1 - alpha / 2, df=welch_df))
         abs_diff = mean_treat - mean_ctrl
-        ci_lower_abs = abs_diff - t_crit * se
-        ci_upper_abs = abs_diff + t_crit * se
+
+        if method == "randomization":
+            p_value = cluster_randomization_test(
+                s_ctrl, m_ctrl, s_treat, m_treat,
+                n_permutations=n_permutations, seed=seed, exact=exact,
+            )
+            ci_lower_abs = -math.inf
+            ci_upper_abs = math.inf
+            pvalue_label = "p-value (RI)"
+        else:
+            var_ctrl = float(np.var(p_ctrl, ddof=1))
+            var_treat = float(np.var(p_treat, ddof=1))
+
+            se_ctrl = var_ctrl / K_ctrl
+            se_treat = var_treat / K_treat
+            se_sum = se_ctrl + se_treat
+
+            if se_sum == 0:
+                t_stat = 0.0 if mean_treat == mean_ctrl else math.copysign(math.inf, mean_treat - mean_ctrl)
+                welch_df = float(K_ctrl + K_treat - 2)
+                se = 0.0
+            else:
+                se = math.sqrt(se_sum)
+                t_stat = (mean_treat - mean_ctrl) / se
+                welch_df = se_sum**2 / (se_ctrl**2 / (K_ctrl - 1) + se_treat**2 / (K_treat - 1))
+
+            if math.isinf(t_stat):
+                p_value = 0.0
+            else:
+                p_value = float(2 * ss.t.sf(abs(t_stat), df=welch_df))
+
+            t_crit = float(ss.t.ppf(1 - alpha / 2, df=welch_df))
+            ci_lower_abs = abs_diff - t_crit * se
+            ci_upper_abs = abs_diff + t_crit * se
+            pvalue_label = "p-value (Welch t)"
 
         if lift == "relative":
             if mean_ctrl == 0:
@@ -513,6 +545,7 @@ class ClusterRandomizedTrial:
         deff_val = design_effect(avg_m, icc_val)
 
         self._analyzed = {
+            "method": method,
             "lift_type": lift,
             "lift": test_lift,
             "control_rate": mean_ctrl,
@@ -520,15 +553,16 @@ class ClusterRandomizedTrial:
             "p_value": p_value,
             "ci_lower": ci_lower,
             "ci_upper": ci_upper,
-            "se": se,
-            "t_stat": t_stat,
-            "welch_df": welch_df,
             "icc": icc_val,
             "deff": deff_val,
             "n_clusters_control": K_ctrl,
             "n_clusters_treatment": K_treat,
             "alpha": alpha,
         }
+        if method == "welch":
+            self._analyzed["se"] = se
+            self._analyzed["t_stat"] = t_stat
+            self._analyzed["welch_df"] = welch_df
 
         str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
         success_rate: list[str | float] = [
@@ -538,7 +572,7 @@ class ClusterRandomizedTrial:
         table_headers = (
             ["Metric", "Metric Name"]
             + self._group_names
-            + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", "p-value (Welch t)"]
+            + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", pvalue_label]
         )
         table_list = [
             [lift, self.metric_name]
@@ -548,11 +582,13 @@ class ClusterRandomizedTrial:
         ]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
         ctrl_name, treat_name = self._group_names
-        return_string += (
+        footer = (
             f"\nICC: {icc_val:.4f} | DEFF: {deff_val:.2f}"
             f" | Clusters: {K_ctrl} {ctrl_name}, {K_treat} {treat_name}"
-            f" | Welch df: {welch_df:.1f}"
         )
+        if method == "welch":
+            footer += f" | Welch df: {welch_df:.1f}"
+        return_string += footer
         return_string += (
             f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
         )

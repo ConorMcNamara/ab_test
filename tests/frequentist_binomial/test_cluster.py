@@ -331,6 +331,7 @@ class TestClusterRandomizedTrial:
         crt = _make_crt()
         s = crt.summary()
         expected_keys = {
+            "method",
             "lift_type",
             "lift",
             "control_rate",

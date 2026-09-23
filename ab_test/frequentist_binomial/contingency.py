@@ -11,6 +11,7 @@ from ab_test._contingency import BaseContingencyTable
 from ab_test._display import convert_to_tabulate_str
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
 from ab_test.frequentist_binomial.msprt import msprt_test
+from ab_test.frequentist_binomial.randomization_inference import randomization_test
 from ab_test.frequentist_binomial.stats_tests import (
     ab_test,
     score_test,
@@ -99,6 +100,8 @@ class ContingencyTable(BaseContingencyTable):
         null_lift: float = 0.0,
         *,
         tau: float | None = None,
+        n_permutations: int = 10_000,
+        seed: int | None = None,
     ) -> str:
         """Analyzes the effect of our experiments through the ContingencyTable.
 
@@ -131,27 +134,34 @@ class ContingencyTable(BaseContingencyTable):
             raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
         lift = lift.casefold()
         test_lift = observed_lift(self.trials, self.successes, lift)
-        if test_method == "msprt":
+        if test_method == "randomization":
+            test_fn = functools.partial(randomization_test, n_permutations=n_permutations, seed=seed)
+            functools.update_wrapper(test_fn, randomization_test)
+            p_value = test_fn(self.trials, self.successes, null_lift, lift)
+        elif test_method == "msprt":
             p_value = msprt_test(self.trials, self.successes, null_lift, lift, tau=tau)
-            test = functools.partial(msprt_test, tau=tau)
-            functools.update_wrapper(test, msprt_test)
+            test_fn = functools.partial(msprt_test, tau=tau)
+            functools.update_wrapper(test_fn, msprt_test)
         else:
             p_value = ab_test(self.trials, self.successes, null_lift, lift, method=test_method)
             if test_method == "score":
-                test = score_test
+                test_fn = score_test
             elif test_method == "likelihood":
-                test = likelihood_ratio_test
+                test_fn = likelihood_ratio_test
             elif test_method == "z":
-                test = z_test
+                test_fn = z_test
             else:
-                test = cressie_read_test
+                test_fn = cressie_read_test
         if lift in ["incremental", "roas", "revenue", "cpa"]:
             ci_lift = "absolute"
         else:
             ci_lift = lift
-        lb, ub = confidence_interval(
-            self.trials, self.successes, test=test, alpha=alpha, lift=ci_lift, method=conf_int_method
-        )
+        if test_method == "randomization":
+            lb, ub = -math.inf, math.inf
+        else:
+            lb, ub = confidence_interval(
+                self.trials, self.successes, test=test_fn, alpha=alpha, lift=ci_lift, method=conf_int_method
+            )
         success_rate: list[int | float]
         if lift in ["incremental", "roas", "revenue", "cpa"]:
             pa: int | float

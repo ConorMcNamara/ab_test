@@ -7,6 +7,7 @@ import numpy as np
 import scipy.stats as ss
 
 from ab_test.frequentist_binomial.msprt import msprt_test
+from ab_test.frequentist_binomial.randomization_inference import randomization_test
 from ab_test.frequentist_binomial.utils import mle_under_null, mle_under_alternative, validate_two_group
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "neyman_test",
     "cressie_read_test",
     "msprt_test",
+    "randomization_test",
 ]
 
 
@@ -146,6 +148,8 @@ def ab_test(
         val = cressie_read_test(trials, successes, null_lift, lift, crit)
     elif method == "msprt":
         val = msprt_test(trials, successes, null_lift, lift, crit)
+    elif method == "randomization":
+        val = randomization_test(trials, successes, null_lift, lift, crit)
     else:
         raise ValueError(f"No support for calculating the p-value and critical value of {method}")
     return val
