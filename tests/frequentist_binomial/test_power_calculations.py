@@ -139,5 +139,109 @@ class TestScorePower:
         assert expected <= ub + tol
 
 
+class TestScaledLiftPower:
+    @staticmethod
+    def test_incremental_matches_absolute():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        abs_pwr = abtest_power(group_sizes, baseline, 0.04, lift="absolute")
+        inc_pwr = abtest_power(group_sizes, baseline, 40, lift="incremental")
+        assert inc_pwr == pytest.approx(abs_pwr)
+
+    @staticmethod
+    def test_roas_matches_absolute():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        spend = 5000.0
+        abs_pwr = abtest_power(group_sizes, baseline, 0.04, lift="absolute")
+        roas_pwr = abtest_power(group_sizes, baseline, 0.008, lift="roas", spend=spend)
+        assert roas_pwr == pytest.approx(abs_pwr)
+
+    @staticmethod
+    def test_revenue_matches_absolute():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        msrp = 50.0
+        abs_pwr = abtest_power(group_sizes, baseline, 0.04, lift="absolute")
+        rev_pwr = abtest_power(group_sizes, baseline, 2000, lift="revenue", msrp=msrp)
+        assert rev_pwr == pytest.approx(abs_pwr)
+
+    @staticmethod
+    def test_cpa_matches_absolute():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        spend = 5000.0
+        abs_pwr = abtest_power(group_sizes, baseline, 0.04, lift="absolute")
+        cpa_pwr = abtest_power(group_sizes, baseline, 125, lift="cpa", spend=spend)
+        assert cpa_pwr == pytest.approx(abs_pwr)
+
+    @staticmethod
+    def test_roas_requires_spend():
+        with pytest.raises(ValueError, match="spend must be set"):
+            abtest_power([1000, 1000], 0.10, 0.01, lift="roas")
+
+    @staticmethod
+    def test_cpa_requires_spend():
+        with pytest.raises(ValueError, match="spend must be set"):
+            abtest_power([1000, 1000], 0.10, 100, lift="cpa")
+
+    @staticmethod
+    def test_revenue_requires_msrp():
+        with pytest.raises(ValueError, match="msrp must be set"):
+            abtest_power([1000, 1000], 0.10, 2000, lift="revenue")
+
+    @staticmethod
+    def test_incremental_unequal_groups():
+        baseline = 0.10
+        group_sizes = [500, 1000]
+        abs_pwr = abtest_power(group_sizes, baseline, 0.04, lift="absolute")
+        inc_pwr = abtest_power(group_sizes, baseline, 40, lift="incremental")
+        assert inc_pwr == pytest.approx(abs_pwr)
+
+
+class TestScaledLiftMDL:
+    @staticmethod
+    def test_incremental_mdl():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        abs_mdl = minimum_detectable_lift(group_sizes, baseline, lift="absolute")
+        inc_mdl = minimum_detectable_lift(group_sizes, baseline, lift="incremental")
+        assert inc_mdl == pytest.approx(abs_mdl * 1000)
+
+    @staticmethod
+    def test_roas_mdl():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        spend = 5000.0
+        abs_mdl = minimum_detectable_lift(group_sizes, baseline, lift="absolute")
+        roas_mdl = minimum_detectable_lift(group_sizes, baseline, lift="roas", spend=spend)
+        assert roas_mdl == pytest.approx(abs_mdl * 1000 / spend)
+
+    @staticmethod
+    def test_revenue_mdl():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        msrp = 50.0
+        abs_mdl = minimum_detectable_lift(group_sizes, baseline, lift="absolute")
+        rev_mdl = minimum_detectable_lift(group_sizes, baseline, lift="revenue", msrp=msrp)
+        assert rev_mdl == pytest.approx(abs_mdl * 1000 * msrp)
+
+    @staticmethod
+    def test_cpa_mdl():
+        baseline = 0.10
+        group_sizes = [1000, 1000]
+        spend = 5000.0
+        abs_mdl = minimum_detectable_lift(group_sizes, baseline, lift="absolute")
+        cpa_mdl = minimum_detectable_lift(group_sizes, baseline, lift="cpa", spend=spend)
+        assert cpa_mdl == pytest.approx(spend / (abs_mdl * 1000))
+
+
+class TestScaledLiftSampleSize:
+    @pytest.mark.parametrize("lift_type", ["incremental", "roas", "revenue", "cpa"])
+    def test_scaled_lift_raises(self, lift_type):
+        with pytest.raises(ValueError, match="not supported for required_sample_size"):
+            required_sample_size(0.10, 0.04, lift=lift_type)
+
+
 if __name__ == "__main__":
     pytest.main()
