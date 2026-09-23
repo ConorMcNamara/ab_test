@@ -17,6 +17,62 @@ __all__ = [
     "plot_bayes_sensitivity_curve",
 ]
 
+_SCALED_LIFTS = {"incremental", "roas", "revenue", "cpa"}
+
+
+def _to_absolute(
+    lift_value: float,
+    lift: str,
+    scale: int,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> float:
+    """Convert a lift value from the given lift type to absolute."""
+    if lift in ("relative", "absolute"):
+        return lift_value
+    if lift == "incremental":
+        return lift_value / scale
+    if lift == "roas":
+        if spend is None:
+            raise ValueError("spend must be set for ROAS calculations")
+        return lift_value * spend / scale
+    if lift == "revenue":
+        if msrp is None:
+            raise ValueError("msrp must be set for revenue calculations")
+        return lift_value / (scale * msrp)
+    if lift == "cpa":
+        if spend is None:
+            raise ValueError("spend must be set for CPA calculations")
+        return spend / (lift_value * scale)
+    raise ValueError(f"Unsupported lift type: {lift}")
+
+
+def _from_absolute(
+    abs_value: float,
+    lift: str,
+    scale: int,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> float:
+    """Convert an absolute lift value to the given lift type."""
+    if lift in ("relative", "absolute"):
+        return abs_value
+    if lift == "incremental":
+        return abs_value * scale
+    if lift == "roas":
+        if spend is None:
+            raise ValueError("spend must be set for ROAS calculations")
+        return abs_value * scale / spend
+    if lift == "revenue":
+        if msrp is None:
+            raise ValueError("msrp must be set for revenue calculations")
+        return abs_value * scale * msrp
+    if lift == "cpa":
+        if spend is None:
+            raise ValueError("spend must be set for CPA calculations")
+        return spend / (abs_value * scale) if abs_value != 0 else np.inf
+    raise ValueError(f"Unsupported lift type: {lift}")
+
 
 def _resolve_alt_rate(
     baseline: float,
@@ -171,10 +227,12 @@ def bayes_power_lift(
     baseline: float,
     alt_lift: float | None = None,
     alt_rate: float | None = None,
-    lift: Literal["relative", "absolute"] = "relative",
+    lift: str = "relative",
     n_samples: int = 100_000,
     mc_samples: int = 1_000,
     confidence_level: float = 0.95,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> float:
     """Estimate the Bayesian power of a two-variant binomial experiment via simulation.
 
@@ -199,12 +257,11 @@ def bayes_power_lift(
         Expected conversion rate of the control variant.
     alt_lift : float, optional
         Expected lift of the treatment over the control. Interpreted according to
-        ``lift``: a relative multiplier (e.g. ``0.10`` → +10%) or an absolute
-        addition (e.g. ``0.02`` → +2 pp). Mutually exclusive with ``alt_rate``.
+        ``lift``. Mutually exclusive with ``alt_rate``.
     alt_rate : float, optional
         Treatment conversion rate specified directly, bypassing the lift
         calculation. Mutually exclusive with ``alt_lift``.
-    lift : {"relative", "absolute"}, optional
+    lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
         How ``alt_lift`` is applied to ``baseline`` to derive the treatment rate.
         Ignored when ``alt_rate`` is provided. Default is ``"relative"``.
     n_samples : int, optional
@@ -215,6 +272,10 @@ def bayes_power_lift(
     confidence_level : float, optional
         Posterior probability threshold that defines a "win". Power is the
         fraction of simulations where P(B > A) >= this value, by default 0.95.
+    spend : float, optional
+        Campaign spend. Required for "roas" and "cpa" lifts.
+    msrp : float, optional
+        Revenue per unit. Required for "revenue" lift.
 
     Returns
     -------
@@ -226,10 +287,13 @@ def bayes_power_lift(
     ValueError
         If neither ``alt_lift`` nor ``alt_rate`` is provided.
     NotImplementedError
-        If ``alt_lift`` is provided but ``lift`` is not ``"relative"`` or
-        ``"absolute"``.
+        If ``alt_lift`` is provided but ``lift`` is not supported.
     """
     group_sizes = _two_smallest_group_sizes(group_sizes)
+    if alt_rate is None and alt_lift is not None and lift in _SCALED_LIFTS:
+        scale = max(group_sizes)
+        alt_lift = _to_absolute(alt_lift, lift, scale, spend, msrp)
+        lift = "absolute"
     alt_rate = _resolve_alt_rate(baseline, alt_lift, alt_rate, lift)
     samples_null, samples_alt = _simulate_posterior_draws(
         group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples
@@ -246,10 +310,12 @@ def bayes_power_loss(
     baseline: float,
     alt_lift: float | None = None,
     alt_rate: float | None = None,
-    lift: Literal["relative", "absolute"] = "relative",
+    lift: str = "relative",
     n_samples: int = 100_000,
     mc_samples: int = 1_000,
     loss_threshold: float = 0.001,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> float:
     """Estimate the Bayesian power of a two-variant binomial experiment via expected loss.
 
@@ -258,11 +324,6 @@ def bayes_power_loss(
     ``loss_threshold``. A simulation is counted as a "win" when
     E[max(A − B, 0)] ≤ ``loss_threshold``, meaning the downside risk of picking B
     is acceptably small.
-
-    The loss is computed in rate units (percentage points). A ``loss_threshold`` of
-    ``0.001`` means "acceptable to lose at most 0.1 pp of conversion rate." Choose
-    this value relative to your baseline — for a 10% baseline, 0.001 represents 1%
-    of the baseline rate.
 
     The treatment rate can be specified in two mutually exclusive ways:
 
@@ -282,12 +343,11 @@ def bayes_power_loss(
         Expected conversion rate of the control variant.
     alt_lift : float, optional
         Expected lift of the treatment over the control. Interpreted according to
-        ``lift``: a relative multiplier (e.g. ``0.10`` → +10%) or an absolute
-        addition (e.g. ``0.02`` → +2 pp). Mutually exclusive with ``alt_rate``.
+        ``lift``. Mutually exclusive with ``alt_rate``.
     alt_rate : float, optional
         Treatment conversion rate specified directly, bypassing the lift
         calculation. Mutually exclusive with ``alt_lift``.
-    lift : {"relative", "absolute"}, optional
+    lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
         How ``alt_lift`` is applied to ``baseline`` to derive the treatment rate.
         Ignored when ``alt_rate`` is provided. Default is ``"relative"``.
     n_samples : int, optional
@@ -298,6 +358,10 @@ def bayes_power_loss(
     loss_threshold : float, optional
         Maximum acceptable expected loss in rate units. A simulation counts as a
         "win" when E[max(A − B, 0)] <= this value, by default 0.001.
+    spend : float, optional
+        Campaign spend. Required for "roas" and "cpa" lifts.
+    msrp : float, optional
+        Revenue per unit. Required for "revenue" lift.
 
     Returns
     -------
@@ -309,10 +373,13 @@ def bayes_power_loss(
     ValueError
         If neither ``alt_lift`` nor ``alt_rate`` is provided.
     NotImplementedError
-        If ``alt_lift`` is provided but ``lift`` is not ``"relative"`` or
-        ``"absolute"``.
+        If ``alt_lift`` is provided but ``lift`` is not supported.
     """
     group_sizes = _two_smallest_group_sizes(group_sizes)
+    if alt_rate is None and alt_lift is not None and lift in _SCALED_LIFTS:
+        scale = max(group_sizes)
+        alt_lift = _to_absolute(alt_lift, lift, scale, spend, msrp)
+        lift = "absolute"
     alt_rate = _resolve_alt_rate(baseline, alt_lift, alt_rate, lift)
     samples_null, samples_alt = _simulate_posterior_draws(
         group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples
@@ -328,7 +395,7 @@ def bayes_minimum_sample_size_loss(
     baseline: float,
     alt_lift: float | None = None,
     alt_rate: float | None = None,
-    lift: Literal["relative", "absolute"] = "relative",
+    lift: str = "relative",
     target_power: float = 0.80,
     loss_threshold: float = 0.001,
     n_samples: int = 10_000,
@@ -357,14 +424,15 @@ def bayes_minimum_sample_size_loss(
         Expected conversion rate of the control variant.
     alt_lift : float, optional
         Expected lift of the treatment over the control. Interpreted according to
-        ``lift``: a relative multiplier (e.g. ``0.10`` → +10%) or an absolute
-        addition (e.g. ``0.02`` → +2 pp). Mutually exclusive with ``alt_rate``.
+        ``lift``. Mutually exclusive with ``alt_rate``.
     alt_rate : float, optional
         Treatment conversion rate specified directly, bypassing the lift
         calculation. Mutually exclusive with ``alt_lift``.
     lift : {"relative", "absolute"}, optional
         How ``alt_lift`` is applied to ``baseline`` to derive the treatment rate.
         Ignored when ``alt_rate`` is provided. Default is ``"relative"``.
+        Scaled lift types (incremental, roas, revenue, cpa) are not
+        supported because the effect size depends on the unknown sample size.
     target_power : float, optional
         Minimum acceptable Bayesian power, by default 0.80.
     loss_threshold : float, optional
@@ -389,13 +457,20 @@ def bayes_minimum_sample_size_loss(
     Raises
     ------
     ValueError
-        If neither ``alt_lift`` nor ``alt_rate`` is provided.
+        If neither ``alt_lift`` nor ``alt_rate`` is provided, or if a scaled
+        lift type is used.
     ValueError
         If ``target_power`` cannot be reached within ``max_n`` samples per group.
     NotImplementedError
         If ``alt_lift`` is provided but ``lift`` is not ``"relative"`` or
         ``"absolute"``.
     """
+    if lift in _SCALED_LIFTS:
+        raise ValueError(
+            f"lift={lift!r} is not supported for bayes_minimum_sample_size_loss "
+            f"because the absolute effect size depends on the group sizes being "
+            f"solved for. Convert to 'relative' or 'absolute' lift first."
+        )
 
     def _power(n: int) -> float:
         return bayes_power_loss(
@@ -429,7 +504,7 @@ def bayes_minimum_sample_size(
     baseline: float,
     alt_lift: float | None = None,
     alt_rate: float | None = None,
-    lift: Literal["relative", "absolute"] = "relative",
+    lift: str = "relative",
     target_power: float = 0.80,
     confidence_level: float = 0.95,
     n_samples: int = 10_000,
@@ -455,14 +530,15 @@ def bayes_minimum_sample_size(
         Expected conversion rate of the control variant.
     alt_lift : float, optional
         Expected lift of the treatment over the control. Interpreted according to
-        ``lift``: a relative multiplier (e.g. ``0.10`` → +10%) or an absolute
-        addition (e.g. ``0.02`` → +2 pp). Mutually exclusive with ``alt_rate``.
+        ``lift``. Mutually exclusive with ``alt_rate``.
     alt_rate : float, optional
         Treatment conversion rate specified directly, bypassing the lift
         calculation. Mutually exclusive with ``alt_lift``.
     lift : {"relative", "absolute"}, optional
         How ``alt_lift`` is applied to ``baseline`` to derive the treatment rate.
         Ignored when ``alt_rate`` is provided. Default is ``"relative"``.
+        Scaled lift types (incremental, roas, revenue, cpa) are not
+        supported because the effect size depends on the unknown sample size.
     target_power : float, optional
         Minimum acceptable Bayesian power, by default 0.80.
     confidence_level : float, optional
@@ -487,13 +563,20 @@ def bayes_minimum_sample_size(
     Raises
     ------
     ValueError
-        If neither ``alt_lift`` nor ``alt_rate`` is provided.
+        If neither ``alt_lift`` nor ``alt_rate`` is provided, or if a scaled
+        lift type is used.
     ValueError
         If ``target_power`` cannot be reached within ``max_n`` samples per group.
     NotImplementedError
         If ``alt_lift`` is provided but ``lift`` is not ``"relative"`` or
         ``"absolute"``.
     """
+    if lift in _SCALED_LIFTS:
+        raise ValueError(
+            f"lift={lift!r} is not supported for bayes_minimum_sample_size "
+            f"because the absolute effect size depends on the group sizes being "
+            f"solved for. Convert to 'relative' or 'absolute' lift first."
+        )
 
     def _power(n: int) -> float:
         return bayes_power_lift(
@@ -526,13 +609,15 @@ def bayes_minimum_detectable_lift(
     alphas: np.ndarray[Any, Any] | list[Any],
     betas: np.ndarray[Any, Any] | list[Any],
     baseline: float,
-    lift: Literal["relative", "absolute"] = "relative",
+    lift: str = "relative",
     target_power: float = 0.80,
     confidence_level: float = 0.95,
     n_samples: int = 10_000,
     mc_samples: int = 500,
     max_lift: float = 10.0,
     tol: float = 0.0001,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> float:
     """Find the minimum lift detectable at a target Bayesian power via P(B > A).
 
@@ -556,11 +641,9 @@ def bayes_minimum_detectable_lift(
         Beta parameters of the Beta prior for each variant.
     baseline : float
         Expected conversion rate of the control variant.
-    lift : {"relative", "absolute"}, optional
+    lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
         How the searched lift is applied to ``baseline``. Default is
-        ``"relative"``, where the returned value is a multiplier
-        (e.g. ``0.20`` → +20%). For ``"absolute"`` the value is in percentage
-        points (e.g. ``0.02`` → +2 pp).
+        ``"relative"``.
     target_power : float, optional
         Minimum acceptable Bayesian power, by default 0.80.
     confidence_level : float, optional
@@ -577,19 +660,28 @@ def bayes_minimum_detectable_lift(
     tol : float, optional
         Convergence tolerance for the binary search. The returned lift is
         accurate to within this value, by default 0.0001.
+    spend : float, optional
+        Campaign spend. Required for "roas" and "cpa" lifts.
+    msrp : float, optional
+        Revenue per unit. Required for "revenue" lift.
 
     Returns
     -------
     float
-        Smallest lift estimated to reach ``target_power``.
+        Smallest lift estimated to reach ``target_power``, in the units
+        specified by ``lift``.
 
     Raises
     ------
     ValueError
         If ``target_power`` cannot be reached within ``max_lift``.
     NotImplementedError
-        If ``lift`` is not ``"relative"`` or ``"absolute"``.
+        If ``lift`` is not supported.
     """
+    if lift in _SCALED_LIFTS:
+        internal_lift = "absolute"
+    else:
+        internal_lift = lift
 
     def _power(alt_lift_val: float) -> float:
         return bayes_power_lift(
@@ -598,13 +690,13 @@ def bayes_minimum_detectable_lift(
             betas=betas,
             baseline=baseline,
             alt_lift=alt_lift_val,
-            lift=lift,
+            lift=internal_lift,
             n_samples=n_samples,
             mc_samples=mc_samples,
             confidence_level=confidence_level,
         )
 
-    return _search_min_lift(
+    abs_mdl = _search_min_lift(
         _power,
         target_power,
         max_lift,
@@ -615,6 +707,9 @@ def bayes_minimum_detectable_lift(
             "Consider a smaller target power or larger group size."
         ),
     )
+    if lift in _SCALED_LIFTS:
+        return _from_absolute(abs_mdl, lift, group_size, spend, msrp)
+    return abs_mdl
 
 
 def bayes_minimum_detectable_lift_loss(
@@ -622,13 +717,15 @@ def bayes_minimum_detectable_lift_loss(
     alphas: np.ndarray[Any, Any] | list[Any],
     betas: np.ndarray[Any, Any] | list[Any],
     baseline: float,
-    lift: Literal["relative", "absolute"] = "relative",
+    lift: str = "relative",
     target_power: float = 0.80,
     loss_threshold: float = 0.001,
     n_samples: int = 10_000,
     mc_samples: int = 500,
     max_lift: float = 10.0,
     tol: float = 0.0001,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> float:
     """Find the minimum lift detectable at a target Bayesian power via expected loss.
 
@@ -654,11 +751,9 @@ def bayes_minimum_detectable_lift_loss(
         Beta parameters of the Beta prior for each variant.
     baseline : float
         Expected conversion rate of the control variant.
-    lift : {"relative", "absolute"}, optional
+    lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
         How the searched lift is applied to ``baseline``. Default is
-        ``"relative"``, where the returned value is a multiplier
-        (e.g. ``0.20`` → +20%). For ``"absolute"`` the value is in percentage
-        points (e.g. ``0.02`` → +2 pp).
+        ``"relative"``.
     target_power : float, optional
         Minimum acceptable Bayesian power, by default 0.80.
     loss_threshold : float, optional
@@ -675,19 +770,28 @@ def bayes_minimum_detectable_lift_loss(
     tol : float, optional
         Convergence tolerance for the binary search. The returned lift is
         accurate to within this value, by default 0.0001.
+    spend : float, optional
+        Campaign spend. Required for "roas" and "cpa" lifts.
+    msrp : float, optional
+        Revenue per unit. Required for "revenue" lift.
 
     Returns
     -------
     float
-        Smallest lift estimated to reach ``target_power``.
+        Smallest lift estimated to reach ``target_power``, in the units
+        specified by ``lift``.
 
     Raises
     ------
     ValueError
         If ``target_power`` cannot be reached within ``max_lift``.
     NotImplementedError
-        If ``lift`` is not ``"relative"`` or ``"absolute"``.
+        If ``lift`` is not supported.
     """
+    if lift in _SCALED_LIFTS:
+        internal_lift = "absolute"
+    else:
+        internal_lift = lift
 
     def _power(alt_lift_val: float) -> float:
         return bayes_power_loss(
@@ -696,13 +800,13 @@ def bayes_minimum_detectable_lift_loss(
             betas=betas,
             baseline=baseline,
             alt_lift=alt_lift_val,
-            lift=lift,
+            lift=internal_lift,
             n_samples=n_samples,
             mc_samples=mc_samples,
             loss_threshold=loss_threshold,
         )
 
-    return _search_min_lift(
+    abs_mdl = _search_min_lift(
         _power,
         target_power,
         max_lift,
@@ -713,6 +817,9 @@ def bayes_minimum_detectable_lift_loss(
             "Consider a smaller target power or larger group size."
         ),
     )
+    if lift in _SCALED_LIFTS:
+        return _from_absolute(abs_mdl, lift, group_size, spend, msrp)
+    return abs_mdl
 
 
 def plot_bayes_power_curve(
@@ -721,7 +828,7 @@ def plot_bayes_power_curve(
     baseline: float,
     alt_lift: float | None = None,
     alt_rate: float | None = None,
-    lift: Literal["relative", "absolute"] = "relative",
+    lift: str = "relative",
     decision: Literal["lift", "loss"] = "lift",
     confidence_level: float = 0.95,
     loss_threshold: float = 0.001,
@@ -729,6 +836,8 @@ def plot_bayes_power_curve(
     mc_samples: int = 500,
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     n_points: int = 50,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> go.Figure:
     """Plot Bayesian power as a function of per-group sample size.
 
@@ -775,6 +884,12 @@ def plot_bayes_power_curve(
     power_fn = bayes_power_lift if decision == "lift" else bayes_power_loss
 
     if sample_sizes is None:
+        if lift in _SCALED_LIFTS:
+            raise ValueError(
+                f"lift={lift!r} requires explicit sample_sizes because the "
+                f"automatic range uses minimum sample size search, which does "
+                f"not support scaled lift types."
+            )
         search_fn = bayes_minimum_sample_size if decision == "lift" else bayes_minimum_sample_size_loss
         common: dict[str, Any] = {
             "alphas": alphas,
@@ -807,6 +922,8 @@ def plot_bayes_power_curve(
             "lift": lift,
             "n_samples": n_samples,
             "mc_samples": mc_samples,
+            "spend": spend,
+            "msrp": msrp,
         }
         if decision == "lift":
             kwargs["confidence_level"] = confidence_level
@@ -850,7 +967,7 @@ def plot_bayes_sensitivity_curve(
     alphas: np.ndarray[Any, Any] | list[Any],
     betas: np.ndarray[Any, Any] | list[Any],
     baseline: float,
-    lift: Literal["relative", "absolute"] = "relative",
+    lift: str = "relative",
     decision: Literal["lift", "loss"] = "lift",
     target_power: float = 0.80,
     confidence_level: float = 0.95,
@@ -859,6 +976,8 @@ def plot_bayes_sensitivity_curve(
     mc_samples: int = 500,
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     n_points: int = 50,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of per-group sample size.
 
@@ -903,6 +1022,12 @@ def plot_bayes_sensitivity_curve(
     mdl_fn = bayes_minimum_detectable_lift if decision == "lift" else bayes_minimum_detectable_lift_loss
 
     if sample_sizes is None:
+        if lift in _SCALED_LIFTS:
+            raise ValueError(
+                f"lift={lift!r} requires explicit sample_sizes because the "
+                f"automatic range uses minimum sample size search, which does "
+                f"not support scaled lift types."
+            )
         search_fn = bayes_minimum_sample_size if decision == "lift" else bayes_minimum_sample_size_loss
         common: dict[str, Any] = {
             "alphas": alphas,
@@ -934,6 +1059,8 @@ def plot_bayes_sensitivity_curve(
             "target_power": target_power,
             "n_samples": n_samples,
             "mc_samples": mc_samples,
+            "spend": spend,
+            "msrp": msrp,
         }
         if decision == "lift":
             kwargs["confidence_level"] = confidence_level
@@ -952,13 +1079,22 @@ def plot_bayes_sensitivity_curve(
         )
     )
 
-    y_label = f"Minimum detectable {lift} lift"
+    _lift_labels = {
+        "relative": "Minimum detectable relative lift",
+        "absolute": "Minimum detectable absolute lift",
+        "incremental": "Minimum detectable incremental lift",
+        "roas": "Minimum detectable ROAS",
+        "revenue": "Minimum detectable revenue",
+        "cpa": "Minimum detectable CPA",
+    }
+    y_label = _lift_labels.get(lift, f"Minimum detectable {lift} lift")
+    y_format = ",.0%" if lift in ("relative", "absolute") else ",."
     rule = f"P(B>A) ≥ {confidence_level}" if decision == "lift" else f"E[loss] ≤ {loss_threshold}"
     fig.update_layout(
         title=f"Bayesian Sensitivity Curve ({rule})",
         xaxis_title="Per-group sample size",
         yaxis_title=y_label,
-        yaxis_tickformat=",.0%",
+        yaxis_tickformat=y_format,
         template="plotly_white",
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
