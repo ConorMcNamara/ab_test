@@ -18,6 +18,62 @@ __all__ = [
     "plot_sensitivity_curve",
 ]
 
+_SCALED_LIFTS = {"incremental", "roas", "revenue", "cpa"}
+
+
+def _to_absolute(
+    lift_value: float,
+    lift: str,
+    scale: int,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> float:
+    """Convert a lift value from the given lift type to absolute."""
+    if lift in ("relative", "absolute"):
+        return lift_value
+    if lift == "incremental":
+        return lift_value / scale
+    if lift == "roas":
+        if spend is None:
+            raise ValueError("spend must be set for ROAS calculations")
+        return lift_value * spend / scale
+    if lift == "revenue":
+        if msrp is None:
+            raise ValueError("msrp must be set for revenue calculations")
+        return lift_value / (scale * msrp)
+    if lift == "cpa":
+        if spend is None:
+            raise ValueError("spend must be set for CPA calculations")
+        return spend / (lift_value * scale)
+    raise ValueError(f"Unsupported lift type: {lift}")
+
+
+def _from_absolute(
+    abs_value: float,
+    lift: str,
+    scale: int,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> float:
+    """Convert an absolute lift value to the given lift type."""
+    if lift in ("relative", "absolute"):
+        return abs_value
+    if lift == "incremental":
+        return abs_value * scale
+    if lift == "roas":
+        if spend is None:
+            raise ValueError("spend must be set for ROAS calculations")
+        return abs_value * scale / spend
+    if lift == "revenue":
+        if msrp is None:
+            raise ValueError("msrp must be set for revenue calculations")
+        return abs_value * scale * msrp
+    if lift == "cpa":
+        if spend is None:
+            raise ValueError("spend must be set for CPA calculations")
+        return spend / (abs_value * scale) if abs_value != 0 else np.inf
+    raise ValueError(f"Unsupported lift type: {lift}")
+
 
 def score_power(
     n: np.ndarray[Any, Any] | list[Any],
@@ -64,6 +120,8 @@ def abtest_power(
     null_lift: float = 0.0,
     power: Callable[..., float] = score_power,
     lift: str = "relative",
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> float:
     """Power associated with an A/B Test.
 
@@ -81,9 +139,12 @@ def abtest_power(
         Lift associated with null hypothesis. Defaults to 0.0.
      power : function, optional
         Function that computes power, such as `score_power` (default).
-     lift : ["relative", "absolute"], optional
-        Whether to interpret the null/alternative lift relative to the baseline
-        success rate, or in absolute terms. Defaults to "relative".
+     lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
+        How to interpret the null/alternative lift. Defaults to "relative".
+     spend : float, optional
+        Campaign spend. Required for "roas" and "cpa" lifts.
+     msrp : float, optional
+        Revenue per unit. Required for "revenue" lift.
 
     Returns
     -------
@@ -95,7 +156,15 @@ def abtest_power(
         a, b, *_ = np.partition(group_sizes, 1)
         group_sizes = [a, b]
 
-    p_null, p_alt = simple_hypothesis_from_composite(group_sizes, baseline, null_lift, alt_lift, lift=lift)
+    if lift in _SCALED_LIFTS:
+        scale = max(group_sizes)
+        internal_lift = "absolute"
+        alt_lift = _to_absolute(alt_lift, lift, scale, spend, msrp)
+        null_lift = _to_absolute(null_lift, lift, scale, spend, msrp) if null_lift != 0.0 else 0.0
+    else:
+        internal_lift = lift
+
+    p_null, p_alt = simple_hypothesis_from_composite(group_sizes, baseline, null_lift, alt_lift, lift=internal_lift)
     return power(group_sizes, p_null, p_alt, alpha=alpha)
 
 
@@ -108,6 +177,8 @@ def minimum_detectable_lift(
     power: Callable[..., float] = score_power,
     drop: bool = False,
     lift: str = "relative",
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> float:
     """Minimum detectable lift.
 
@@ -129,33 +200,43 @@ def minimum_detectable_lift(
      drop : boolean, optional
         If True, the minimum detectable drop will be returned.
         Defaults to False, returning the minimum detectable lift.
-     lift : ["relative", "absolute"], optional
-        Whether to interpret the null/alternative lift relative to the baseline
-        success rate, or in absolute terms. Defaults to "relative".
+     lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
+        How to interpret the null/alternative lift. Defaults to "relative".
+     spend : float, optional
+        Campaign spend. Required for "roas" and "cpa" lifts.
+     msrp : float, optional
+        Revenue per unit. Required for "revenue" lift.
 
     Returns
     -------
      mdl : float
-        Minimum detectable lift/drop associated with test. If `lift` is
-        "relative", this will be in relative terms, otherwise it will be in
-        absolute terms.
+        Minimum detectable lift/drop associated with test, in the units
+        specified by ``lift``.
 
     Notes
     -----
     Uses binary search to compute the smallest lift/drop with adequate
     power.
     """
+    if lift in _SCALED_LIFTS:
+        scale = max(group_sizes)
+        internal_lift = "absolute"
+        internal_null = _to_absolute(null_lift, lift, scale, spend, msrp) if null_lift != 0.0 else 0.0
+    else:
+        internal_lift = lift
+        internal_null = null_lift
+
     tol = 1e-6
 
     # Find an extremum bound on the MDL
     mdl_inner = 0.0
     if drop:
-        if lift == "relative":
+        if internal_lift == "relative":
             mdl_extremum = -0.2
         else:
             mdl_extremum = -0.99 * baseline
     else:
-        if lift == "relative":
+        if internal_lift == "relative":
             mdl_extremum = 0.2
         else:
             mdl_extremum = 0.99 * (1 - baseline)
@@ -165,14 +246,14 @@ def minimum_detectable_lift(
         baseline,
         mdl_extremum,
         alpha=alpha,
-        null_lift=null_lift,
+        null_lift=internal_null,
         power=power,
-        lift=lift,
+        lift=internal_lift,
     )
 
     while pwr < 1 - beta:
         mdl_inner = mdl_extremum
-        if lift == "relative":
+        if internal_lift == "relative":
             mdl_extremum *= 2
         elif drop:
             mdl_extremum = 0.5 * (-baseline + mdl_extremum)
@@ -184,9 +265,9 @@ def minimum_detectable_lift(
             baseline,
             mdl_extremum,
             alpha=alpha,
-            null_lift=null_lift,
+            null_lift=internal_null,
             power=power,
-            lift=lift,
+            lift=internal_lift,
         )
 
     while abs(mdl_extremum - mdl_inner) > tol:
@@ -196,9 +277,9 @@ def minimum_detectable_lift(
             baseline,
             mdl,
             alpha=alpha,
-            null_lift=null_lift,
+            null_lift=internal_null,
             power=power,
-            lift=lift,
+            lift=internal_lift,
         )
         if pwr < 1 - beta:
             # Inadequate power, increase mdl
@@ -210,6 +291,8 @@ def minimum_detectable_lift(
     if drop:
         mdl_extremum *= -1.0
 
+    if lift in _SCALED_LIFTS:
+        return _from_absolute(mdl_extremum, lift, scale, spend, msrp)
     return mdl_extremum
 
 
@@ -230,8 +313,8 @@ def required_sample_size(
      baseline : float
         Baseline success rate associated with first experiment group.
      alt_lift : float
-        Relative lift (second group relative to first) associated with
-        alternative hypothesis.
+        Lift associated with the alternative hypothesis, in the units
+        specified by ``lift``.
      alpha : float
         Type-I error rate threshold. Defaults to 0.05.
      beta : float
@@ -241,13 +324,13 @@ def required_sample_size(
         Fraction of experimental units in each group. If None
         (default), will use an even split.
      null_lift : float
-        Relative lift (second group relative to first) associated with
-        null hypothesis. Defaults to 0.0.
+        Lift associated with the null hypothesis. Defaults to 0.0.
      power : function
         Function that computes power, such as `score_power` (default).
-     lift : ["relative", "absolute"], optional
-        Whether to interpret the null/alternative lift relative to the baseline
-        success rate, or in absolute terms. Defaults to "relative".
+     lift : {"relative", "absolute"}, optional
+        How to interpret the null/alternative lift. Defaults to "relative".
+        Scaled lift types (incremental, roas, revenue, cpa) are not
+        supported because the effect size depends on the unknown sample size.
 
     Returns
     -------
@@ -258,8 +341,17 @@ def required_sample_size(
     Notes
     -----
     Uses binary search to compute the smallest sample size with
-    adequate power.
+    adequate power. Only "relative" and "absolute" lifts are supported;
+    scaled lifts (incremental, roas, revenue, cpa) depend on the group
+    sizes which are the unknown being solved for.
     """
+    if lift in _SCALED_LIFTS:
+        raise ValueError(
+            f"lift={lift!r} is not supported for required_sample_size because "
+            f"the absolute effect size depends on the group sizes being solved "
+            f"for. Convert to 'relative' or 'absolute' lift first."
+        )
+
     tol = 0.01
 
     if group_proportions is None:
@@ -326,6 +418,8 @@ def plot_power_curve(
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> go.Figure:
     """Plot statistical power as a function of total sample size.
 
@@ -341,9 +435,8 @@ def plot_power_curve(
         Lift associated with the null hypothesis. Defaults to 0.0.
     power : function, optional
         Function that computes power, such as ``score_power`` (default).
-    lift : {"relative", "absolute"}, optional
-        Whether to interpret the null/alternative lift relative to the baseline
-        success rate, or in absolute terms. Defaults to ``"relative"``.
+    lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
+        How to interpret the null/alternative lift. Defaults to ``"relative"``.
     sample_sizes : array_like or None, optional
         Explicit total sample sizes to evaluate. When ``None`` (default), an
         evenly spaced sequence of ``n_points`` values is generated automatically.
@@ -352,6 +445,10 @@ def plot_power_curve(
     n_points : int, optional
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 100.
+    spend : float, optional
+        Campaign spend. Required for "roas" and "cpa" lifts.
+    msrp : float, optional
+        Revenue per unit. Required for "revenue" lift.
 
     Returns
     -------
@@ -386,6 +483,8 @@ def plot_power_curve(
             null_lift=null_lift,
             power=power,
             lift=lift,
+            spend=spend,
+            msrp=msrp,
         )
         for ss in sample_sizes
     ]
@@ -431,6 +530,8 @@ def plot_sensitivity_curve(
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of total sample size.
 
@@ -446,9 +547,8 @@ def plot_sensitivity_curve(
         Lift associated with the null hypothesis. Defaults to 0.0.
     power : function, optional
         Function that computes power, such as ``score_power`` (default).
-    lift : {"relative", "absolute"}, optional
-        Whether to interpret the null/alternative lift relative to the baseline
-        success rate, or in absolute terms. Defaults to ``"relative"``.
+    lift : {"relative", "absolute", "incremental", "roas", "revenue", "cpa"}, optional
+        How to interpret the null/alternative lift. Defaults to ``"relative"``.
     sample_sizes : array_like or None, optional
         Explicit total sample sizes to evaluate. When ``None`` (default), an
         evenly spaced sequence of ``n_points`` values is generated automatically.
@@ -457,6 +557,10 @@ def plot_sensitivity_curve(
     n_points : int, optional
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 100.
+    spend : float, optional
+        Campaign spend. Required for "roas" and "cpa" lifts.
+    msrp : float, optional
+        Revenue per unit. Required for "revenue" lift.
 
     Returns
     -------
@@ -468,6 +572,12 @@ def plot_sensitivity_curve(
         group_proportions = [0.5, 0.5]
 
     if sample_sizes is None:
+        if lift in _SCALED_LIFTS:
+            raise ValueError(
+                f"lift={lift!r} requires explicit sample_sizes because the "
+                f"automatic range uses required_sample_size, which does not "
+                f"support scaled lift types."
+            )
         target_ss = required_sample_size(
             baseline,
             alt_lift=0.05,
@@ -491,6 +601,8 @@ def plot_sensitivity_curve(
             null_lift=null_lift,
             power=power,
             lift=lift,
+            spend=spend,
+            msrp=msrp,
         )
         for ss in sample_sizes
     ]
@@ -506,12 +618,21 @@ def plot_sensitivity_curve(
         )
     )
 
-    y_label = f"Minimum detectable {lift} lift"
+    _lift_labels = {
+        "relative": "Minimum detectable relative lift",
+        "absolute": "Minimum detectable absolute lift",
+        "incremental": "Minimum detectable incremental lift",
+        "roas": "Minimum detectable ROAS",
+        "revenue": "Minimum detectable revenue",
+        "cpa": "Minimum detectable CPA",
+    }
+    y_label = _lift_labels.get(lift, f"Minimum detectable {lift} lift")
+    y_format = ",.0%" if lift in ("relative", "absolute") else ",."
     fig.update_layout(
         title="Sensitivity Curve",
         xaxis_title="Total sample size",
         yaxis_title=y_label,
-        yaxis_tickformat=",.0%",
+        yaxis_tickformat=y_format,
         template="plotly_white",
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
