@@ -7,6 +7,7 @@ import numpy as np
 import plotly.graph_objects as go
 import scipy.stats as ss
 
+from ab_test._lift import _SCALED_LIFTS, from_absolute, to_absolute
 from ab_test.frequentist_binomial.utils import simple_hypothesis_from_composite
 
 __all__ = [
@@ -17,62 +18,6 @@ __all__ = [
     "plot_power_curve",
     "plot_sensitivity_curve",
 ]
-
-_SCALED_LIFTS = {"incremental", "roas", "revenue", "cpa"}
-
-
-def _to_absolute(
-    lift_value: float,
-    lift: str,
-    scale: int,
-    spend: float | None = None,
-    msrp: float | None = None,
-) -> float:
-    """Convert a lift value from the given lift type to absolute."""
-    if lift in ("relative", "absolute"):
-        return lift_value
-    if lift == "incremental":
-        return lift_value / scale
-    if lift == "roas":
-        if spend is None:
-            raise ValueError("spend must be set for ROAS calculations")
-        return lift_value * spend / scale
-    if lift == "revenue":
-        if msrp is None:
-            raise ValueError("msrp must be set for revenue calculations")
-        return lift_value / (scale * msrp)
-    if lift == "cpa":
-        if spend is None:
-            raise ValueError("spend must be set for CPA calculations")
-        return spend / (lift_value * scale)
-    raise ValueError(f"Unsupported lift type: {lift}")
-
-
-def _from_absolute(
-    abs_value: float,
-    lift: str,
-    scale: int,
-    spend: float | None = None,
-    msrp: float | None = None,
-) -> float:
-    """Convert an absolute lift value to the given lift type."""
-    if lift in ("relative", "absolute"):
-        return abs_value
-    if lift == "incremental":
-        return abs_value * scale
-    if lift == "roas":
-        if spend is None:
-            raise ValueError("spend must be set for ROAS calculations")
-        return abs_value * scale / spend
-    if lift == "revenue":
-        if msrp is None:
-            raise ValueError("msrp must be set for revenue calculations")
-        return abs_value * scale * msrp
-    if lift == "cpa":
-        if spend is None:
-            raise ValueError("spend must be set for CPA calculations")
-        return spend / (abs_value * scale) if abs_value != 0 else np.inf
-    raise ValueError(f"Unsupported lift type: {lift}")
 
 
 def score_power(
@@ -159,8 +104,8 @@ def abtest_power(
     if lift in _SCALED_LIFTS:
         scale = max(group_sizes)
         internal_lift = "absolute"
-        alt_lift = _to_absolute(alt_lift, lift, scale, spend, msrp)
-        null_lift = _to_absolute(null_lift, lift, scale, spend, msrp) if null_lift != 0.0 else 0.0
+        alt_lift = to_absolute(alt_lift, lift, scale, spend, msrp)
+        null_lift = to_absolute(null_lift, lift, scale, spend, msrp) if null_lift != 0.0 else 0.0
     else:
         internal_lift = lift
 
@@ -221,7 +166,7 @@ def minimum_detectable_lift(
     if lift in _SCALED_LIFTS:
         scale = max(group_sizes)
         internal_lift = "absolute"
-        internal_null = _to_absolute(null_lift, lift, scale, spend, msrp) if null_lift != 0.0 else 0.0
+        internal_null = to_absolute(null_lift, lift, scale, spend, msrp) if null_lift != 0.0 else 0.0
     else:
         internal_lift = lift
         internal_null = null_lift
@@ -292,7 +237,7 @@ def minimum_detectable_lift(
         mdl_extremum *= -1.0
 
     if lift in _SCALED_LIFTS:
-        return _from_absolute(mdl_extremum, lift, scale, spend, msrp)
+        return from_absolute(mdl_extremum, lift, scale, spend, msrp)
     return mdl_extremum
 
 

@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 
+from ab_test._lift import compute_sample_lift
 from ab_test.bayesian_binomial.utils import sample_beta
 
 __all__ = [
@@ -86,33 +87,8 @@ def calculate_rope(
     """
     a = np.asarray(sample_a)
     b = np.asarray(sample_b)
-    if lift == "relative":
-        lift_arr = (b - a) / a
-    elif lift == "absolute":
-        lift_arr = b - a
-    elif lift in ("incremental", "revenue", "roas", "cpa"):
-        if trials is None:
-            raise ValueError(f"trials must be provided for lift='{lift}'")
-        max_n = max(trials)
-        if lift == "incremental":
-            lift_arr = (b - a) * max_n
-        elif lift == "revenue":
-            if msrp is None:
-                raise ValueError("msrp must be provided for lift='revenue'")
-            lift_arr = (b - a) * max_n * msrp
-        elif lift == "roas":
-            if spend is None:
-                raise ValueError("spend must be provided for lift='roas'")
-            lift_arr = (b - a) * max_n / spend
-        else:  # cpa
-            if spend is None:
-                raise ValueError("spend must be provided for lift='cpa'")
-            incremental = (b - a) * max_n
-            lift_arr = np.where(np.abs(incremental) > 1e-12, spend / incremental, np.inf)
-    else:
-        raise NotImplementedError(f"lift {lift} not implemented")
+    lift_arr = compute_sample_lift(a, b, lift=lift, trials=trials, spend=spend, msrp=msrp)
 
-    # Calculate what % of samples fall within the ROPE
     prob_in_rope = float(np.mean((lift_arr >= low) & (lift_arr <= high)))
 
     # Also useful: Prob B is practically better (above ROPE)

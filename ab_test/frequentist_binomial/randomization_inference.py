@@ -20,6 +20,7 @@ import math
 from typing import Any
 
 import numpy as np
+from joblib import Parallel, delayed
 
 from ab_test.frequentist_binomial.utils import validate_two_group
 
@@ -101,6 +102,24 @@ def randomization_test(
     return bool(p_value <= crit)
 
 
+def _cluster_perm_chunk(
+    all_props: np.ndarray[Any, Any],
+    k_ctrl: int,
+    abs_obs: float,
+    chunk_size: int,
+    seed: int,
+) -> int:
+    """Run a chunk of Monte Carlo cluster permutations and return the extreme count."""
+    k_total = len(all_props)
+    rng = np.random.default_rng(seed)
+    random_keys = rng.random((chunk_size, k_total))
+    indices = np.argsort(random_keys, axis=1)
+    ctrl_means = all_props[indices[:, :k_ctrl]].mean(axis=1)
+    treat_means = all_props[indices[:, k_ctrl:]].mean(axis=1)
+    perm_diffs = treat_means - ctrl_means
+    return int(np.sum(np.abs(perm_diffs) >= abs_obs - 1e-12))
+
+
 def cluster_randomization_test(
     successes_ctrl: np.ndarray[Any, Any] | list[int],
     trials_ctrl: np.ndarray[Any, Any] | list[int],
@@ -110,6 +129,7 @@ def cluster_randomization_test(
     n_permutations: int = 10_000,
     seed: int | None = None,
     exact: bool = False,
+    n_jobs: int = 1,
 ) -> float:
     """Randomization inference test for cluster-randomized trials.
 
@@ -131,6 +151,10 @@ def cluster_randomization_test(
         If True, enumerate all possible cluster assignments.  Raises
         ``ValueError`` when the number of combinations exceeds
         1,000,000.
+    n_jobs : int
+        Number of parallel jobs for Monte Carlo permutations.  ``1``
+        (default) runs sequentially; ``-1`` uses all available cores.
+        Ignored when ``exact=True``.
 
     Returns
     -------
@@ -171,15 +195,19 @@ def cluster_randomization_test(
             total += 1
         return count / total
 
-    rng = np.random.default_rng(seed)
-    random_keys = rng.random((n_permutations, k_total))
-    indices = np.argsort(random_keys, axis=1)
-    ctrl_indices = indices[:, :k_ctrl]
-    treat_indices = indices[:, k_ctrl:]
-
-    ctrl_means = all_props[ctrl_indices].mean(axis=1)
-    treat_means = all_props[treat_indices].mean(axis=1)
-    perm_diffs = treat_means - ctrl_means
-
     abs_obs = abs(observed)
-    return float((np.sum(np.abs(perm_diffs) >= abs_obs - 1e-12) + 1) / (n_permutations + 1))
+    rng = np.random.default_rng(seed)
+
+    if n_jobs == 1:
+        child_seed = int(rng.integers(2**31))
+        extreme_count = _cluster_perm_chunk(all_props, k_ctrl, abs_obs, n_permutations, child_seed)
+    else:
+        chunk_sizes = np.diff(np.linspace(0, n_permutations, abs(n_jobs) + 1, dtype=int))
+        child_seeds = rng.integers(2**31, size=len(chunk_sizes)).tolist()
+        counts: list[int] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+            delayed(_cluster_perm_chunk)(all_props, k_ctrl, abs_obs, int(cs), s)
+            for cs, s in zip(chunk_sizes, child_seeds)
+        )
+        extreme_count = sum(counts)
+
+    return float((extreme_count + 1) / (n_permutations + 1))

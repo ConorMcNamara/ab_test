@@ -442,6 +442,7 @@ class ClusterRandomizedTrial:
         n_permutations: int = 10_000,
         seed: int | None = None,
         exact: bool = False,
+        n_jobs: int = 1,
     ) -> str:
         """Analyze the cluster-randomized trial.
 
@@ -462,6 +463,10 @@ class ClusterRandomizedTrial:
         exact : bool
             Enumerate all possible cluster assignments instead of Monte
             Carlo.  Only used when ``method="randomization"``.
+        n_jobs : int
+            Number of parallel jobs for Monte Carlo permutations.
+            ``1`` (default) runs sequentially; ``-1`` uses all cores.
+            Only used when ``method="randomization"`` and ``exact=False``.
 
         Returns
         -------
@@ -498,6 +503,7 @@ class ClusterRandomizedTrial:
                 n_permutations=n_permutations,
                 seed=seed,
                 exact=exact,
+                n_jobs=n_jobs,
             )
             ci_lower_abs = -math.inf
             ci_upper_abs = math.inf
