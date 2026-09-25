@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 import numpy as np
 import plotly.graph_objects as go
+from joblib import Parallel, delayed
 
 __all__ = [
     "bayes_power_lift",
@@ -124,6 +125,28 @@ def _two_smallest_group_sizes(group_sizes: np.ndarray[Any, Any] | list[Any]) -> 
     return group_sizes
 
 
+def _simulate_chunk(
+    group_sizes: np.ndarray[Any, Any] | list[Any],
+    alphas: np.ndarray[Any, Any] | list[Any],
+    betas: np.ndarray[Any, Any] | list[Any],
+    baseline: float,
+    alt_rate: float,
+    n_samples: int,
+    mc_samples: int,
+    seed: int,
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    """Simulate one chunk of posterior draws with an explicit seed."""
+    rng = np.random.default_rng(seed)
+    successes_null = rng.binomial(group_sizes[0], baseline, size=n_samples)
+    successes_alt = rng.binomial(group_sizes[1], alt_rate, size=n_samples)
+    null_alpha, null_beta = alphas[0] + successes_null, betas[0] + group_sizes[0] - successes_null
+    alt_alpha, alt_beta = alphas[1] + successes_alt, betas[1] + group_sizes[1] - successes_alt
+
+    samples_null = rng.beta(null_alpha[:, np.newaxis], null_beta[:, np.newaxis], size=(n_samples, mc_samples))
+    samples_alt = rng.beta(alt_alpha[:, np.newaxis], alt_beta[:, np.newaxis], size=(n_samples, mc_samples))
+    return samples_null, samples_alt
+
+
 def _simulate_posterior_draws(
     group_sizes: np.ndarray[Any, Any] | list[Any],
     alphas: np.ndarray[Any, Any] | list[Any],
@@ -132,25 +155,42 @@ def _simulate_posterior_draws(
     alt_rate: float,
     n_samples: int,
     mc_samples: int,
+    seed: int | None = None,
+    n_jobs: int = 1,
 ) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
     """Simulate posterior draws for the control and treatment across ``n_samples`` experiments.
 
     Draws ``n_samples`` simulated experiments (one binomial outcome per arm) then,
     for each, ``mc_samples`` posterior draws from the resulting Beta posterior.
 
+    Parameters
+    ----------
+    seed : int or None
+        Random seed for reproducibility.
+    n_jobs : int
+        Number of parallel jobs. ``1`` (default) runs sequentially; ``-1``
+        uses all available cores.
+
     Returns
     -------
     tuple of np.ndarray
         ``(samples_null, samples_alt)``, each of shape ``(n_samples, mc_samples)``.
     """
-    successes_null = np.random.binomial(group_sizes[0], baseline, size=n_samples)
-    successes_alt = np.random.binomial(group_sizes[1], alt_rate, size=n_samples)
-    null_alpha, null_beta = alphas[0] + successes_null, betas[0] + group_sizes[0] - successes_null
-    alt_alpha, alt_beta = alphas[1] + successes_alt, betas[1] + group_sizes[1] - successes_alt
+    rng = np.random.default_rng(seed)
+    if n_jobs == 1:
+        child_seed = int(rng.integers(2**31))
+        return _simulate_chunk(group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples, child_seed)
 
-    samples_null = np.random.beta(null_alpha[:, np.newaxis], null_beta[:, np.newaxis], size=(n_samples, mc_samples))
-    samples_alt = np.random.beta(alt_alpha[:, np.newaxis], alt_beta[:, np.newaxis], size=(n_samples, mc_samples))
-    return samples_null, samples_alt
+    chunk_sizes = np.diff(np.linspace(0, n_samples, abs(n_jobs) + 1, dtype=int))
+    child_seeds = rng.integers(2**31, size=len(chunk_sizes)).tolist()
+    results: list[tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+        delayed(_simulate_chunk)(group_sizes, alphas, betas, baseline, alt_rate, int(cs), mc_samples, s)
+        for cs, s in zip(chunk_sizes, child_seeds)
+    )
+    return (
+        np.concatenate([r[0] for r in results]),
+        np.concatenate([r[1] for r in results]),
+    )
 
 
 def _search_min_sample_size(
@@ -233,6 +273,9 @@ def bayes_power_lift(
     confidence_level: float = 0.95,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    seed: int | None = None,
+    n_jobs: int = 1,
 ) -> float:
     """Estimate the Bayesian power of a two-variant binomial experiment via simulation.
 
@@ -276,6 +319,11 @@ def bayes_power_lift(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+    seed : int or None, optional
+        Random seed for reproducibility.
+    n_jobs : int, optional
+        Number of parallel jobs for the simulation. ``1`` (default) runs
+        sequentially; ``-1`` uses all available cores.
 
     Returns
     -------
@@ -296,7 +344,7 @@ def bayes_power_lift(
         lift = "absolute"
     alt_rate = _resolve_alt_rate(baseline, alt_lift, alt_rate, lift)
     samples_null, samples_alt = _simulate_posterior_draws(
-        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples
+        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples, seed=seed, n_jobs=n_jobs
     )
 
     prob_b_better = np.mean(samples_alt > samples_null, axis=1)
@@ -316,6 +364,9 @@ def bayes_power_loss(
     loss_threshold: float = 0.001,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    seed: int | None = None,
+    n_jobs: int = 1,
 ) -> float:
     """Estimate the Bayesian power of a two-variant binomial experiment via expected loss.
 
@@ -362,6 +413,11 @@ def bayes_power_loss(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+    seed : int or None, optional
+        Random seed for reproducibility.
+    n_jobs : int, optional
+        Number of parallel jobs for the simulation. ``1`` (default) runs
+        sequentially; ``-1`` uses all available cores.
 
     Returns
     -------
@@ -382,7 +438,7 @@ def bayes_power_loss(
         lift = "absolute"
     alt_rate = _resolve_alt_rate(baseline, alt_lift, alt_rate, lift)
     samples_null, samples_alt = _simulate_posterior_draws(
-        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples
+        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples, seed=seed, n_jobs=n_jobs
     )
 
     expected_loss = np.mean(np.maximum(samples_null - samples_alt, 0), axis=1)
@@ -401,6 +457,8 @@ def bayes_minimum_sample_size_loss(
     n_samples: int = 10_000,
     mc_samples: int = 500,
     max_n: int = 1_000_000,
+    *,
+    n_jobs: int = 1,
 ) -> int:
     """Find the minimum per-group sample size that achieves a target Bayesian power via expected loss.
 
@@ -484,6 +542,7 @@ def bayes_minimum_sample_size_loss(
             n_samples=n_samples,
             mc_samples=mc_samples,
             loss_threshold=loss_threshold,
+            n_jobs=n_jobs,
         )
 
     return _search_min_sample_size(
@@ -510,6 +569,8 @@ def bayes_minimum_sample_size(
     n_samples: int = 10_000,
     mc_samples: int = 500,
     max_n: int = 1_000_000,
+    *,
+    n_jobs: int = 1,
 ) -> int:
     """Find the minimum per-group sample size that achieves a target Bayesian power.
 
@@ -590,6 +651,7 @@ def bayes_minimum_sample_size(
             n_samples=n_samples,
             mc_samples=mc_samples,
             confidence_level=confidence_level,
+            n_jobs=n_jobs,
         )
 
     return _search_min_sample_size(
@@ -618,6 +680,8 @@ def bayes_minimum_detectable_lift(
     tol: float = 0.0001,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    n_jobs: int = 1,
 ) -> float:
     """Find the minimum lift detectable at a target Bayesian power via P(B > A).
 
@@ -694,6 +758,7 @@ def bayes_minimum_detectable_lift(
             n_samples=n_samples,
             mc_samples=mc_samples,
             confidence_level=confidence_level,
+            n_jobs=n_jobs,
         )
 
     abs_mdl = _search_min_lift(
@@ -726,6 +791,8 @@ def bayes_minimum_detectable_lift_loss(
     tol: float = 0.0001,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    n_jobs: int = 1,
 ) -> float:
     """Find the minimum lift detectable at a target Bayesian power via expected loss.
 
@@ -804,6 +871,7 @@ def bayes_minimum_detectable_lift_loss(
             n_samples=n_samples,
             mc_samples=mc_samples,
             loss_threshold=loss_threshold,
+            n_jobs=n_jobs,
         )
 
     abs_mdl = _search_min_lift(
@@ -838,6 +906,8 @@ def plot_bayes_power_curve(
     n_points: int = 50,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    n_jobs: int = 1,
 ) -> go.Figure:
     """Plot Bayesian power as a function of per-group sample size.
 
@@ -906,7 +976,7 @@ def plot_bayes_power_curve(
             common["confidence_level"] = confidence_level
         else:
             common["loss_threshold"] = loss_threshold
-        target_n = search_fn(**common)
+        target_n = search_fn(**common, n_jobs=n_jobs)
         max_n = int(target_n * 2)
         sample_sizes = np.linspace(max(20, max_n // n_points), max_n, n_points, dtype=int)
 
@@ -924,6 +994,7 @@ def plot_bayes_power_curve(
             "mc_samples": mc_samples,
             "spend": spend,
             "msrp": msrp,
+            "n_jobs": n_jobs,
         }
         if decision == "lift":
             kwargs["confidence_level"] = confidence_level
@@ -978,6 +1049,8 @@ def plot_bayes_sensitivity_curve(
     n_points: int = 50,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    n_jobs: int = 1,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of per-group sample size.
 
@@ -1043,7 +1116,7 @@ def plot_bayes_sensitivity_curve(
             common["confidence_level"] = confidence_level
         else:
             common["loss_threshold"] = loss_threshold
-        target_n = search_fn(**common)
+        target_n = search_fn(**common, n_jobs=n_jobs)
         min_n = max(100, target_n // 10)
         max_n = target_n * 5
         sample_sizes = np.linspace(min_n, max_n, n_points, dtype=int)
@@ -1061,6 +1134,7 @@ def plot_bayes_sensitivity_curve(
             "mc_samples": mc_samples,
             "spend": spend,
             "msrp": msrp,
+            "n_jobs": n_jobs,
         }
         if decision == "lift":
             kwargs["confidence_level"] = confidence_level
