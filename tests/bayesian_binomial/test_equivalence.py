@@ -16,25 +16,19 @@ class TestBayesEquivalenceBasic:
 
     @staticmethod
     def test_equivalent_when_rates_close() -> None:
-        result = bayes_equivalence_test(
-            [100, 102], [1000, 1000], [1, 1], [1, 1], delta=0.05, n_samples=50_000, seed=42
-        )
+        result = bayes_equivalence_test([100, 102], [1000, 1000], [1, 1], [1, 1], delta=0.05, n_samples=50_000, seed=42)
         assert result["equivalent"] is True
         assert result["prob_equivalent"] > 0.95
 
     @staticmethod
     def test_not_equivalent_when_rates_differ() -> None:
-        result = bayes_equivalence_test(
-            [100, 200], [1000, 1000], [1, 1], [1, 1], delta=0.02, n_samples=50_000, seed=42
-        )
+        result = bayes_equivalence_test([100, 200], [1000, 1000], [1, 1], [1, 1], delta=0.02, n_samples=50_000, seed=42)
         assert result["equivalent"] is False
         assert result["prob_equivalent"] < 0.05
 
     @staticmethod
     def test_identical_rates() -> None:
-        result = bayes_equivalence_test(
-            [100, 100], [1000, 1000], [1, 1], [1, 1], delta=0.05, n_samples=50_000, seed=42
-        )
+        result = bayes_equivalence_test([100, 100], [1000, 1000], [1, 1], [1, 1], delta=0.05, n_samples=50_000, seed=42)
         assert result["equivalent"] is True
         assert result["prob_equivalent"] > 0.99
 
@@ -42,25 +36,19 @@ class TestBayesEquivalenceBasic:
 class TestBayesEquivalenceProbabilities:
     @staticmethod
     def test_probabilities_sum_to_one() -> None:
-        result = bayes_equivalence_test(
-            [100, 120], [1000, 1000], [1, 1], [1, 1], delta=0.05, n_samples=50_000, seed=42
-        )
+        result = bayes_equivalence_test([100, 120], [1000, 1000], [1, 1], [1, 1], delta=0.05, n_samples=50_000, seed=42)
         total = result["prob_equivalent"] + result["prob_superior"] + result["prob_inferior"]
         assert total == pytest.approx(1.0, abs=1e-6)
 
     @staticmethod
     def test_superior_when_b_much_better() -> None:
-        result = bayes_equivalence_test(
-            [100, 200], [1000, 1000], [1, 1], [1, 1], delta=0.02, n_samples=50_000, seed=42
-        )
+        result = bayes_equivalence_test([100, 200], [1000, 1000], [1, 1], [1, 1], delta=0.02, n_samples=50_000, seed=42)
         assert result["prob_superior"] > 0.95
         assert result["prob_inferior"] < 0.01
 
     @staticmethod
     def test_inferior_when_b_much_worse() -> None:
-        result = bayes_equivalence_test(
-            [200, 100], [1000, 1000], [1, 1], [1, 1], delta=0.02, n_samples=50_000, seed=42
-        )
+        result = bayes_equivalence_test([200, 100], [1000, 1000], [1, 1], [1, 1], delta=0.02, n_samples=50_000, seed=42)
         assert result["prob_inferior"] > 0.95
         assert result["prob_superior"] < 0.01
 
@@ -104,9 +92,7 @@ class TestBayesEquivalenceLiftTypes:
 
     @staticmethod
     def test_incremental_requires_trials() -> None:
-        result = bayes_equivalence_test(
-            [100, 102], [1000, 1000], [1, 1], [1, 1], delta=50, lift="incremental", seed=42
-        )
+        result = bayes_equivalence_test([100, 102], [1000, 1000], [1, 1], [1, 1], delta=50, lift="incremental", seed=42)
         assert isinstance(result["prob_equivalent"], float)
 
 
@@ -124,13 +110,9 @@ class TestBayesEquivalenceValidation:
     @staticmethod
     def test_roas_requires_spend() -> None:
         with pytest.raises(ValueError, match="spend"):
-            bayes_equivalence_test(
-                [100, 102], [1000, 1000], [1, 1], [1, 1], delta=0.05, lift="roas", seed=42
-            )
+            bayes_equivalence_test([100, 102], [1000, 1000], [1, 1], [1, 1], delta=0.05, lift="roas", seed=42)
 
     @staticmethod
     def test_revenue_requires_msrp() -> None:
         with pytest.raises(ValueError, match="msrp"):
-            bayes_equivalence_test(
-                [100, 102], [1000, 1000], [1, 1], [1, 1], delta=0.05, lift="revenue", seed=42
-            )
+            bayes_equivalence_test([100, 102], [1000, 1000], [1, 1], [1, 1], delta=0.05, lift="revenue", seed=42)

@@ -86,8 +86,7 @@ def tost_test(
     method_lower = method.casefold()
     if method_lower not in _SUPPORTED_METHODS:
         raise ValueError(
-            f"Method '{method}' does not support non-zero null_lift. "
-            f"Supported methods: {sorted(_SUPPORTED_METHODS)}"
+            f"Method '{method}' does not support non-zero null_lift. Supported methods: {sorted(_SUPPORTED_METHODS)}"
         )
 
     d_hat = observed_lift(trials, successes, lift=lift)
