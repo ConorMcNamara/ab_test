@@ -4,45 +4,9 @@ from typing import Any
 
 import numpy as np
 
+from ab_test._lift import compute_sample_lift
+
 __all__ = ["bayes_equivalence_test"]
-
-
-def _compute_lift(
-    samples_a: np.ndarray[Any, Any],
-    samples_b: np.ndarray[Any, Any],
-    lift: str,
-    trials: tuple[int, int] | None,
-    spend: float | None,
-    msrp: float | None,
-) -> np.ndarray[Any, Any]:
-    """Compute the posterior lift distribution between two sets of samples."""
-    if lift == "relative":
-        return (samples_b - samples_a) / samples_a
-    if lift == "absolute":
-        return samples_b - samples_a
-
-    if trials is None:
-        raise ValueError(f"trials must be provided for lift='{lift}'")
-    max_n = max(trials)
-    diff = samples_b - samples_a
-
-    if lift == "incremental":
-        return diff * max_n
-    if lift == "revenue":
-        if msrp is None:
-            raise ValueError("msrp must be provided for lift='revenue'")
-        return diff * max_n * msrp
-    if lift == "roas":
-        if spend is None:
-            raise ValueError("spend must be provided for lift='roas'")
-        return diff * max_n / spend
-    if lift == "cpa":
-        if spend is None:
-            raise ValueError("spend must be provided for lift='cpa'")
-        incremental = diff * max_n
-        return np.where(np.abs(incremental) > 1e-12, spend / incremental, np.inf)
-
-    raise NotImplementedError(f"lift '{lift}' not implemented")
 
 
 def bayes_equivalence_test(
@@ -132,7 +96,7 @@ def bayes_equivalence_test(
     samples_b = rng.beta(alpha_post_b, beta_post_b, size=n_samples)
 
     trial_pair = (int(trials_arr[0]), int(trials_arr[1]))
-    lift_arr = _compute_lift(samples_a, samples_b, lift, trial_pair, spend, msrp)
+    lift_arr = compute_sample_lift(samples_a, samples_b, lift=lift, trials=trial_pair, spend=spend, msrp=msrp)
 
     prob_equivalent = float(np.mean((lift_arr >= -delta) & (lift_arr <= delta)))
     prob_superior = float(np.mean(lift_arr > delta))
