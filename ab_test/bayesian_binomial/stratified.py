@@ -16,6 +16,7 @@ import plotly.graph_objects as go  # type: ignore[import-untyped]
 from tabulate import tabulate
 
 from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._lift import scale_metric
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
 
@@ -213,16 +214,7 @@ class BayesianStratifiedContingencyTable:
 
         if lift in ("incremental", "roas", "revenue", "cpa"):
             n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
-            pooled = pooled * n_max
-            if lift == "roas":
-                assert self.spend is not None
-                pooled = pooled / self.spend
-            elif lift == "cpa":
-                assert self.spend is not None
-                pooled = np.where(np.abs(pooled) > 1e-12, self.spend / pooled, np.inf)
-            elif lift == "revenue":
-                assert self.msrp is not None
-                pooled = pooled * self.msrp
+            pooled = scale_metric(pooled * n_max, lift, self.spend, self.msrp)
 
         return pooled
 
@@ -322,20 +314,10 @@ class BayesianStratifiedContingencyTable:
         if lift == "relative":
             display_stratum_samples = [np.exp(s) - 1 for s in stratum_samples]
         elif lift in ("incremental", "roas", "revenue", "cpa"):
-            display_stratum_samples = []
-            for k, s in enumerate(stratum_samples):
-                n_max_k = max(trials[k, 0], trials[k, 1])
-                scaled = s * n_max_k
-                if lift == "roas":
-                    assert self.spend is not None
-                    scaled = scaled / self.spend
-                elif lift == "cpa":
-                    assert self.spend is not None
-                    scaled = np.where(np.abs(scaled) > 1e-12, self.spend / scaled, np.inf)
-                elif lift == "revenue":
-                    assert self.msrp is not None
-                    scaled = scaled * self.msrp
-                display_stratum_samples.append(scaled)
+            display_stratum_samples = [
+                scale_metric(s * max(trials[k, 0], trials[k, 1]), lift, self.spend, self.msrp)
+                for k, s in enumerate(stratum_samples)
+            ]
         else:
             display_stratum_samples = stratum_samples
 
@@ -445,16 +427,7 @@ class BayesianStratifiedContingencyTable:
                 display_samples = np.exp(samples) - 1
             elif lift in ("incremental", "roas", "revenue", "cpa"):
                 n_max_k = max(trials[k, 0], trials[k, 1])
-                display_samples = samples * n_max_k
-                if lift == "roas":
-                    assert self.spend is not None
-                    display_samples = display_samples / self.spend
-                elif lift == "cpa":
-                    assert self.spend is not None
-                    display_samples = np.where(np.abs(display_samples) > 1e-12, self.spend / display_samples, np.inf)
-                elif lift == "revenue":
-                    assert self.msrp is not None
-                    display_samples = display_samples * self.msrp
+                display_samples = scale_metric(samples * n_max_k, lift, self.spend, self.msrp)
             else:
                 display_samples = samples
 
@@ -533,16 +506,7 @@ class BayesianStratifiedContingencyTable:
                 display_samples = np.exp(samples) - 1
             elif lift in ("incremental", "roas", "revenue", "cpa"):
                 n_max_k = max(trials[k, 0], trials[k, 1])
-                display_samples = samples * n_max_k
-                if lift == "roas":
-                    assert self.spend is not None
-                    display_samples = display_samples / self.spend
-                elif lift == "cpa":
-                    assert self.spend is not None
-                    display_samples = np.where(np.abs(display_samples) > 1e-12, self.spend / display_samples, np.inf)
-                elif lift == "revenue":
-                    assert self.msrp is not None
-                    display_samples = display_samples * self.msrp
+                display_samples = scale_metric(samples * n_max_k, lift, self.spend, self.msrp)
             else:
                 display_samples = samples
 

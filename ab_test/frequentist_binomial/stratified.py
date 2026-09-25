@@ -16,6 +16,7 @@ import scipy.stats as ss
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 
 from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._lift import scale_bounds, scale_metric
 
 try:
     from tabulate import tabulate
@@ -257,26 +258,9 @@ def _stratum_effect(
         se_scaled = se * n_max
         ci_lo = d_scaled - z * se_scaled
         ci_hi = d_scaled + z * se_scaled
-        if lift == "roas":
-            assert spend is not None
-            d_scaled /= spend
-            se_scaled /= spend
-            ci_lo /= spend
-            ci_hi /= spend
-        elif lift == "cpa":
-            assert spend is not None
-            se_scaled = np.inf
-            d_scaled = spend / d_scaled if abs(d_scaled) > 1e-12 else np.inf
-            ci_lo, ci_hi = (
-                (spend / ci_hi if ci_hi > 0 else np.inf),
-                (spend / ci_lo if ci_lo > 0 else np.inf),
-            )
-        elif lift == "revenue":
-            assert msrp is not None
-            d_scaled *= msrp
-            se_scaled *= msrp
-            ci_lo *= msrp
-            ci_hi *= msrp
+        d_scaled = scale_metric(d_scaled, lift, spend, msrp)
+        se_scaled = np.inf if lift == "cpa" else scale_metric(se_scaled, lift, spend, msrp)
+        ci_lo, ci_hi = scale_bounds(ci_lo, ci_hi, lift, spend, msrp)
         return d_scaled, se_scaled, ci_lo, ci_hi
 
     return d, se, d - z * se, d + z * se
@@ -318,23 +302,9 @@ def _pooled_effect(
         se_scaled = pooled_se * n_max
         lb = est - z * se_scaled
         ub = est + z * se_scaled
-        if lift == "roas":
-            assert spend is not None
-            est /= spend
-            se_scaled /= spend
-            lb /= spend
-            ub /= spend
-        elif lift == "cpa":
-            assert spend is not None
-            se_scaled = np.inf
-            est = spend / est if abs(est) > 1e-12 else np.inf
-            lb, ub = (spend / ub if ub > 0 else np.inf), (spend / lb if lb > 0 else np.inf)
-        elif lift == "revenue":
-            assert msrp is not None
-            est *= msrp
-            se_scaled *= msrp
-            lb *= msrp
-            ub *= msrp
+        est = scale_metric(est, lift, spend, msrp)
+        se_scaled = np.inf if lift == "cpa" else scale_metric(se_scaled, lift, spend, msrp)
+        lb, ub = scale_bounds(lb, ub, lift, spend, msrp)
         return est, se_scaled, lb, ub
 
     lb = pooled_d - z * pooled_se

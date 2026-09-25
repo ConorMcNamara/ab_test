@@ -167,6 +167,29 @@ class TestClusterRandomizationTest:
         with pytest.raises(ValueError, match="Treatment arm has 1"):
             cluster_randomization_test([10, 12], [100, 100], [10], [100])
 
+    @staticmethod
+    def test_parallel_consistent_with_sequential() -> None:
+        args = ([10, 8, 12, 9, 11], [100, 100, 100, 100, 100], [15, 18, 20, 14, 17], [100, 100, 100, 100, 100])
+        p_seq = cluster_randomization_test(*args, n_permutations=10_000, seed=42, n_jobs=1)
+        p_par = cluster_randomization_test(*args, n_permutations=10_000, seed=42, n_jobs=2)
+        assert p_seq == pytest.approx(p_par, abs=0.02)
+
+    @staticmethod
+    def test_parallel_seed_reproducibility() -> None:
+        args = ([10, 8, 12, 9, 11], [100, 100, 100, 100, 100], [15, 18, 20, 14, 17], [100, 100, 100, 100, 100])
+        p1 = cluster_randomization_test(*args, seed=42, n_jobs=2)
+        p2 = cluster_randomization_test(*args, seed=42, n_jobs=2)
+        assert p1 == p2
+
+    @staticmethod
+    def test_parallel_clear_signal() -> None:
+        s_c = [5, 6, 4, 7, 5]
+        m_c = [100, 100, 100, 100, 100]
+        s_t = [30, 35, 28, 32, 33]
+        m_t = [100, 100, 100, 100, 100]
+        p = cluster_randomization_test(s_c, m_c, s_t, m_t, seed=0, n_jobs=2)
+        assert p < 0.05
+
 
 class TestContingencyTableRandomization:
     @staticmethod
@@ -262,6 +285,12 @@ class TestClusterRandomizedTrialRandomization:
         crt = self._build_crt()
         with pytest.raises(ValueError, match="method must be one of"):
             crt.analyze(method="unknown")
+
+    def test_analyze_parallel(self) -> None:
+        crt = self._build_crt()
+        result = crt.analyze(method="randomization", seed=42, n_jobs=2)
+        assert isinstance(result, str)
+        assert "RI" in result
 
 
 if __name__ == "__main__":

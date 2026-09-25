@@ -9,6 +9,7 @@ from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
 from ab_test._display import convert_to_tabulate_str
+from ab_test._lift import scale_bounds, scale_metric
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
 from ab_test.frequentist_binomial.msprt import msprt_test
 from ab_test.frequentist_binomial.randomization_inference import randomization_test
@@ -176,30 +177,10 @@ class ContingencyTable(BaseContingencyTable):
                 pb = math.ceil(self.successes[1])
                 lb = _scale_bound(lb, self.trials[1])
                 ub = _scale_bound(ub, self.trials[1])
-            test_lift = pb - pa
-            if lift == "roas":
-                if self.spend is None:
-                    raise ValueError("spend must be set for ROAS calculations")
-                test_lift /= self.spend
-                pa /= self.spend
-                pb /= self.spend
-                lb /= self.spend
-                ub /= self.spend
-            elif lift == "cpa":
-                if self.spend is None:
-                    raise ValueError("spend must be set for CPA calculations")
-                test_lift = self.spend / test_lift if test_lift != 0 else np.inf
-                pa = self.spend / pa if pa > 0 else np.inf
-                pb = self.spend / pb if pb > 0 else np.inf
-                lb, ub = (self.spend / ub if ub > 0 else np.inf), (self.spend / lb if lb > 0 else np.inf)
-            if lift == "revenue":
-                if self.msrp is None:
-                    raise ValueError("msrp must be set for revenue calculations")
-                test_lift *= self.msrp
-                pa *= self.msrp
-                pb *= self.msrp
-                lb *= self.msrp
-                ub *= self.msrp
+            test_lift = scale_metric(pb - pa, lift, self.spend, self.msrp)
+            pa = scale_metric(pa, lift, self.spend, self.msrp)
+            pb = scale_metric(pb, lift, self.spend, self.msrp)
+            lb, ub = scale_bounds(lb, ub, lift, self.spend, self.msrp)
             success_rate = [pa, pb]
         else:
             success_rate = [si / ti for ti, si in zip(self.trials, self.successes)]

@@ -5,13 +5,15 @@ incremental, roas, revenue, cpa) should call through here rather than
 reimplementing the branching logic.
 """
 
-from typing import Any
+from typing import Any, overload
 
 import numpy as np
 
 __all__ = [
     "to_absolute",
     "from_absolute",
+    "scale_metric",
+    "scale_bounds",
     "compute_sample_lift",
 ]
 
@@ -110,6 +112,114 @@ def from_absolute(
             raise ValueError("spend must be set for CPA calculations")
         return spend / (abs_value * scale) if abs_value != 0 else np.inf
     raise ValueError(f"Unsupported lift type: {lift}")
+
+
+@overload
+def scale_metric(
+    value: float | int,
+    lift: str,
+    spend: float | None = ...,
+    msrp: float | None = ...,
+) -> float: ...
+
+
+@overload
+def scale_metric(
+    value: np.ndarray[Any, Any],
+    lift: str,
+    spend: float | None = ...,
+    msrp: float | None = ...,
+) -> np.ndarray[Any, Any]: ...
+
+
+def scale_metric(
+    value: float | int | np.ndarray[Any, Any],
+    lift: str,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> float | np.ndarray[Any, Any]:
+    """Convert value(s) from incremental-count space to the target metric.
+
+    For values already multiplied by ``max(trials)`` this applies the
+    final metric transform: division by ``spend`` for ROAS, multiplication
+    by ``msrp`` for revenue, or inversion for CPA.  Works on both scalars
+    and numpy arrays.
+
+    Parameters
+    ----------
+    value : float, int, or np.ndarray
+        Value(s) in incremental-count space.
+    lift : {"incremental", "roas", "revenue", "cpa"}
+        Target metric.
+    spend : float, optional
+        Total ad spend — required for ``"roas"`` and ``"cpa"``.
+    msrp : float, optional
+        Average product price — required for ``"revenue"``.
+
+    Returns
+    -------
+    float or np.ndarray
+        Value(s) on the target metric scale.
+    """
+    if lift == "incremental":
+        return value
+    if lift == "roas":
+        if spend is None:
+            raise ValueError("spend must be set for ROAS calculations")
+        return value / spend
+    if lift == "revenue":
+        if msrp is None:
+            raise ValueError("msrp must be set for revenue calculations")
+        return value * msrp
+    if lift == "cpa":
+        if spend is None:
+            raise ValueError("spend must be set for CPA calculations")
+        if isinstance(value, np.ndarray):
+            return np.where(np.abs(value) > 1e-12, spend / value, np.inf)
+        return spend / value if abs(value) > 1e-12 else np.inf
+    raise ValueError(f"Unsupported lift type for scale_metric: {lift}")
+
+
+def scale_bounds(
+    lb: float,
+    ub: float,
+    lift: str,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> tuple[float, float]:
+    """Scale CI bounds from incremental-count space to the target metric.
+
+    Handles CPA's ordering inversion: since CPA is ``spend / count``,
+    a larger count yields a smaller CPA, so the lower/upper bounds swap.
+    Non-positive bounds produce ``np.inf`` for CPA.
+
+    Parameters
+    ----------
+    lb : float
+        Lower confidence/credible interval bound in incremental-count space.
+    ub : float
+        Upper confidence/credible interval bound in incremental-count space.
+    lift : {"incremental", "roas", "revenue", "cpa"}
+        Target metric.
+    spend : float, optional
+        Total ad spend — required for ``"roas"`` and ``"cpa"``.
+    msrp : float, optional
+        Average product price — required for ``"revenue"``.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(lower, upper)`` bounds on the target metric scale.
+    """
+    if lift == "cpa":
+        if spend is None:
+            raise ValueError("spend must be set for CPA calculations")
+        new_lb = spend / ub if ub > 0 else np.inf
+        new_ub = spend / lb if lb > 0 else np.inf
+        return float(new_lb), float(new_ub)
+    scaled_lb = scale_metric(lb, lift, spend, msrp)
+    scaled_ub = scale_metric(ub, lift, spend, msrp)
+    return float(scaled_lb), float(scaled_ub)
 
 
 def compute_sample_lift(
