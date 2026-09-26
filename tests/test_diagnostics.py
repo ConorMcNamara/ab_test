@@ -103,9 +103,16 @@ class TestTimeTrendTest:
     def test_returns_expected_keys() -> None:
         result = time_trend_test([100] * 5, [1000] * 5, [110] * 5, [1000] * 5)
         expected_keys = {
-            "slope", "slope_se", "t_stat", "p_value",
-            "trending", "diagnosis", "period_lifts",
-            "period_se", "cumulative_lift", "figure",
+            "slope",
+            "slope_se",
+            "t_stat",
+            "p_value",
+            "trending",
+            "diagnosis",
+            "period_lifts",
+            "period_se",
+            "cumulative_lift",
+            "figure",
         }
         assert set(result) == expected_keys
 
@@ -183,9 +190,7 @@ class TestTimeTrendTest:
     @staticmethod
     def test_custom_labels() -> None:
         labels = ["Mon", "Tue", "Wed", "Thu", "Fri"]
-        result = time_trend_test(
-            [100] * 5, [1000] * 5, [110] * 5, [1000] * 5, labels=labels
-        )
+        result = time_trend_test([100] * 5, [1000] * 5, [110] * 5, [1000] * 5, labels=labels)
         trace = result["figure"].data[0]
         assert list(trace.x) == labels
 
