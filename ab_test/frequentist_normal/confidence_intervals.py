@@ -23,6 +23,7 @@ def _search_lower_bound(
     means: Any,
     variances: Any,
     trials: Any,
+    test: Any,
     lb_lb: float,
     lb_ub: float,
     alpha: float,
@@ -33,7 +34,7 @@ def _search_lower_bound(
     while True:
         if lift == "relative" and lb_lb < -1:
             return -1.0
-        pval = welch_test(means, variances, trials, null_lift=lb_lb, lift=lift)
+        pval = test(means, variances, trials, null_lift=lb_lb, lift=lift)
         if pval >= alpha:
             lb_ub = lb_lb
             lb_lb -= eps
@@ -42,7 +43,7 @@ def _search_lower_bound(
             break
     while (lb_ub - lb_lb) > tol:
         lb = 0.5 * (lb_lb + lb_ub)
-        pval = welch_test(means, variances, trials, null_lift=lb, lift=lift)
+        pval = test(means, variances, trials, null_lift=lb, lift=lift)
         if pval >= alpha:
             lb_ub = lb
         else:
@@ -54,6 +55,7 @@ def _search_upper_bound(
     means: Any,
     variances: Any,
     trials: Any,
+    test: Any,
     ub_lb: float,
     ub_ub: float,
     alpha: float,
@@ -64,7 +66,7 @@ def _search_upper_bound(
     while True:
         if ub_ub > 100:
             return math.inf
-        pval = welch_test(means, variances, trials, null_lift=ub_ub, lift=lift)
+        pval = test(means, variances, trials, null_lift=ub_ub, lift=lift)
         if pval >= alpha:
             ub_lb = ub_ub
             ub_ub += eps
@@ -73,7 +75,7 @@ def _search_upper_bound(
             break
     while (ub_ub - ub_lb) > tol:
         ub = 0.5 * (ub_lb + ub_ub)
-        pval = welch_test(means, variances, trials, null_lift=ub, lift=lift)
+        pval = test(means, variances, trials, null_lift=ub, lift=lift)
         if pval >= alpha:
             ub_lb = ub
         else:
@@ -85,6 +87,7 @@ def confidence_interval(
     means: np.ndarray[Any, Any] | list[Any],
     variances: np.ndarray[Any, Any] | list[Any],
     trials: np.ndarray[Any, Any] | list[Any],
+    test: Any = welch_test,
     method: str = "welch",
     alpha: float = 0.05,
     lift: str = "relative",
@@ -100,11 +103,14 @@ def confidence_interval(
         Variances of each group.
     trials : array_like
         Number of trials in each group.
+    test : function
+        The significance test inverted by ``'binary_search'``, e.g.
+        `welch_test` or `score_test`. Ignored by the other methods.
     method : {'welch', 'z', 'binary_search', 'delta'}
         How we want to calculate the confidence interval.
         ``'welch'`` constructs individual t-intervals per group and
         combines them.  ``'z'`` does the same with z-intervals (large
-        sample).  ``'binary_search'`` inverts the Welch test.
+        sample).  ``'binary_search'`` inverts ``test``.
         ``'delta'`` uses the delta method directly.
     alpha : float
         Threshold for significance. The confidence interval will have
@@ -130,11 +136,11 @@ def confidence_interval(
         ub_ub = ote + 0.01
         with ThreadPoolExecutor(max_workers=2) as executor:
             lb_future = executor.submit(
-                _search_lower_bound, means, variances, trials,
+                _search_lower_bound, means, variances, trials, test,
                 lb_lb, lb_ub, alpha, lift, tol,
             )
             ub_future = executor.submit(
-                _search_upper_bound, means, variances, trials,
+                _search_upper_bound, means, variances, trials, test,
                 ub_lb, ub_ub, alpha, lift, tol,
             )
             lb = lb_future.result()

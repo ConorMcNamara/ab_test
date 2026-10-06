@@ -8,7 +8,7 @@ from tabulate import tabulate
 
 from ab_test._continuous_table import BaseContinuousTable
 from ab_test._display import convert_to_tabulate_str
-from ab_test.frequentist_normal.stats_tests import welch_test
+from ab_test.frequentist_normal.stats_tests import score_test, welch_test
 from ab_test.frequentist_normal.confidence_intervals import confidence_interval
 from ab_test.frequentist_normal.utils import observed_lift
 
@@ -109,6 +109,7 @@ class NormalTable(BaseContinuousTable):
         self,
         lift: str = "relative",
         test_method: str = "welch",
+        conf_int_method: str = "welch",
         alpha: float = 0.05,
         null_lift: float = 0.0,
     ) -> str:
@@ -120,7 +121,11 @@ class NormalTable(BaseContinuousTable):
             The kind of lift we are measuring for our campaign
         test_method : str
             The method we plan to use to assess whether our result is
-            statistically significant. Currently only ``'welch'`` is supported.
+            statistically significant. One of ``'welch'`` or ``'score'``.
+        conf_int_method : str
+            The method we plan to use to craft confidence intervals of our lift.
+            One of ``'welch'``, ``'z'``, ``'binary_search'`` (which inverts the
+            test chosen by ``test_method``), or ``'delta'``.
         alpha : float, default = 0.05
             The alpha level of our experiment, to be used to craft confidence intervals.
         null_lift : float
@@ -135,12 +140,20 @@ class NormalTable(BaseContinuousTable):
         lift = lift.casefold()
         mean_a, mean_b = self.means[0], self.means[1]
         n_a, n_b = self.trials[0], self.trials[1]
-        p_value = welch_test(self.means, self.variances, self.trials, null_lift, lift)
+        if test_method == "welch":
+            test = welch_test
+        elif test_method == "score":
+            test = score_test
+        else:
+            raise NotImplementedError(f"No support for {test_method} test method")
         if lift in ["incremental", "roas", "revenue", "cpa"]:
             ci_lift = "absolute"
         else:
             ci_lift = lift
-        lb, ub = confidence_interval(self.means, self.variances, self.trials, test_method, alpha, ci_lift)
+        p_value = test(self.means, self.variances, self.trials, null_lift, ci_lift)
+        lb, ub = confidence_interval(
+            self.means, self.variances, self.trials, test=test, method=conf_int_method, alpha=alpha, lift=ci_lift
+        )
         test_lift = observed_lift(self.means, self.trials, lift=ci_lift)
         cell_values: list[float]
         if lift in ["incremental", "roas", "revenue", "cpa"]:

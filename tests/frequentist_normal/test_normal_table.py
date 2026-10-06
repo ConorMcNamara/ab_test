@@ -291,6 +291,23 @@ class TestNormalTable:
         result = nt.analyze()
         assert "statistically significant" in result
 
+    @staticmethod
+    def test_analyze_score_test():
+        nt = NormalTable(name="Test", metric_name="metric")
+        nt.add("A", 10.0, 4.0, 1000)
+        nt.add("B", 11.0, 5.0, 1000)
+        result = nt.analyze(test_method="score", conf_int_method="binary_search")
+        assert "p-value" in result
+        assert "*" in result
+
+    @staticmethod
+    def test_analyze_unknown_test_method_raises():
+        nt = NormalTable(name="Test", metric_name="metric")
+        nt.add("A", 10.0, 4.0, 1000)
+        nt.add("B", 11.0, 5.0, 1000)
+        with pytest.raises(NotImplementedError):
+            nt.analyze(test_method="fisher")
+
 
 if __name__ == "__main__":
     pytest.main()

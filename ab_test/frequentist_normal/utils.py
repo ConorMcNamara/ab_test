@@ -6,6 +6,7 @@ import numpy as np
 __all__ = [
     "validate_two_group",
     "observed_lift",
+    "mle_under_null",
 ]
 
 
@@ -71,3 +72,67 @@ def observed_lift(
     else:
         ote = mean_b - mean_a
     return float(ote)
+
+
+def mle_under_null(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+    null_lift: float = 0.0,
+    lift: str = "relative",
+) -> tuple[list[float], float]:
+    """Maximum Likelihood Estimation under H0.
+
+    Parameters
+    ----------
+    means : array_like
+        The average for each group.
+    variances : array_like
+        The sample variances (``ddof=1``) for each group.
+    trials : array_like
+        Number of trials in each group.
+    null_lift : float
+        Lift associated with null hypothesis. Defaults to 0.0.
+    lift : {"relative", "absolute"}
+        Whether to interpret the null lift relative to the baseline mean,
+        or in absolute terms. See Notes.
+
+    Returns
+    -------
+    mu : list of float
+        ``[mu_a_star, mu_b_star]``, the MLE of each group mean under H0.
+    sigma2 : float
+        The MLE of the common variance under H0.
+
+    Notes
+    -----
+    Assumes both groups are normal with a common variance and solves::
+
+        maximize ll(mu_a, mu_b, sigma2)
+        s.t.     H0
+
+    where H0 is either ``mu_b = mu_a + d`` (absolute lift) or
+    ``mu_b = mu_a * (1 + d)`` (relative lift). Both are linear equality
+    constraints, so unlike the binomial case the solution is closed form:
+    ``mu_a_star`` is a weighted least-squares fit of the two sample means
+    under the constraint, and ``sigma2`` is the pooled within-group sum of
+    squares plus the squared deviation of each sample mean from its
+    constrained estimate, divided by the total number of trials.
+    """
+    mean_a, mean_b = means[0], means[1]
+    n_a, n_b = trials[0], trials[1]
+    if lift == "relative":
+        k = 1.0 + null_lift
+        mu_a = (n_a * mean_a + n_b * k * mean_b) / (n_a + n_b * k * k)
+        mu = [mu_a, k * mu_a]
+    else:
+        mu_a = (n_a * mean_a + n_b * (mean_b - null_lift)) / (n_a + n_b)
+        mu = [mu_a, mu_a + null_lift]
+    sum_sq = (
+        (n_a - 1) * variances[0]
+        + (n_b - 1) * variances[1]
+        + n_a * (mean_a - mu[0]) ** 2
+        + n_b * (mean_b - mu[1]) ** 2
+    )
+    sigma2 = sum_sq / (n_a + n_b)
+    return [float(mu[0]), float(mu[1])], float(sigma2)
