@@ -148,5 +148,64 @@ class TestMleUnderAlternative:
         assert sigma2_alt <= sigma2_null
 
 
+
+class TestMleUnequalVariance:
+    @staticmethod
+    def _grid_argmax(means, variances, trials, k, c):
+        ml_var = [(n - 1) / n * v for n, v in zip(trials, variances)]
+        grid = np.linspace(min(means) - 5, max(means) + 5, 400001)
+        ll = -0.5 * trials[0] * np.log(ml_var[0] + (means[0] - grid) ** 2) - 0.5 * trials[1] * np.log(
+            ml_var[1] + (means[1] - k * grid - c) ** 2
+        )
+        return grid[np.argmax(ll)]
+
+    @pytest.mark.parametrize("null_lift, lift", [(0.0, "absolute"), (0.5, "absolute"), (0.05, "relative")])
+    def test_constraint_holds(self, null_lift, lift):
+        mu, sigma2 = mle_under_null(
+            [10.0, 11.0], [1.0, 9.0], [300, 150], null_lift=null_lift, lift=lift, equal_var=False
+        )
+        if lift == "absolute":
+            assert mu[1] - mu[0] == pytest.approx(null_lift)
+        else:
+            assert mu[1] / mu[0] == pytest.approx(1 + null_lift)
+        assert len(sigma2) == 2
+
+    @staticmethod
+    def test_low_variance_group_dominates():
+        mu, _ = mle_under_null([10.0, 11.0], [0.5, 50.0], [500, 500], null_lift=0.0, equal_var=False)
+        assert abs(mu[0] - 10.0) < abs(mu[0] - 11.0)
+
+    @staticmethod
+    def test_picks_global_maximum_when_bimodal():
+        means, variances, trials = [0.0, 3.0], [0.01, 0.02], [40, 40]
+        mu, _ = mle_under_null(means, variances, trials, null_lift=0.0, lift="absolute", equal_var=False)
+        assert mu[0] == pytest.approx(TestMleUnequalVariance._grid_argmax(means, variances, trials, 1.0, 0.0), abs=1e-4)
+
+    @staticmethod
+    def test_relative_matches_grid_search():
+        means, variances, trials = [10.0, 10.4], [1.0, 9.0], [300, 150]
+        mu, _ = mle_under_null(means, variances, trials, null_lift=0.02, lift="relative", equal_var=False)
+        assert mu[0] == pytest.approx(TestMleUnequalVariance._grid_argmax(means, variances, trials, 1.02, 0.0), abs=1e-4)
+
+    @staticmethod
+    def test_observed_lift_recovers_sample_moments():
+        mu, sigma2 = mle_under_null([10.0, 11.0], [1.0, 9.0], [300, 150], null_lift=1.0, lift="absolute", equal_var=False)
+        assert mu == pytest.approx([10.0, 11.0])
+        assert sigma2 == pytest.approx([299 / 300 * 1.0, 149 / 150 * 9.0])
+
+    @staticmethod
+    def test_unconstrained_alternative_uses_per_group_variances():
+        mu, sigma2 = mle_under_alternative([10.0, 11.0], [1.0, 9.0], [300, 150], equal_var=False)
+        assert mu == pytest.approx([10.0, 11.0])
+        assert sigma2 == pytest.approx([299 / 300 * 1.0, 149 / 150 * 9.0])
+
+    @staticmethod
+    def test_constrained_alternative_matches_null():
+        args = ([10.0, 11.0], [1.0, 9.0], [300, 150])
+        assert mle_under_alternative(*args, alt_lift=0.5, lift="absolute", equal_var=False) == mle_under_null(
+            *args, null_lift=0.5, lift="absolute", equal_var=False
+        )
+
+
 if __name__ == "__main__":
     pytest.main()
