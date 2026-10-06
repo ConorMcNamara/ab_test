@@ -12,7 +12,7 @@ from ab_test.frequentist_binomial.confidence_intervals import (
     wald_interval,
 )
 from ab_test.frequentist_binomial.msprt import msprt_test
-from ab_test.frequentist_binomial.stats_tests import likelihood_ratio_test, score_test, z_test
+from ab_test.frequentist_binomial.stats_tests import likelihood_ratio_test, score_test, wald_test, z_test
 
 
 class TestConfidenceIntervalComparison:
@@ -418,6 +418,26 @@ class TestBoundaryIntervals:
             lb, ub = confidence_interval([n, n], successes, test=score_test, lift="absolute")
             covered += lb <= pb - pa <= ub
         assert covered / reps >= 0.92
+
+
+class TestWaldInterval:
+    @pytest.mark.parametrize("trials, successes", [([1000, 1000], [100, 130]), ([500, 800], [20, 25])])
+    def test_inverting_wald_test_matches_wald_interval(self, trials, successes):
+        lb, ub = confidence_interval(trials, successes, test=wald_test, lift="absolute")
+        w_lb, w_ub = confidence_interval(trials, successes, lift="absolute", method="wald")
+        assert lb == pytest.approx(w_lb, abs=1e-5)
+        assert ub == pytest.approx(w_ub, abs=1e-5)
+
+    @staticmethod
+    def test_zero_successes_in_both_groups_gives_zero_width_interval():
+        lb, ub = confidence_interval([500, 500], [0, 0], test=wald_test, lift="absolute")
+        assert lb == pytest.approx(0.0, abs=1e-5)
+        assert ub == pytest.approx(0.0, abs=1e-5)
+
+    @staticmethod
+    def test_relative_lift_not_supported():
+        with pytest.raises(NotImplementedError):
+            confidence_interval([1000, 1000], [100, 130], test=wald_test, lift="relative")
 
 
 if __name__ == "__main__":
