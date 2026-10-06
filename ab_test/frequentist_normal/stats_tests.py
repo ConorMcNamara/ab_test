@@ -10,6 +10,8 @@ from ab_test.frequentist_normal.utils import validate_two_group
 
 __all__ = [
     "welch_test",
+    "score_test",
+    "likelihood_ratio_test"
 ]
 
 
@@ -71,3 +73,105 @@ def welch_test(
         pval = 2 * (1.0 - ss.t.cdf(abs(t_value), df))  # type: ignore[no-untyped-call]
         return float(pval)
     return abs(t_value) >= crit
+
+
+def score_test(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    crit: float | None = None,
+) -> float | bool:
+    """Rao's score test for 2 experiment groups.
+
+    Parameters
+    ----------
+    means : array_like
+        The average for each group.
+    variances : array_like
+        The variances for each group.
+    trials : array_like
+        Number of trials in each group.
+    null_lift : float
+        Lift associated with null hypothesis. Defaults to 0.0.
+    lift : {"relative", "absolute"}
+        Whether to interpret the null lift relative to the baseline mean,
+        or in absolute terms.
+    crit : float, optional
+        Critical value for the test statistic. If omitted, a p-value will be
+        returned. If passed, a boolean will be returned corresponding to
+        whether the result is statistically significant. Useful primarily for
+        simulations where we will be repeatedly assessing significance, since
+        calculating the critical value can be done once instead of repeatedly.
+        This makes such simulations about 5x faster.
+
+    Returns
+    -------
+    pval : float
+        P-value. Returned if ``crit`` is None.
+    stat_sig : boolean
+        True if the result is statistically significant, i.e. if the absolute
+        test statistic is >= ``crit``. Returned if ``crit`` is not None.
+
+    Notes
+    -----
+    Only supports two experiment groups at this time.
+    """
+    validate_two_group(means, trials, variances, null_lift, lift)
+    mean1, mean2 = means[0], means[1]
+    var1, var2 = variances[0], variances[1]
+    trial1, trial2 = trials[0], trials[1]
+    pool_mean = (trial1 * mean1 + trial2 * mean2) / np.sum(trials)
+    pool_var = (trial1 - 1) * var1 + (trial2 - 1) * var2 / (trial1 - trial2 - 2)
+    t_value = (mean1 - mean2) / pool_var * (np.sqrt((1 / trial1) + (1 / trial2)))
+    df = trial1 + trial2 - 2
+    if crit is None:
+        pval = 2 * (1.0 - ss.t.cdf(abs(t_value), df))  # type: ignore[no-untyped-call]
+        return float(pval)
+    return abs(t_value) >= crit
+
+def likelihood_ratio_test(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    crit: float | None = None,
+) -> float | bool:
+    """Likelihood Ratio test for 2 experiment groups.
+
+    Parameters
+    ----------
+    means : array_like
+        The average for each group.
+    variances : array_like
+        The variances for each group.
+    trials : array_like
+        Number of trials in each group.
+    null_lift : float
+        Lift associated with null hypothesis. Defaults to 0.0.
+    lift : {"relative", "absolute"}
+        Whether to interpret the null lift relative to the baseline mean,
+        or in absolute terms.
+    crit : float, optional
+        Critical value for the test statistic. If omitted, a p-value will be
+        returned. If passed, a boolean will be returned corresponding to
+        whether the result is statistically significant. Useful primarily for
+        simulations where we will be repeatedly assessing significance, since
+        calculating the critical value can be done once instead of repeatedly.
+        This makes such simulations about 5x faster.
+
+    Returns
+    -------
+    pval : float
+        P-value. Returned if ``crit`` is None.
+    stat_sig : boolean
+        True if the result is statistically significant, i.e. if the absolute
+        test statistic is >= ``crit``. Returned if ``crit`` is not None.
+
+    Notes
+    -----
+    Only supports two experiment groups at this time.
+    """
+    ...
