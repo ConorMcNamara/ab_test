@@ -9,7 +9,7 @@ from scipy.stats import beta
 from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test._lift import scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
@@ -21,7 +21,16 @@ __all__ = [
 
 
 class BayesianContingencyTable(BaseContingencyTable):
-    """A class for analyzing experiment results using Bayesian approaches."""
+    """A class for analyzing experiment results using Bayesian approaches.
+
+    Examples
+    --------
+    >>> table = BayesianContingencyTable("Checkout redesign", "conversion")
+    >>> table = table.add("Control", 1000, 10000, alpha=1, beta=1).add("Treatment", 1100, 10000, alpha=1, beta=1)
+    >>> print(table.analyze(lift="relative"))  # doctest: +SKIP
+    >>> print(table.analyze_individually())  # doctest: +SKIP
+    >>> table.plot(is_individual=False)  # doctest: +SKIP
+    """
 
     _columns: ClassVar[list[str]] = ["cell_name", "successes", "trials", "alpha", "beta"]
     _pyspark_types: ClassVar[dict[str, str]] = {
@@ -239,7 +248,7 @@ class BayesianContingencyTable(BaseContingencyTable):
             if prob_b_exceeds_a >= confidence_level
             else f"{convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}"
         )
-        table_headers = (
+        row_labels = (
             ["Metric", "Metric Name"]
             + self.names
             + [
@@ -251,7 +260,7 @@ class BayesianContingencyTable(BaseContingencyTable):
                 "Probability Lift is in ROPE ***",
             ]
         )
-        table_list = [
+        values = (
             [lift]
             + [self.metric_name]
             + convert_to_tabulate_str(success_rate, lift)
@@ -259,8 +268,8 @@ class BayesianContingencyTable(BaseContingencyTable):
             + [str_pvalue]
             + [convert_to_tabulate_str(results["Expected loss"], "relative")]
             + [convert_to_tabulate_str(results["Probability of ROPE"], "relative")]
-        ]
-        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
+        )
+        return_string = tabulate_summary(row_labels, values)
         return_string += (
             f"\n* next to the prob means it exceeds our confidence level at {round(confidence_level * 100)}% level"
         )

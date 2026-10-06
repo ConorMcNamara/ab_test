@@ -15,7 +15,7 @@ import scipy.stats as ss
 
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test._lift import scale_bounds, scale_metric
 
 try:
@@ -329,6 +329,17 @@ class StratifiedContingencyTable:
         Campaign spend (required for ``lift="roas"``).
     msrp : float or None
         Average product price (required for ``lift="revenue"``).
+
+    Examples
+    --------
+    >>> table = StratifiedContingencyTable("Checkout test", "conversion")
+    >>> table = (
+    ...     table.add("Control", 120, 1000, stratum="desktop")
+    ...     .add("Treatment", 140, 1000, stratum="desktop")
+    ...     .add("Control", 80, 1200, stratum="mobile")
+    ...     .add("Treatment", 95, 1150, stratum="mobile")
+    ... )
+    >>> results = table.analyze(lift="relative")
     """
 
     def __init__(
@@ -457,16 +468,16 @@ class StratifiedContingencyTable:
             return convert_to_tabulate_str(v, "absolute")
 
         success_rate: list[str | float] = [fmt_rate(p_control), fmt_rate(p_treatment)]
-        str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
-        table_headers = (
+        str_pvalue = f"{p_value:.4f}" if p_value >= alpha else f"{p_value:.4f}*"
+        row_labels = (
             ["Metric", "Metric Name"]
             + self._cell_names
             + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", "p-value (CMH)"]
         )
-        table_list = [
+        values = (
             [lift, self.metric_name] + success_rate + convert_to_tabulate_str([estimate, lb, ub], lift) + [str_pvalue]
-        ]
-        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
+        )
+        return_string = tabulate_summary(row_labels, values)
 
         if len(strata_names) >= 2:
             _, bd_pvalue = breslow_day_test(successes, trials_arr)

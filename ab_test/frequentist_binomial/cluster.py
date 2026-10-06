@@ -23,7 +23,7 @@ import numpy as np
 import plotly.graph_objects as go
 import scipy.stats as ss
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test.frequentist_binomial.randomization_inference import cluster_randomization_test
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
@@ -339,10 +339,13 @@ class ClusterRandomizedTrial:
     Examples
     --------
     >>> crt = ClusterRandomizedTrial("Store test", "conversion")
-    >>> crt.add("store_1", 45, 500, group="control")
-    >>> crt.add("store_2", 52, 480, group="control")
-    >>> crt.add("store_3", 62, 490, group="treatment")
-    >>> crt.add("store_4", 58, 520, group="treatment")
+    >>> crt = (
+    ...     crt.add("store_1", 45, 500, group="control")
+    ...     .add("store_2", 52, 480, group="control")
+    ...     .add("store_3", 62, 490, group="treatment")
+    ...     .add("store_4", 58, 520, group="treatment")
+    ... )
+    >>> results = crt.analyze(lift="relative")
     """
 
     def __init__(self, name: str = "CRT", metric_name: str = "outcome") -> None:
@@ -473,8 +476,6 @@ class ClusterRandomizedTrial:
         str
             Formatted results table.
         """
-        from tabulate import tabulate
-
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
@@ -575,23 +576,23 @@ class ClusterRandomizedTrial:
             self._analyzed["t_stat"] = t_stat
             self._analyzed["welch_df"] = welch_df
 
-        str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
+        str_pvalue = f"{p_value:.4f}" if p_value >= alpha else f"{p_value:.4f}*"
         success_rate: list[str | float] = [
             convert_to_tabulate_str(mean_ctrl, "absolute"),
             convert_to_tabulate_str(mean_treat, "absolute"),
         ]
-        table_headers = (
+        row_labels = (
             ["Metric", "Metric Name"]
             + self._group_names
             + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", pvalue_label]
         )
-        table_list = [
+        values = (
             [lift, self.metric_name]
             + success_rate
             + convert_to_tabulate_str([test_lift, ci_lower, ci_upper], lift)
             + [str_pvalue]
-        ]
-        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
+        )
+        return_string = tabulate_summary(row_labels, values)
         ctrl_name, treat_name = self._group_names
         footer = f"\nICC: {icc_val:.4f} | DEFF: {deff_val:.2f} | Clusters: {K_ctrl} {ctrl_name}, {K_treat} {treat_name}"
         if method == "welch":

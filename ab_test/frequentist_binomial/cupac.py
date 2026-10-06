@@ -227,6 +227,19 @@ class CupacExperiment:
     cluster_col : str or None
         Column identifying clusters for CR2 cluster-robust standard
         errors.  When ``None`` (default), HC2 standard errors are used.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> rng = np.random.default_rng(0)
+    >>> n = 2000
+    >>> pre_visits = rng.poisson(3, n)
+    >>> treatment = rng.integers(0, 2, n)
+    >>> converted = rng.binomial(1, np.clip(0.05 + 0.02 * pre_visits + 0.02 * treatment, 0, 1))
+    >>> df = pd.DataFrame({"converted": converted, "treatment": treatment, "pre_visits": pre_visits})
+    >>> exp = CupacExperiment(df, "converted", "treatment", ["pre_visits"]).fit()
+    >>> print(exp.analyze())  # doctest: +SKIP
     """
 
     def __init__(
