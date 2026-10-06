@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 import numpy as np
 import scipy.stats as ss
+from scipy.special import xlogy
 
 from ab_test.frequentist_binomial.msprt import msprt_test
 from ab_test.frequentist_binomial.randomization_inference import randomization_test
@@ -200,13 +201,12 @@ def score_test(
 
     p = mle_under_null(trials, successes, null_lift=null_lift, lift=lift)
 
-    if min(p) <= 1e-12 or max(p) + 1e-12 >= 1.0:
-        return 1.0
-
-    p0, p1 = p[0], p[1]
-    pq0, pq1 = p0 * (1 - p0), p1 * (1 - p1)
-    ts = (successes[0] - trials[0] * p0) ** 2 / (trials[0] * pq0) + (successes[1] - trials[1] * p1) ** 2 / (
-        trials[1] * pq1
+    # The constrained MLE only reaches 0 or 1 for a group with no successes or
+    # no failures, which it then fits exactly, so that group adds nothing.
+    ts = sum(
+        (s_i - n_i * p_i) ** 2 / (n_i * p_i * (1 - p_i))
+        for n_i, s_i, p_i in zip(trials[:2], successes[:2], p)
+        if 1e-12 < p_i < 1.0 - 1e-12
     )
 
     if crit is None:
@@ -265,21 +265,14 @@ def likelihood_ratio_test(
     p0 = mle_under_null(trials, successes, null_lift=null_lift, lift=lift)
     p1 = mle_under_alternative(trials, successes)
 
-    if min(p0) <= 1e-12 or max(p0) + 1e-12 >= 1.0:
-        return 1.0
-
-    if min(p1) <= 1e-12 or max(p1) + 1e-12 >= 1.0:
-        return 1.0
-
+    # xlogy treats 0 * log(0) as 0, so groups with no successes or no failures
+    # (where an MLE sits at 0 or 1) are handled without special-casing.
     def log_likelihood(p: list[Any] | np.ndarray[Any, Any]) -> float:
-        return (
-            successes[0] * math.log(p[0])
-            + (trials[0] - successes[0]) * math.log(1 - p[0])
-            + successes[1] * math.log(p[1])
-            + (trials[1] - successes[1]) * math.log(1 - p[1])
+        return float(
+            sum(xlogy(s_i, p_i) + xlogy(n_i - s_i, 1 - p_i) for n_i, s_i, p_i in zip(trials[:2], successes[:2], p))
         )
 
-    ts = 2 * (log_likelihood(p1) - log_likelihood(p0))
+    ts = max(2 * (log_likelihood(p1) - log_likelihood(p0)), 0.0)
     if crit is None:
         pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
         return float(pval)
@@ -334,8 +327,11 @@ def z_test(
     p0 = mle_under_null(trials, successes, null_lift=null_lift, lift=lift)
     p1 = mle_under_alternative(trials, successes)
 
-    p0_arr = np.asarray(p0)
+    # The constrained MLE can overshoot [0, 1] by rounding error near the boundary.
+    p0_arr = np.clip(np.asarray(p0), 0.0, 1.0)
     sigma2 = float(np.sum(p0_arr * (1 - p0_arr) / np.asarray(trials)))
+    if sigma2 <= 0:
+        return 1.0 if crit is None else False
     z = (p1[1] - p1[0] - null_lift) / math.sqrt(sigma2)
     if crit is None:
         return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]

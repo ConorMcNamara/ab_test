@@ -280,21 +280,63 @@ def mle_under_null(
             pcrit_plus = 1
 
         x0 = 0.5 * (pcrit_minus + pcrit_plus)
+        converged = False
         for _ in range(50):
             fn = D + x0 * (C + x0 * (B + x0 * A))
             fpn = C + x0 * (2 * B + x0 * 3 * A)
             x0 -= fn / fpn
 
             if abs(fn) < val_tol and abs(fn / fpn) < step_tol:
+                converged = True
                 break
-        else:
-            raise ValueError("MLE did not converge")
+
+        # pa must keep both rates in [0, 1]. When the maximum sits on that
+        # boundary (e.g. a group with no successes or no failures), the cubic has
+        # no root inside it: Newton lands outside, or on a spurious root at the
+        # boundary introduced by clearing denominators. Fall back to bisection.
+        lo, hi = max(0.0, -d), min(1.0, 1.0 - d)
+        if not converged or not lo + 1e-9 < x0 < hi - 1e-9:
+            x0 = _bisect_absolute_mle(sa, fa, sb, fb, d, lo, hi)
 
         pstar_a = x0
         pstar_b = pstar_a + null_lift
         p = [pstar_a, pstar_b]
 
     return p
+
+
+def _bisect_absolute_mle(sa: float, fa: float, sb: float, fb: float, d: float, lo: float, hi: float) -> float:
+    """Maximise the absolute-lift constrained log-likelihood over ``[lo, hi]``.
+
+    The log-likelihood is concave in ``pa``, so its derivative is decreasing and
+    bisection on its sign converges to the interior root, or to whichever end of
+    the interval the maximum lies at.
+    """
+
+    def ratio(count: float, prob: float) -> float:
+        if count == 0:
+            return 0.0
+        return count / prob if prob > 0 else math.inf
+
+    def slope(pa: float) -> float:
+        pb = pa + d
+        return ratio(sa, pa) - ratio(fa, 1 - pa) + ratio(sb, pb) - ratio(fb, 1 - pb)
+
+    left, right = lo, hi
+    for _ in range(200):
+        mid = 0.5 * (left + right)
+        if mid <= left or mid >= right:
+            break
+        if slope(mid) > 0:
+            left = mid
+        else:
+            right = mid
+    pa = 0.5 * (left + right)
+    if pa - lo < 1e-12:
+        return lo
+    if hi - pa < 1e-12:
+        return hi
+    return pa
 
 
 def mle_under_alternative(

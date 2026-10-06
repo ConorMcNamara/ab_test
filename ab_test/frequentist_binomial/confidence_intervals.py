@@ -30,13 +30,14 @@ def _search_lower_bound(
     lb_ub: float,
     alpha: float,
     lift: str,
-    pa: float,
     tol: float,
 ) -> float:
     eps = 0.01
     lower_bound_exists = True
     while True:
-        if (lift == "relative" and lb_lb < -1) or (lift == "absolute" and lb_lb < -pa):
+        # Both lifts are bounded below by -1. The observed control rate is not a
+        # bound for absolute lift, since the true rate can exceed it.
+        if lb_lb < -1 or (lift == "absolute" and lb_lb <= -1):
             lower_bound_exists = False
             break
         pval = test(trials, successes, null_lift=lb_lb, lift=lift)
@@ -55,10 +56,7 @@ def _search_lower_bound(
             else:
                 lb_lb = lb
         return 0.5 * (lb_lb + lb_ub)
-    elif successes[0] > 0:
-        return -1.0
-    else:
-        return -math.inf
+    return -1.0
 
 
 def _search_upper_bound(
@@ -75,7 +73,7 @@ def _search_upper_bound(
     if upper_bound_exists:
         eps = 0.01
         while True:
-            if ub_ub > 100:
+            if ub_ub > 100 or (lift == "absolute" and ub_ub >= 1):
                 upper_bound_exists = False
                 break
             pval = test(trials, successes, null_lift=ub_ub, lift=lift)
@@ -158,17 +156,15 @@ def confidence_interval(
                 lb_ub = ote
                 ub_lb = ote
                 ub_ub = ote + 0.01
-                pa = 0.0
             else:
-                pa = successes[0] / trials[0]
-                lb_lb = max(ote - 0.01, -pa)
+                lb_lb = max(ote - 0.01, -1.0)
                 lb_ub = ote
                 ub_lb = ote
-                ub_ub = min(ote + 0.01, 1.0 - pa)
+                ub_ub = min(ote + 0.01, 1.0)
 
             with ThreadPoolExecutor(max_workers=2) as executor:
                 lb_future = executor.submit(
-                    _search_lower_bound, test, trials, successes, lb_lb, lb_ub, alpha, lift, pa, tol
+                    _search_lower_bound, test, trials, successes, lb_lb, lb_ub, alpha, lift, tol
                 )
                 ub_future = executor.submit(
                     _search_upper_bound, test, trials, successes, ub_lb, ub_ub, alpha, lift, tol, upper_bound_exists

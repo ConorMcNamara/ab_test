@@ -7,6 +7,7 @@ import pytest
 import scipy.stats as ss
 
 from ab_test.frequentist_binomial.confidence_intervals import wilson_interval
+from ab_test.frequentist_binomial.msprt import msprt_test
 from ab_test.frequentist_binomial.stats_tests import (
     score_test,
     likelihood_ratio_test,
@@ -341,6 +342,38 @@ class TestCressieReadTest:
         one = cressie_read_test(trials, successes, null_lift=0.0)
         two = cressie_read_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == pytest.approx(two, rel=1e-10)
+
+
+class TestBoundaryCounts:
+    @pytest.mark.parametrize("test", [score_test, likelihood_ratio_test, z_test, msprt_test])
+    def test_rejects_large_lift_with_zero_control_successes(self, test):
+        assert test([500, 500], [0, 3], null_lift=0.05, lift="absolute") < 0.05
+
+    @staticmethod
+    def test_lrt_not_stuck_at_one_with_zero_control_successes():
+        assert likelihood_ratio_test([500, 500], [0, 3], null_lift=-0.01, lift="absolute") < 0.05
+
+    @pytest.mark.parametrize("test", [score_test, likelihood_ratio_test, z_test])
+    def test_p_value_one_at_observed_lift(self, test):
+        assert test([500, 500], [0, 3], null_lift=0.006, lift="absolute") == pytest.approx(1.0)
+
+    @pytest.mark.parametrize("test", [score_test, likelihood_ratio_test, z_test, msprt_test])
+    @pytest.mark.parametrize("successes, d", [([0, 3], 0.01), ([50, 47], -0.02), ([49, 45], 0.02)])
+    def test_swapping_groups_negates_null(self, test, successes, d):
+        trials = [500, 500] if max(successes) < 10 else [50, 50]
+        swapped = list(reversed(successes))
+        one = test(trials, successes, null_lift=d, lift="absolute")
+        two = test(trials, swapped, null_lift=-d, lift="absolute")
+        assert one == pytest.approx(two, rel=1e-6)
+
+    @staticmethod
+    def test_z_test_no_domain_error_near_boundary():
+        pval = z_test([50, 50], [49, 45], null_lift=0.02, lift="absolute")
+        assert 0.0 <= pval <= 1.0
+
+    @staticmethod
+    def test_score_crit_on_boundary_returns_bool():
+        assert score_test([500, 500], [0, 0], null_lift=0.0, lift="absolute", crit=3.84) is False
 
 
 if __name__ == "__main__":
