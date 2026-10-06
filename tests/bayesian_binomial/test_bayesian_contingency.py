@@ -400,6 +400,16 @@ class TestBayesianContingencyTable:
             bct.analyze(lift="cpa")
 
     @staticmethod
+    @pytest.mark.parametrize("confidence_level, label", [(0.95, "95"), (0.9, "90")])
+    def test_analyze_footnote_says_credible_interval(confidence_level, label):
+        ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
+        ct.add("Holdout", 100, 1_000, 1, 1)
+        ct.add("Test", 110, 1_000, 1, 1)
+        result = ct.analyze(confidence_level=confidence_level)
+        assert f"** {label}% Credible Interval" in result
+        assert "Confidence Interval" not in result
+
+    @staticmethod
     def test_contingency_analyze_individual_results():
         ct = BayesianContingencyTable(name="Initial AB Test", metric_name="sales")
         ct.add("Holdout", 100, 1_000, 1, 1)

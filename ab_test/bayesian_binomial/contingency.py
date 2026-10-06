@@ -273,7 +273,7 @@ class BayesianContingencyTable(BaseContingencyTable):
         return_string += (
             f"\n* next to the prob means it exceeds our confidence level at {round(confidence_level * 100)}% level"
         )
-        return_string += f"\n** {round(confidence_level * 100)}% Confidence Interval"
+        return_string += f"\n** {round(confidence_level * 100)}% Credible Interval"
         return_string += "\n*** Region of Practical Equivalence"
         return return_string
 
