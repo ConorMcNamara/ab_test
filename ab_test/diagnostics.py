@@ -14,9 +14,14 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 
+from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
+from ab_test.frequentist_binomial.stats_tests import ab_test
+from ab_test.frequentist_binomial.utils import observed_lift
+
 __all__ = [
     "srm_test",
     "time_trend_test",
+    "placebo_test",
 ]
 
 
@@ -249,4 +254,94 @@ def time_trend_test(
         "period_se": period_se,
         "cumulative_lift": cumulative_lift,
         "figure": fig,
+    }
+
+
+def placebo_test(
+    successes_a: int,
+    trials_a: int,
+    successes_b: int,
+    trials_b: int,
+    alpha: float = 0.05,
+    lift: str = "absolute",
+    test_method: str = "score",
+) -> dict[str, Any]:
+    """Check for a treatment effect where none should exist.
+
+    Compares the two groups on data the treatment cannot have affected —
+    either the pre-experiment period for the same users, or a placebo
+    outcome measured before exposure. The true effect is zero by
+    construction, so a significant result points to pre-existing imbalance,
+    a broken randomiser, or a data pipeline bug rather than a real effect.
+
+    Parameters
+    ----------
+    successes_a : int
+        Placebo successes for variant A (control).
+    trials_a : int
+        Placebo trials for variant A.
+    successes_b : int
+        Placebo successes for variant B (treatment).
+    trials_b : int
+        Placebo trials for variant B.
+    alpha : float, optional
+        Significance level for the placebo check.  Default is 0.05.
+    lift : {"absolute", "relative"}, optional
+        Scale of the reported lift and confidence interval.  Default is
+        ``"absolute"``, which stays defined when the control group has no
+        placebo successes.
+    test_method : str, optional
+        Significance test used for the p-value; any ``method`` accepted by
+        :func:`~ab_test.frequentist_binomial.stats_tests.ab_test`.  Default
+        is ``"score"``.
+
+    Returns
+    -------
+    dict
+        Dictionary with the following keys:
+
+        - ``"lift"`` : float — observed placebo lift (B vs. A).
+        - ``"ci_lower"`` : float — lower bound of the 100(1 − alpha)%
+          confidence interval (Wilson for absolute lift, an inverted score
+          test for relative lift).
+        - ``"ci_upper"`` : float — upper bound of that interval.
+        - ``"p_value"`` : float — p-value for H₀: no placebo effect.
+        - ``"failed"`` : bool — ``True`` when p_value < alpha, i.e. the
+          groups differ where they should not.
+
+    Raises
+    ------
+    ValueError
+        If any count is negative, a group has no trials, successes exceed
+        trials, or ``lift="relative"`` with no control successes.
+
+    Examples
+    --------
+    >>> result = placebo_test(successes_a=480, trials_a=10000, successes_b=495, trials_b=10000)
+    >>> result["failed"]
+    False
+    """
+    trials = [trials_a, trials_b]
+    successes = [successes_a, successes_b]
+    if min(successes) < 0 or min(trials) <= 0:
+        raise ValueError("Trials must be positive and successes non-negative")
+    if successes_a > trials_a or successes_b > trials_b:
+        raise ValueError("Successes cannot exceed trials")
+    lift = lift.casefold()
+    if lift == "relative" and successes_a == 0:
+        raise ValueError('Relative lift is undefined with no control successes; use lift="absolute"')
+
+    p_value = float(ab_test(trials, successes, null_lift=0.0, lift=lift, method=test_method))
+    # Inverting the score test breaks down with zero control successes, which
+    # placebo data hits often; Wilson intervals stay finite there. They can fall
+    # below -100% for relative lift on small counts, so that case keeps the score test.
+    ci_method = "wilson" if lift == "absolute" else "binary_search"
+    ci_lower, ci_upper = confidence_interval(trials, successes, alpha=alpha, lift=lift, method=ci_method)
+
+    return {
+        "lift": observed_lift(trials, successes, lift=lift),
+        "ci_lower": float(ci_lower),
+        "ci_upper": float(ci_upper),
+        "p_value": p_value,
+        "failed": p_value < alpha,
     }

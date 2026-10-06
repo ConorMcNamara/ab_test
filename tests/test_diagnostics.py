@@ -5,7 +5,8 @@ import plotly.graph_objects as go
 import pytest
 import scipy.stats as ss
 
-from ab_test.diagnostics import srm_test, time_trend_test
+from ab_test.diagnostics import placebo_test, srm_test, time_trend_test
+from ab_test.frequentist_binomial.stats_tests import ab_test
 
 
 class TestSrmTest:
@@ -233,3 +234,84 @@ class TestTimeTrendTest:
                 rejections += 1
         error_rate = rejections / n_sims
         assert error_rate < alpha + 0.03
+
+
+class TestPlaceboTest:
+    @staticmethod
+    def test_balanced_groups_pass():
+        result = placebo_test(480, 10000, 495, 10000)
+        assert result["failed"] is False
+        assert result["p_value"] > 0.05
+
+    @staticmethod
+    def test_imbalanced_groups_fail():
+        result = placebo_test(480, 10000, 560, 10000)
+        assert result["failed"] is True
+        assert result["p_value"] < 0.05
+
+    @staticmethod
+    def test_returns_expected_keys():
+        result = placebo_test(480, 10000, 495, 10000)
+        assert set(result) == {"lift", "ci_lower", "ci_upper", "p_value", "failed"}
+
+    @staticmethod
+    def test_absolute_lift_value():
+        result = placebo_test(480, 10000, 560, 10000)
+        assert result["lift"] == pytest.approx(0.008)
+
+    @staticmethod
+    def test_relative_lift_value():
+        result = placebo_test(480, 10000, 560, 10000, lift="relative")
+        assert result["lift"] == pytest.approx(560 / 480 - 1)
+
+    @pytest.mark.parametrize("lift", ["absolute", "relative"])
+    def test_interval_contains_lift(self, lift):
+        result = placebo_test(480, 10000, 560, 10000, lift=lift)
+        assert result["ci_lower"] < result["lift"] < result["ci_upper"]
+
+    @staticmethod
+    def test_interval_agrees_with_p_value():
+        failed = placebo_test(480, 10000, 560, 10000)
+        passed = placebo_test(480, 10000, 495, 10000)
+        assert failed["ci_lower"] > 0
+        assert passed["ci_lower"] < 0 < passed["ci_upper"]
+
+    @pytest.mark.parametrize("method", ["score", "z", "fisher", "likelihood"])
+    def test_p_value_uses_test_method(self, method):
+        result = placebo_test(480, 10000, 560, 10000, test_method=method)
+        expected = ab_test([10000, 10000], [480, 560], null_lift=0.0, lift="absolute", method=method)
+        assert result["p_value"] == pytest.approx(expected)
+
+    @staticmethod
+    def test_alpha_controls_failure():
+        result = placebo_test(480, 10000, 560, 10000)
+        assert placebo_test(480, 10000, 560, 10000, alpha=result["p_value"] / 2)["failed"] is False
+
+    @staticmethod
+    def test_zero_control_successes_gives_finite_interval():
+        result = placebo_test(0, 500, 3, 500)
+        assert np.isfinite(result["ci_lower"])
+        assert np.isfinite(result["ci_upper"])
+        assert result["ci_lower"] < 0.006 < result["ci_upper"]
+
+    @staticmethod
+    def test_relative_with_zero_control_successes_raises():
+        with pytest.raises(ValueError, match="Relative lift is undefined"):
+            placebo_test(0, 500, 3, 500, lift="relative")
+
+    @pytest.mark.parametrize(
+        "counts",
+        [(-1, 100, 5, 100), (5, 0, 5, 100), (5, 100, 5, -100), (101, 100, 5, 100), (5, 100, 101, 100)],
+    )
+    def test_invalid_counts_raise(self, counts):
+        with pytest.raises(ValueError):
+            placebo_test(*counts)
+
+    @staticmethod
+    def test_false_positive_rate_matches_alpha():
+        rng = np.random.default_rng(0)
+        n, reps = 2000, 1000
+        failures = sum(
+            placebo_test(int(rng.binomial(n, 0.05)), n, int(rng.binomial(n, 0.05)), n)["failed"] for _ in range(reps)
+        )
+        assert 0.03 <= failures / reps <= 0.07
