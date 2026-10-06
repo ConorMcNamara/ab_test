@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.13%20%7C%203.14-blue)](https://www.python.org/)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Checked with zuban](https://img.shields.io/badge/type%20checked-zuban-blue)](https://zubanls.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A Python library for designing, running, and analyzing A/B tests on binomial metrics (conversion rates, click-through rates, etc.). It provides both frequentist and Bayesian approaches with full power analysis, sequential testing, and covariate-adjusted variance reduction.
 

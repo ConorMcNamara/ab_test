@@ -6,8 +6,8 @@ authors = [
     {name = "ConorMcNamara",email = "conor.s.mcnamara@gmail.com"}
 ]
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
