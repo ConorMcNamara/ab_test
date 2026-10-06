@@ -9,6 +9,7 @@ from ab_test.frequentist_normal.confidence_intervals import (
     z_interval,
     delta_interval,
 )
+from ab_test.frequentist_normal.stats_tests import score_test
 
 
 class TestConfidenceIntervalComparison:
@@ -115,6 +116,17 @@ class TestConfidenceIntervalComparison:
         )
         assert actual_low == pytest.approx(expected_low, abs=1e-4)
         assert actual_high == pytest.approx(expected_high, abs=1e-4)
+
+    @staticmethod
+    def test_binary_search_inverts_score_test():
+        means = [10.0, 11.0]
+        variances = [4.0, 5.0]
+        trials = [1000, 1000]
+        lb, ub = confidence_interval(
+            means, variances, trials, test=score_test, method="binary_search", lift="absolute"
+        )
+        assert score_test(means, variances, trials, null_lift=lb, lift="absolute") == pytest.approx(0.05, abs=1e-4)
+        assert score_test(means, variances, trials, null_lift=ub, lift="absolute") == pytest.approx(0.05, abs=1e-4)
 
     @staticmethod
     def test_methods_agree_absolute():

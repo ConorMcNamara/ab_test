@@ -2,7 +2,7 @@
 
 import pytest
 
-from ab_test.frequentist_normal.utils import observed_lift, validate_two_group
+from ab_test.frequentist_normal.utils import mle_under_null, observed_lift, validate_two_group
 
 
 class TestObservedLift:
@@ -74,6 +74,38 @@ class TestValidateTwoGroup:
             [1, 2], [100, 200], [4, 5],
             null_lift=0.1, lift="relative", allow_relative_null=True,
         )
+
+
+class TestMleUnderNull:
+    @staticmethod
+    def test_zero_null_pools_means():
+        mu, _ = mle_under_null([10.0, 11.0], [4.0, 5.0], [100, 300], null_lift=0.0, lift="absolute")
+        assert mu == pytest.approx([10.75, 10.75])
+
+    @pytest.mark.parametrize("lift", ["relative", "absolute"])
+    def test_zero_null_same_for_both_lifts(self, lift):
+        mu, sigma2 = mle_under_null([10.0, 11.0], [4.0, 5.0], [100, 300], null_lift=0.0, lift=lift)
+        assert mu == pytest.approx([10.75, 10.75])
+        assert sigma2 == pytest.approx((99 * 4.0 + 299 * 5.0 + 100 * 0.75**2 + 300 * 0.25**2) / 400)
+
+    @staticmethod
+    def test_absolute_constraint_holds():
+        mu, _ = mle_under_null([10.0, 11.0], [4.0, 5.0], [100, 300], null_lift=0.4, lift="absolute")
+        assert mu[1] - mu[0] == pytest.approx(0.4)
+
+    @staticmethod
+    def test_relative_constraint_holds():
+        mu, _ = mle_under_null([10.0, 11.0], [4.0, 5.0], [100, 300], null_lift=0.05, lift="relative")
+        assert mu[1] / mu[0] == pytest.approx(1.05)
+
+    @pytest.mark.parametrize(
+        "null_lift, lift",
+        [(1.0, "absolute"), (0.1, "relative")],
+    )
+    def test_observed_lift_recovers_sample_means(self, null_lift, lift):
+        mu, sigma2 = mle_under_null([10.0, 11.0], [4.0, 5.0], [100, 300], null_lift=null_lift, lift=lift)
+        assert mu == pytest.approx([10.0, 11.0])
+        assert sigma2 == pytest.approx((99 * 4.0 + 299 * 5.0) / 400)
 
 
 if __name__ == "__main__":
