@@ -1,5 +1,6 @@
 """Testing our confidence intervals"""
 
+import numpy as np
 import pytest
 
 from ab_test.frequentist_binomial.confidence_intervals import (
@@ -10,7 +11,8 @@ from ab_test.frequentist_binomial.confidence_intervals import (
     clopper_pearson_interval,
     wald_interval,
 )
-from ab_test.frequentist_binomial.stats_tests import likelihood_ratio_test, z_test
+from ab_test.frequentist_binomial.msprt import msprt_test
+from ab_test.frequentist_binomial.stats_tests import likelihood_ratio_test, score_test, z_test
 
 
 class TestConfidenceIntervalComparison:
@@ -62,7 +64,8 @@ class TestConfidenceIntervalComparison:
     def test_extremes_01():
         trials = [1000, 1000]
         successes = [0, 1]
-        expected_low = float("-inf")
+        # Relative lift is bounded below by -100%.
+        expected_low = -1.0
         expected_high = float("inf")
         actual_low, actual_high = confidence_interval(trials, successes)
         assert actual_low == expected_low
@@ -72,7 +75,8 @@ class TestConfidenceIntervalComparison:
     def test_extremes_00():
         trials = [1000, 1000]
         successes = [0, 0]
-        expected_low = float("-inf")
+        # Relative lift is bounded below by -100%.
+        expected_low = -1.0
         expected_high = float("inf")
         actual_low, actual_high = confidence_interval(trials, successes)
         assert actual_low == expected_low
@@ -359,6 +363,61 @@ class TestConfidenceInterval:
 
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
+
+
+class TestBoundaryIntervals:
+    @pytest.mark.parametrize("test", [score_test, likelihood_ratio_test, z_test, msprt_test])
+    @pytest.mark.parametrize("successes", [[0, 3], [3, 0], [0, 0], [50, 47], [47, 50], [50, 50]])
+    def test_absolute_interval_is_finite_and_contains_estimate(self, test, successes):
+        trials = [50, 50] if max(successes) >= 10 else [500, 500]
+        lb, ub = confidence_interval(trials, successes, test=test, lift="absolute")
+        estimate = successes[1] / trials[1] - successes[0] / trials[0]
+        assert -1.0 < lb <= ub < 1.0
+        assert lb <= estimate + 1e-6 and estimate - 1e-6 <= ub
+
+    @pytest.mark.parametrize("test", [score_test, z_test])
+    @pytest.mark.parametrize("successes", [[0, 3], [3, 0], [0, 0], [50, 47], [47, 50]])
+    def test_score_and_z_close_to_wilson(self, test, successes):
+        trials = [50, 50] if max(successes) >= 10 else [500, 500]
+        lb, ub = confidence_interval(trials, successes, test=test, lift="absolute")
+        w_lb, w_ub = confidence_interval(trials, successes, lift="absolute", method="wilson")
+        width = w_ub - w_lb
+        assert lb == pytest.approx(w_lb, abs=0.35 * width)
+        assert ub == pytest.approx(w_ub, abs=0.35 * width)
+
+    @pytest.mark.parametrize("test", [score_test, likelihood_ratio_test, z_test, msprt_test])
+    @pytest.mark.parametrize("successes", [[0, 3], [50, 47]])
+    def test_swapping_groups_mirrors_interval(self, test, successes):
+        trials = [50, 50] if max(successes) >= 10 else [500, 500]
+        lb, ub = confidence_interval(trials, successes, test=test, lift="absolute")
+        s_lb, s_ub = confidence_interval(trials, list(reversed(successes)), test=test, lift="absolute")
+        assert lb == pytest.approx(-s_ub, abs=1e-4)
+        assert ub == pytest.approx(-s_lb, abs=1e-4)
+
+    @staticmethod
+    def test_absolute_lower_bound_not_limited_by_observed_control_rate():
+        # The search used to stop at -(observed control rate) = -0.04 here and
+        # report -1.0, although the true bound is about -0.032.
+        lb, _ = confidence_interval([500, 800], [20, 25], lift="absolute")
+        w_lb, _ = confidence_interval([500, 800], [20, 25], lift="absolute", method="wilson")
+        assert lb == pytest.approx(w_lb, abs=0.005)
+
+    @pytest.mark.parametrize("successes", [[0, 3], [0, 0], [50, 47], [3, 0]])
+    def test_relative_lower_bound_at_least_minus_one(self, successes):
+        trials = [50, 50] if max(successes) >= 10 else [500, 500]
+        lb, _ = confidence_interval(trials, successes, lift="relative")
+        assert lb >= -1.0
+
+    @staticmethod
+    def test_coverage_with_rare_events():
+        rng = np.random.default_rng(0)
+        n, pa, pb, reps = 500, 0.003, 0.006, 300
+        covered = 0
+        for _ in range(reps):
+            successes = [int(rng.binomial(n, pa)), int(rng.binomial(n, pb))]
+            lb, ub = confidence_interval([n, n], successes, test=score_test, lift="absolute")
+            covered += lb <= pb - pa <= ub
+        assert covered / reps >= 0.92
 
 
 if __name__ == "__main__":

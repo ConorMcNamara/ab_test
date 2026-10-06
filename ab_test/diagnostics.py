@@ -302,8 +302,7 @@ def placebo_test(
 
         - ``"lift"`` : float — observed placebo lift (B vs. A).
         - ``"ci_lower"`` : float — lower bound of the 100(1 − alpha)%
-          confidence interval (Wilson for absolute lift, an inverted score
-          test for relative lift).
+          confidence interval, from inverting the score test.
         - ``"ci_upper"`` : float — upper bound of that interval.
         - ``"p_value"`` : float — p-value for H₀: no placebo effect.
         - ``"failed"`` : bool — ``True`` when p_value < alpha, i.e. the
@@ -332,11 +331,7 @@ def placebo_test(
         raise ValueError('Relative lift is undefined with no control successes; use lift="absolute"')
 
     p_value = float(ab_test(trials, successes, null_lift=0.0, lift=lift, method=test_method))
-    # Inverting the score test breaks down with zero control successes, which
-    # placebo data hits often; Wilson intervals stay finite there. They can fall
-    # below -100% for relative lift on small counts, so that case keeps the score test.
-    ci_method = "wilson" if lift == "absolute" else "binary_search"
-    ci_lower, ci_upper = confidence_interval(trials, successes, alpha=alpha, lift=lift, method=ci_method)
+    ci_lower, ci_upper = confidence_interval(trials, successes, alpha=alpha, lift=lift)
 
     return {
         "lift": observed_lift(trials, successes, lift=lift),

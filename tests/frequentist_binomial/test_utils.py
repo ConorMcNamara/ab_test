@@ -2,6 +2,8 @@
 
 import numpy as np
 import pytest
+from scipy.optimize import minimize_scalar
+from scipy.special import xlogy
 
 from ab_test.frequentist_binomial.utils import (
     observed_lift,
@@ -231,6 +233,61 @@ class TestMaximumLikelihoodEstimation:
 
         assert actual[1] == pytest.approx(actual[0] + null_lift)
         assert actual == pytest.approx(expected, abs=1e-6)
+
+
+def _constrained_log_likelihood(trials, successes, pa, d):
+    p = [pa, pa + d]
+    return sum(xlogy(s, q) + xlogy(n - s, 1 - q) for n, s, q in zip(trials, successes, p))
+
+
+class TestMleUnderNullBoundary:
+    @pytest.mark.parametrize(
+        "trials, successes, d",
+        [
+            ([50, 50], [50, 47], -0.06),
+            ([50, 50], [47, 50], 0.02),
+            ([50, 50], [50, 50], 0.03),
+            ([500, 500], [0, 3], 0.01),
+            ([500, 500], [3, 0], -0.01),
+            ([500, 500], [0, 0], 0.03),
+            ([50, 50], [49, 45], -0.05),
+            ([500, 800], [20, 25], -0.03),
+        ],
+    )
+    def test_maximises_constrained_likelihood(self, trials, successes, d):
+        lo, hi = max(0.0, -d), min(1.0, 1.0 - d)
+        brute = minimize_scalar(
+            lambda pa: -_constrained_log_likelihood(trials, successes, pa, d),
+            bounds=(lo, hi),
+            method="bounded",
+            options={"xatol": 1e-12},
+        )
+        p = mle_under_null(trials, successes, null_lift=d, lift="absolute")
+        assert 0.0 <= p[0] <= 1.0 and 0.0 <= p[1] <= 1.0
+        assert p[1] - p[0] == pytest.approx(d)
+        assert _constrained_log_likelihood(trials, successes, p[0], d) >= -brute.fun - 1e-9
+
+    @staticmethod
+    def test_all_successes_control_sits_on_boundary():
+        assert mle_under_null([50, 50], [50, 47], null_lift=-0.06, lift="absolute") == pytest.approx([1.0, 0.94])
+
+    @staticmethod
+    def test_rejects_spurious_boundary_root():
+        # Newton converges to pa = 1 - d here, a root introduced by clearing the
+        # (1 - pb) denominator when the treatment group has no failures.
+        p = mle_under_null([50, 50], [47, 50], null_lift=0.02, lift="absolute")
+        assert p[1] < 1.0
+
+    @staticmethod
+    def test_rates_always_valid():
+        rng = np.random.default_rng(0)
+        for _ in range(500):
+            trials = [int(rng.integers(5, 200)), int(rng.integers(5, 200))]
+            successes = [int(rng.integers(0, trials[0] + 1)), int(rng.integers(0, trials[1] + 1))]
+            d = float(rng.uniform(-0.9, 0.9))
+            p = mle_under_null(trials, successes, null_lift=d, lift="absolute")
+            assert -1e-12 <= p[0] <= 1 + 1e-12
+            assert -1e-12 <= p[1] <= 1 + 1e-12
 
 
 if __name__ == "__main__":

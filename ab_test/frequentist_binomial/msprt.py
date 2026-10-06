@@ -111,9 +111,6 @@ def msprt_test(
     p0 = mle_under_null(trials, successes, null_lift=null_lift, lift=lift)
     p1 = mle_under_alternative(trials, successes)
 
-    if min(p0) <= 1e-12 or max(p0) + 1e-12 >= 1.0:
-        return 1.0 if crit is None else False
-
     sigma2 = p0[0] * (1 - p0[0]) / trials[0] + p0[1] * (1 - p0[1]) / trials[1]
     if sigma2 <= 1e-24:
         return 1.0 if crit is None else False

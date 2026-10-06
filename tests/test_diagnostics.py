@@ -6,7 +6,8 @@ import pytest
 import scipy.stats as ss
 
 from ab_test.diagnostics import placebo_test, srm_test, time_trend_test
-from ab_test.frequentist_binomial.stats_tests import ab_test
+from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
+from ab_test.frequentist_binomial.stats_tests import ab_test, score_test
 
 
 class TestSrmTest:
@@ -293,6 +294,20 @@ class TestPlaceboTest:
         assert np.isfinite(result["ci_lower"])
         assert np.isfinite(result["ci_upper"])
         assert result["ci_lower"] < 0.006 < result["ci_upper"]
+
+    @pytest.mark.parametrize("lift", ["absolute", "relative"])
+    def test_interval_inverts_score_test(self, lift):
+        result = placebo_test(480, 10000, 560, 10000, lift=lift)
+        lb, ub = confidence_interval([10000, 10000], [480, 560], test=score_test, lift=lift)
+        assert result["ci_lower"] == pytest.approx(lb)
+        assert result["ci_upper"] == pytest.approx(ub)
+
+    @pytest.mark.parametrize(
+        "counts", [(0, 500, 3, 500), (0, 500, 9, 500), (480, 10000, 495, 10000), (480, 10000, 560, 10000)]
+    )
+    def test_interval_excludes_zero_exactly_when_failed(self, counts):
+        result = placebo_test(*counts)
+        assert (not result["ci_lower"] <= 0 <= result["ci_upper"]) is result["failed"]
 
     @staticmethod
     def test_relative_with_zero_control_successes_raises():
