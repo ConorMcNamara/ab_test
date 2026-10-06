@@ -82,6 +82,7 @@ def score_test(
     null_lift: float = 0.0,
     lift: str = "relative",
     crit: float | None = None,
+    equal_var: bool = True,
 ) -> float | bool:
     """Rao's score test for 2 experiment groups.
 
@@ -105,6 +106,9 @@ def score_test(
         simulations where we will be repeatedly assessing significance, since
         calculating the critical value can be done once instead of repeatedly.
         This makes such simulations about 5x faster.
+    equal_var : bool, default=True
+        If True, assume both groups share a common variance. If False, give
+        each group its own variance, analogous to `welch_test`. See Notes.
 
     Returns
     -------
@@ -118,22 +122,35 @@ def score_test(
     -----
     Only supports two experiment groups at this time.
 
-    Assumes both groups share a common variance; use `welch_test` when they
-    do not. The test statistic is compared against a chi-squared
-    distribution with 1 degree of freedom, so ``crit`` must be on that scale
-    (e.g. ``ss.chi2.isf(alpha, df=1)``). For an absolute null it equals
+    The test statistic is ``sum(n_i * (mean_i - mu_i)**2 / sigma2_i)``, where
+    ``mu_i`` and ``sigma2_i`` are the MLEs under H0 from `mle_under_null`. It
+    is compared against a chi-squared distribution with 1 degree of freedom,
+    so ``crit`` must be on that scale (e.g. ``ss.chi2.isf(alpha, df=1)``).
+
+    With ``equal_var=True`` and an absolute null, the statistic equals
     ``N * t**2 / (N - 2 + t**2)``, where ``t`` is the pooled two-sample
     t-statistic, so the exact small-sample version of this test is the
     pooled t-test.
+
+    With ``equal_var=False`` and an absolute null, the statistic equals
+    ``D**2 / (sigma2_a / n_a + sigma2_b / n_b)`` with
+    ``D = mean_b - mean_a - null_lift``: Welch's statistic squared, but with
+    each variance estimated under H0. There is no exact small-sample version
+    (this is the Behrens-Fisher problem), so for small samples prefer
+    `welch_test`.
     """
     validate_two_group(means, trials, variances, null_lift, lift)
 
-    mu, sigma2 = mle_under_null(means, variances, trials, null_lift=null_lift, lift=lift)
+    mu, sigma2 = mle_under_null(means, variances, trials, null_lift=null_lift, lift=lift, equal_var=equal_var)
+    sigma2_by_group = sigma2 if isinstance(sigma2, list) else [sigma2, sigma2]
 
-    if sigma2 <= 1e-12:
-        return 1.0 if crit is None else False
-
-    ts = (trials[0] * (means[0] - mu[0]) ** 2 + trials[1] * (means[1] - mu[1]) ** 2) / sigma2
+    # A group's null variance is only zero when its mean is fit exactly, so it
+    # contributes nothing to the statistic.
+    ts = sum(
+        n * (m - u) ** 2 / s2
+        for n, m, u, s2 in zip(trials[:2], means[:2], mu, sigma2_by_group)
+        if s2 > 1e-12
+    )
 
     if crit is None:
         pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
