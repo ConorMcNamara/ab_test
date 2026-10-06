@@ -1,12 +1,12 @@
 """Calculates confidence intervals for AB Tests with Normal Data."""
 
 import math
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
 import scipy.stats as ss
 
+from ab_test._binary_search import binary_search_interval
 from ab_test.frequentist_normal.stats_tests import welch_test
 from ab_test.frequentist_normal.utils import observed_lift
 
@@ -17,70 +17,6 @@ __all__ = [
     "z_interval",
     "delta_interval",
 ]
-
-
-def _search_lower_bound(
-    means: Any,
-    variances: Any,
-    trials: Any,
-    test: Any,
-    lb_lb: float,
-    lb_ub: float,
-    alpha: float,
-    lift: str,
-    tol: float,
-) -> float:
-    eps = 0.01
-    while True:
-        if lift == "relative" and lb_lb < -1:
-            return -1.0
-        pval = test(means, variances, trials, null_lift=lb_lb, lift=lift)
-        if pval >= alpha:
-            lb_ub = lb_lb
-            lb_lb -= eps
-            eps *= 2
-        else:
-            break
-    while (lb_ub - lb_lb) > tol:
-        lb = 0.5 * (lb_lb + lb_ub)
-        pval = test(means, variances, trials, null_lift=lb, lift=lift)
-        if pval >= alpha:
-            lb_ub = lb
-        else:
-            lb_lb = lb
-    return 0.5 * (lb_lb + lb_ub)
-
-
-def _search_upper_bound(
-    means: Any,
-    variances: Any,
-    trials: Any,
-    test: Any,
-    ub_lb: float,
-    ub_ub: float,
-    alpha: float,
-    lift: str,
-    tol: float,
-) -> float:
-    eps = 0.01
-    while True:
-        if ub_ub > 100:
-            return math.inf
-        pval = test(means, variances, trials, null_lift=ub_ub, lift=lift)
-        if pval >= alpha:
-            ub_lb = ub_ub
-            ub_ub += eps
-            eps *= 2
-        else:
-            break
-    while (ub_ub - ub_lb) > tol:
-        ub = 0.5 * (ub_lb + ub_ub)
-        pval = test(means, variances, trials, null_lift=ub, lift=lift)
-        if pval >= alpha:
-            ub_lb = ub
-        else:
-            ub_ub = ub
-    return 0.5 * (ub_lb + ub_ub)
 
 
 def confidence_interval(
@@ -130,21 +66,17 @@ def confidence_interval(
     lb: float
     ub: float
     if method == "binary_search":
-        lb_lb = ote - 0.01
-        lb_ub = ote
-        ub_lb = ote
-        ub_ub = ote + 0.01
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            lb_future = executor.submit(
-                _search_lower_bound, means, variances, trials, test,
-                lb_lb, lb_ub, alpha, lift, tol,
-            )
-            ub_future = executor.submit(
-                _search_upper_bound, means, variances, trials, test,
-                ub_lb, ub_ub, alpha, lift, tol,
-            )
-            lb = lb_future.result()
-            ub = ub_future.result()
+        lb_found, ub_found = binary_search_interval(
+            lambda d: test(means, variances, trials, null_lift=d, lift=lift),
+            (ote - 0.01, ote),
+            (ote, ote + 0.01),
+            alpha=alpha,
+            lower_limit=-1.0 if lift == "relative" else -math.inf,
+            upper_limit=100.0 if lift == "relative" else math.inf,
+            tol=tol,
+        )
+        lb = lb_found if lb_found is not None else -1.0
+        ub = ub_found if ub_found is not None else math.inf
     elif method in ["welch", "z"]:
         if method == "welch":
             t_crit_a = float(ss.t.ppf(1 - alpha / 2, trials[0] - 1))  # type: ignore[no-untyped-call]

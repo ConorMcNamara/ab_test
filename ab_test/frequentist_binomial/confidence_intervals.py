@@ -1,12 +1,12 @@
 """Calculates confidence intervals for AB Tests."""
 
 import math
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
 import scipy.stats as ss
 
+from ab_test._binary_search import binary_search_interval
 from ab_test.frequentist_binomial.stats_tests import score_test
 from ab_test.frequentist_binomial.utils import observed_lift
 
@@ -20,82 +20,6 @@ __all__ = [
     "wald_interval",
     "delta_interval",
 ]
-
-
-def _search_lower_bound(
-    test: Any,
-    trials: Any,
-    successes: Any,
-    lb_lb: float,
-    lb_ub: float,
-    alpha: float,
-    lift: str,
-    tol: float,
-) -> float:
-    eps = 0.01
-    lower_bound_exists = True
-    while True:
-        # Both lifts are bounded below by -1. The observed control rate is not a
-        # bound for absolute lift, since the true rate can exceed it.
-        if lb_lb < -1 or (lift == "absolute" and lb_lb <= -1):
-            lower_bound_exists = False
-            break
-        pval = test(trials, successes, null_lift=lb_lb, lift=lift)
-        if pval >= alpha:
-            lb_ub = lb_lb
-            lb_lb -= eps
-            eps *= 2
-        else:
-            break
-    if lower_bound_exists:
-        while (lb_ub - lb_lb) > tol:
-            lb = 0.5 * (lb_lb + lb_ub)
-            pval = test(trials, successes, null_lift=lb, lift=lift)
-            if pval >= alpha:
-                lb_ub = lb
-            else:
-                lb_lb = lb
-        return 0.5 * (lb_lb + lb_ub)
-    return -1.0
-
-
-def _search_upper_bound(
-    test: Any,
-    trials: Any,
-    successes: Any,
-    ub_lb: float,
-    ub_ub: float,
-    alpha: float,
-    lift: str,
-    tol: float,
-    upper_bound_exists: bool,
-) -> float:
-    if upper_bound_exists:
-        eps = 0.01
-        while True:
-            if ub_ub > 100 or (lift == "absolute" and ub_ub >= 1):
-                upper_bound_exists = False
-                break
-            pval = test(trials, successes, null_lift=ub_ub, lift=lift)
-            if pval >= alpha:
-                ub_lb = ub_ub
-                ub_ub += eps
-                eps *= 2
-            else:
-                break
-    if upper_bound_exists:
-        while (ub_ub - ub_lb) > tol:
-            ub = 0.5 * (ub_lb + ub_ub)
-            pval = test(trials, successes, null_lift=ub, lift=lift)
-            if pval >= alpha:
-                ub_lb = ub
-            else:
-                ub_ub = ub
-        return 0.5 * (ub_lb + ub_ub)
-    elif lift == "relative":
-        return math.inf
-    else:
-        return 1.0
 
 
 def confidence_interval(
@@ -162,15 +86,24 @@ def confidence_interval(
                 ub_lb = ote
                 ub_ub = min(ote + 0.01, 1.0)
 
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                lb_future = executor.submit(
-                    _search_lower_bound, test, trials, successes, lb_lb, lb_ub, alpha, lift, tol
-                )
-                ub_future = executor.submit(
-                    _search_upper_bound, test, trials, successes, ub_lb, ub_ub, alpha, lift, tol, upper_bound_exists
-                )
-                lb = lb_future.result()
-                ub = ub_future.result()
+            # Both lifts are bounded below by -1, and absolute lift above by 1. The
+            # absolute limits are exclusive: a difference of exactly +/-1 forces both
+            # rates onto the boundary.
+            lb_found, ub_found = binary_search_interval(
+                lambda d: test(trials, successes, null_lift=d, lift=lift),
+                (lb_lb, lb_ub),
+                (ub_lb, ub_ub),
+                alpha=alpha,
+                lower_limit=-1.0 if lift == "relative" else math.nextafter(-1.0, 0.0),
+                upper_limit=100.0 if lift == "relative" else math.nextafter(1.0, 0.0),
+                tol=tol,
+                search_upper=upper_bound_exists,
+            )
+            lb = lb_found if lb_found is not None else -1.0
+            if ub_found is not None:
+                ub = ub_found
+            else:
+                ub = math.inf if lift == "relative" else 1.0
         else:
             raise NotImplementedError(f"binary_search is not implemented for {test}")
     else:
