@@ -9,12 +9,14 @@ import math
 from typing import Any, overload
 
 import plotly.graph_objects as go
+from tabulate import tabulate
 
 __all__ = [
     "COLORBLIND_PALETTES",
     "resolve_plot_color",
     "convert_to_tabulate_str",
     "render_forest_plot",
+    "tabulate_summary",
 ]
 
 # Colorblind-friendly palettes keyed by name. "wong" and "ito" are aliases for
@@ -134,6 +136,40 @@ def convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[A
     raise TypeError(f"No support for converting {value} to string")
 
 
+def tabulate_summary(row_labels: list[str], values: list[Any]) -> str:
+    """Render a single result as a vertical ``Statistic | Value`` grid.
+
+    Parameters
+    ----------
+    row_labels : list of str
+        The name of each statistic.
+    values : list
+        The value of each statistic, in the same order as ``row_labels``.
+
+    Returns
+    -------
+    str
+        The grid-formatted table.
+    """
+
+    def _format_value(val: Any) -> str:
+        if isinstance(val, str):
+            return val
+        if isinstance(val, int):
+            return f"{val:,}"
+        if isinstance(val, float):
+            return f"{val:,.2f}"
+        return str(val)
+
+    result: str = tabulate(
+        [[label, _format_value(val)] for label, val in zip(row_labels, values)],
+        headers=["Statistic", "Value"],
+        tablefmt="grid",
+        disable_numparse=True,
+    )
+    return result
+
+
 def render_forest_plot(
     names: list[str],
     individual_results: dict[str, dict[str, float]],
@@ -141,6 +177,8 @@ def render_forest_plot(
     is_individual: bool = True,
     reverse_plot: bool = True,
     color: str | dict[str, Any] | list[Any] | None = None,
+    experiment_name: str | None = None,
+    metric_name: str | None = None,
 ) -> None:
     """Render a dot-and-whisker (forest) plot of point estimates and intervals.
 
@@ -151,10 +189,14 @@ def render_forest_plot(
     individual_results : dict
         Per-cell results keyed by name (plus a ``"Total"`` entry), each holding
         ``"lift"``, ``"ci_lower"``, and ``"ci_upper"``. Used when
-        ``is_individual`` is True.
+        ``is_individual`` is True. This is only populated once
+        ``.analyze_individually()`` has been run; nothing will render before
+        then.
     incremental_results : dict or None
         Comparative results holding ``"lift"``, ``"ci_lower"``, ``"ci_upper"``,
-        and ``"lift_type"``. Used when ``is_individual`` is False.
+        and ``"lift_type"``. Used when ``is_individual`` is False. This is
+        only populated once ``.analyze()`` has been run; nothing will render
+        before then.
     is_individual : bool, default=True
         Whether to plot each cell's individual performance or the comparative
         performance between variants.
@@ -162,11 +204,20 @@ def render_forest_plot(
         Whether to reverse the y-axis order.
     color : str, list, dict, or None, default=None
         Passed to :func:`resolve_plot_color`.
+    experiment_name : str or None, default=None
+        Name of the experiment, included in the plot title when given.
+    metric_name : str or None, default=None
+        Name of the metric being plotted, included in the plot title and, for
+        individual plots, the x-axis label.
 
     Raises
     ------
     ValueError
-        If ``is_individual`` is False but ``incremental_results`` is None.
+        If ``is_individual`` is False but ``incremental_results`` is None,
+        i.e. ``.analyze()`` was not run first.
+    KeyError
+        If ``is_individual`` is True but ``individual_results`` is empty,
+        i.e. ``.analyze_individually()`` was not run first.
     """
     plot_color = resolve_plot_color(color)
     fig = go.Figure()  # type: ignore[attr-defined]
@@ -262,6 +313,29 @@ def render_forest_plot(
                 fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="0.2")
         else:
             fig.update_layout(xaxis_tickformat="~s")
+
+    subtitle = " - ".join(part for part in (experiment_name, metric_name) if part)
+    if is_individual:
+        title = f"Individual Performance by Cell{f': {subtitle}' if subtitle else ''}"
+        xaxis_title = metric_name or "Success Rate"
+        yaxis_title = "Cell"
+    else:
+        lift_label = (
+            {
+                "relative": "Relative Lift",
+                "absolute": "Absolute Lift",
+                "incremental": "Incremental Lift",
+                "revenue": "Revenue Lift",
+                "roas": "ROAS Lift",
+                "cpa": "CPA Lift",
+            }.get(incremental_results["lift_type"], "Lift")
+            if incremental_results is not None
+            else "Lift"
+        )
+        title = f"{lift_label} of {names[0]} vs. {names[1]}{f': {subtitle}' if subtitle else ''}"
+        xaxis_title = lift_label
+        yaxis_title = ""
+    fig.update_layout(title_text=title, xaxis_title=xaxis_title, yaxis_title=yaxis_title)
     if reverse_plot:
         fig.update_layout(yaxis={"autorange": "reversed"})
     fig.show()  # type: ignore[no-untyped-call]

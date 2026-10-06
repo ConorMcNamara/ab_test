@@ -245,10 +245,20 @@ class BaseContingencyTable:
             If a list, each item corresponds to a color for the relevant group.
             If a dict, keys are group names and values are colors.
 
+        Raises
+        ------
+        ValueError
+            If ``is_individual`` is False and .analyze() has not been run yet.
+        KeyError
+            If ``is_individual`` is True and .analyze_individually() has not
+            been run yet.
+
         Notes
         -----
-        This function is intended to be run after either .analyze() or
-        .analyze_individually().
+        This function will not render anything unless it is run after either
+        .analyze() (for ``is_individual=False``) or .analyze_individually()
+        (for ``is_individual=True``) — those methods populate the results
+        this function plots.
         """
         render_forest_plot(
             self.names,
@@ -257,6 +267,8 @@ class BaseContingencyTable:
             is_individual=is_individual,
             reverse_plot=reverse_plot,
             color=color,
+            experiment_name=self.experiment_name,
+            metric_name=self.metric_name,
         )
 
     def __str__(self) -> str:

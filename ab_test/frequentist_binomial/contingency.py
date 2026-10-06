@@ -8,7 +8,7 @@ import numpy as np
 from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
-from ab_test._display import convert_to_tabulate_str
+from ab_test._display import convert_to_tabulate_str, tabulate_summary
 from ab_test._lift import scale_bounds, scale_metric
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
 from ab_test.frequentist_binomial.msprt import msprt_test
@@ -52,7 +52,16 @@ def _scale_bound(bound: float, factor: float) -> float:
 
 
 class ContingencyTable(BaseContingencyTable):
-    """A class for analyzing experiment results."""
+    """A class for analyzing experiment results.
+
+    Examples
+    --------
+    >>> table = ContingencyTable("Checkout redesign", "conversion")
+    >>> table = table.add("Control", 1000, 10000).add("Treatment", 1100, 10000)
+    >>> print(table.analyze(lift="relative"))  # doctest: +SKIP
+    >>> print(table.analyze_individually())  # doctest: +SKIP
+    >>> table.plot(is_individual=False)  # doctest: +SKIP
+    """
 
     _columns: ClassVar[list[str]] = ["cell_name", "successes", "trials"]
     _pyspark_types: ClassVar[dict[str, str]] = {
@@ -193,17 +202,17 @@ class ContingencyTable(BaseContingencyTable):
             "ci_lower": lb,
             "ci_upper": ub,
         }
-        table_headers = (
+        row_labels = (
             ["Metric", "Metric Name"] + self.names + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", "p-value"]
         )
-        str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
-        table_list = [
+        str_pvalue = f"{p_value:.4f}" if p_value >= alpha else f"{p_value:.4f}*"
+        values = (
             [lift, self.metric_name]
             + convert_to_tabulate_str(success_rate, lift)
             + convert_to_tabulate_str([test_lift, lb, ub], lift)
             + [str_pvalue]
-        ]
-        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
+        )
+        return_string = tabulate_summary(row_labels, values)
         return_string += (
             f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
         )

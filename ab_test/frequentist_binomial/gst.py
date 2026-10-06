@@ -314,7 +314,7 @@ class GroupSequentialDesign:
     --------
     >>> design = GroupSequentialDesign(n_analyses=3, alpha=0.05)
     >>> print(design.summary())  # doctest: +SKIP
-    >>> design.test([5000, 5000], [480, 550], look=2)
+    >>> result = design.test([5000, 5000], [480, 550], look=2)
     """
 
     def __init__(

@@ -65,7 +65,8 @@ module-name = "ab_test"
 
 [tool.pytest.ini_options]
 pythonpath = ["ab_test", '.']
-addopts = "--cov=ab_test --cov-report=term-missing --cov-report=xml"
+testpaths = ["tests", "ab_test"]
+addopts = "--doctest-modules --cov=ab_test --cov-report=term-missing --cov-report=xml"
 markers = ["slow: computationally expensive tests (Monte Carlo, exact combinatorial)"]
 
 [tool.coverage.run]

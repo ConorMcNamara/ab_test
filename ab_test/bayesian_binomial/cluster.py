@@ -22,7 +22,7 @@ import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 from tabulate import tabulate
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 
 __all__ = [
@@ -151,6 +151,17 @@ class BayesianClusterRandomizedTrial:
         Experiment name.
     metric_name : str
         Metric being measured (e.g. ``"conversion"``).
+
+    Examples
+    --------
+    >>> crt = BayesianClusterRandomizedTrial("Store test", "conversion")
+    >>> crt = (
+    ...     crt.add("store_1", 45, 500, group="control")
+    ...     .add("store_2", 52, 480, group="control")
+    ...     .add("store_3", 62, 490, group="treatment")
+    ...     .add("store_4", 58, 520, group="treatment")
+    ... )
+    >>> results = crt.analyze(lift="relative")
     """
 
     def __init__(
@@ -387,7 +398,7 @@ class BayesianClusterRandomizedTrial:
             else f"{convert_to_tabulate_str(r['prob_t_gt_c'], 'relative')}"
         )
 
-        table_headers = (
+        row_labels = (
             ["Metric", "Metric Name"]
             + self._groups
             + [
@@ -399,15 +410,15 @@ class BayesianClusterRandomizedTrial:
                 "Probability Lift is in ROPE ***",
             ]
         )
-        table_list = [
+        values = (
             [lift, self.metric_name]
             + [fmt_rate(r["p_control"]), fmt_rate(r["p_treatment"])]
             + [fmt(r["lift"]), fmt(r["ci_lower"]), fmt(r["ci_upper"])]
             + [str_prob]
             + [convert_to_tabulate_str(r["expected_loss"], "relative")]
             + [convert_to_tabulate_str(r["prob_rope"], "relative")]
-        ]
-        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
+        )
+        return_string = tabulate_summary(row_labels, values)
 
         ctrl, treat = self._groups[0], self._groups[1]
         n_ctrl = len(self._clusters[ctrl])

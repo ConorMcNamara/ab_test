@@ -15,7 +15,7 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 from tabulate import tabulate
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test._lift import scale_metric
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
@@ -44,6 +44,17 @@ class BayesianStratifiedContingencyTable:
         Campaign spend (required for ``lift="roas"``).
     msrp : float or None
         Average product price (required for ``lift="revenue"``).
+
+    Examples
+    --------
+    >>> table = BayesianStratifiedContingencyTable("Checkout test", "conversion")
+    >>> table = (
+    ...     table.add("Control", 120, 1000, 1, 1, stratum="desktop")
+    ...     .add("Treatment", 140, 1000, 1, 1, stratum="desktop")
+    ...     .add("Control", 80, 1200, 1, 1, stratum="mobile")
+    ...     .add("Treatment", 95, 1150, 1, 1, stratum="mobile")
+    ... )
+    >>> results = table.analyze(lift="relative")
     """
 
     def __init__(
@@ -350,7 +361,7 @@ class BayesianStratifiedContingencyTable:
             else f"{convert_to_tabulate_str(r['prob_t_gt_c'], 'relative')}"
         )
 
-        table_headers = (
+        row_labels = (
             ["Metric", "Metric Name"]
             + self._cell_names
             + [
@@ -362,15 +373,15 @@ class BayesianStratifiedContingencyTable:
                 "Probability Lift is in ROPE ***",
             ]
         )
-        table_list = [
+        values = (
             [lift, self.metric_name]
             + [fmt_rate(r["p_control"]), fmt_rate(r["p_treatment"])]
             + [fmt(r["lift"]), fmt(r["ci_lower"]), fmt(r["ci_upper"])]
             + [str_prob]
             + [convert_to_tabulate_str(r["expected_loss"], "relative")]
             + [convert_to_tabulate_str(r["prob_rope"], "relative")]
-        ]
-        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
+        )
+        return_string = tabulate_summary(row_labels, values)
 
         het = self.heterogeneity_results
         return_string += (
