@@ -1,8 +1,14 @@
 """Testing utility functions for normal data."""
 
+import numpy as np
 import pytest
 
-from ab_test.frequentist_normal.utils import mle_under_null, observed_lift, validate_two_group
+from ab_test.frequentist_normal.utils import (
+    mle_under_alternative,
+    mle_under_null,
+    observed_lift,
+    validate_two_group,
+)
 
 
 class TestObservedLift:
@@ -106,6 +112,40 @@ class TestMleUnderNull:
         mu, sigma2 = mle_under_null([10.0, 11.0], [4.0, 5.0], [100, 300], null_lift=null_lift, lift=lift)
         assert mu == pytest.approx([10.0, 11.0])
         assert sigma2 == pytest.approx((99 * 4.0 + 299 * 5.0) / 400)
+
+
+class TestMleUnderAlternative:
+    @staticmethod
+    def test_unconstrained_uses_sample_means():
+        mu, sigma2 = mle_under_alternative([10.0, 11.0], [4.0, 5.0], [100, 300])
+        assert mu == pytest.approx([10.0, 11.0])
+        assert sigma2 == pytest.approx((99 * 4.0 + 299 * 5.0) / 400)
+
+    @staticmethod
+    def test_unconstrained_matches_raw_data_mle():
+        rng = np.random.default_rng(0)
+        x1 = rng.normal(10, 2, 120)
+        x2 = rng.normal(11, 2, 80)
+        mu, sigma2 = mle_under_alternative(
+            [x1.mean(), x2.mean()], [x1.var(ddof=1), x2.var(ddof=1)], [len(x1), len(x2)]
+        )
+        expected = (((x1 - x1.mean()) ** 2).sum() + ((x2 - x2.mean()) ** 2).sum()) / 200
+        assert mu == pytest.approx([x1.mean(), x2.mean()])
+        assert sigma2 == pytest.approx(expected)
+
+    @pytest.mark.parametrize("alt_lift, lift", [(0.4, "absolute"), (0.05, "relative")])
+    def test_constrained_matches_mle_under_null(self, alt_lift, lift):
+        args = ([10.0, 11.0], [4.0, 5.0], [100, 300])
+        assert mle_under_alternative(*args, alt_lift=alt_lift, lift=lift) == mle_under_null(
+            *args, null_lift=alt_lift, lift=lift
+        )
+
+    @staticmethod
+    def test_unconstrained_variance_not_above_null():
+        args = ([10.0, 11.0], [4.0, 5.0], [100, 300])
+        _, sigma2_alt = mle_under_alternative(*args)
+        _, sigma2_null = mle_under_null(*args, null_lift=0.0)
+        assert sigma2_alt <= sigma2_null
 
 
 if __name__ == "__main__":

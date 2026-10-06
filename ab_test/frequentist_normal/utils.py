@@ -7,6 +7,7 @@ __all__ = [
     "validate_two_group",
     "observed_lift",
     "mle_under_null",
+    "mle_under_alternative",
 ]
 
 
@@ -136,3 +137,48 @@ def mle_under_null(
     )
     sigma2 = sum_sq / (n_a + n_b)
     return [float(mu[0]), float(mu[1])], float(sigma2)
+
+
+def mle_under_alternative(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+    alt_lift: float | None = None,
+    lift: str = "relative",
+) -> tuple[list[float], float]:
+    """Maximum Likelihood Estimation under H1.
+
+    Parameters
+    ----------
+    means : array_like
+        The average for each group.
+    variances : array_like
+        The sample variances (``ddof=1``) for each group.
+    trials : array_like
+        Number of trials in each group.
+    alt_lift : float, optional
+        Lift associated with alternative hypothesis. If None (default),
+        alternative is unconstrained.
+    lift : {"relative", "absolute"}
+        Whether to interpret ``alt_lift`` relative to the baseline mean,
+        or in absolute terms. See Notes in `mle_under_null`.
+
+    Returns
+    -------
+    mu : list of float
+        ``[mu_a_star, mu_b_star]``, the MLE of each group mean under H1.
+    sigma2 : float
+        The MLE of the common variance under H1.
+
+    Notes
+    -----
+    The most common alternative hypothesis considered is unconstrained, in
+    which case ``mu`` is simply the sample means and ``sigma2`` is the pooled
+    within-group sum of squares divided by the total number of trials. But we
+    also support an alternative hypothesis of the same form as H0, in case we
+    ever want that.
+    """
+    if alt_lift is None:
+        sum_sq = (trials[0] - 1) * variances[0] + (trials[1] - 1) * variances[1]
+        return [float(means[0]), float(means[1])], float(sum_sq / (trials[0] + trials[1]))
+    return mle_under_null(means, variances, trials, null_lift=alt_lift, lift=lift)
