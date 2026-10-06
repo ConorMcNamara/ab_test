@@ -19,7 +19,6 @@ from ab_test.frequentist_binomial.stats_tests import (
     likelihood_ratio_test,
     z_test,
     wald_test,
-    cressie_read_test,
 )
 from ab_test.frequentist_binomial.utils import observed_lift
 
@@ -127,11 +126,17 @@ class ContingencyTable(BaseContingencyTable):
             ``'modified_likelihood'``, ``'freeman-tukey'``, ``'neyman'``,
             ``'cressie-read'``, or ``'msprt'``.
         conf_int_method : str
-            The method we plan to use to craft confidence intervals of our lift
+            The method we plan to use to craft confidence intervals of our lift.
+            ``'binary_search'`` inverts the test chosen by ``test_method``, so it
+            requires ``'score'``, ``'likelihood'``, ``'z'``, ``'wald'`` or
+            ``'msprt'``; the other tests only support a null lift of 0, so use a
+            method such as ``'wilson'`` with them.
         alpha : float, default = 0.05
             The alpha level of our experiment, to be used to craft confidence intervals.
         null_lift : float
-            Lift associated with null hypothesis. Defaults to 0.0.
+            Lift associated with null hypothesis. Defaults to 0.0. Only
+            ``'score'``, ``'likelihood'``, ``'z'``, ``'wald'``, ``'msprt'`` and
+            ``'randomization'`` support a nonzero value.
         tau : float or None, optional
             Scale of the Gaussian mixing distribution for the mSPRT test.
             Only used when ``test_method="msprt"``. When ``None``, the scale
@@ -144,6 +149,18 @@ class ContingencyTable(BaseContingencyTable):
         if len(self.names) != 2:
             raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
         lift = lift.casefold()
+        invertible_tests = {
+            "score": score_test,
+            "likelihood": likelihood_ratio_test,
+            "z": z_test,
+            "wald": wald_test,
+        }
+        if conf_int_method == "binary_search" and test_method not in {*invertible_tests, "msprt", "randomization"}:
+            raise ValueError(
+                f"conf_int_method='binary_search' inverts the significance test, but test_method={test_method!r} "
+                "cannot be inverted. Use test_method 'score', 'likelihood', 'z', 'wald' or 'msprt', or a "
+                "conf_int_method such as 'wilson'."
+            )
         test_lift = observed_lift(self.trials, self.successes, lift)
         if test_method == "randomization":
             test_fn = functools.partial(randomization_test, n_permutations=n_permutations, seed=seed)
@@ -155,16 +172,8 @@ class ContingencyTable(BaseContingencyTable):
             functools.update_wrapper(test_fn, msprt_test)
         else:
             p_value = ab_test(self.trials, self.successes, null_lift, lift, method=test_method)
-            if test_method == "score":
-                test_fn = score_test
-            elif test_method == "likelihood":
-                test_fn = likelihood_ratio_test
-            elif test_method == "z":
-                test_fn = z_test
-            elif test_method == "wald":
-                test_fn = wald_test
-            else:
-                test_fn = cressie_read_test
+            # Only used by binary_search, which the check above limits to invertible tests.
+            test_fn = invertible_tests.get(test_method, score_test)
         if lift in ["incremental", "roas", "revenue", "cpa"]:
             ci_lift = "absolute"
         else:

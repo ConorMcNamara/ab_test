@@ -467,5 +467,35 @@ class TestBoundaryCounts:
         assert score_test([500, 500], [0, 0], null_lift=0.0, lift="absolute", crit=3.84) is False
 
 
+ZERO_NULL_ONLY = {
+    "fisher": fisher_test,
+    "barnard": barnard_exact_test,
+    "boschloo": boschloo_exact_test,
+    "modified_likelihood": modified_log_likelihood_test,
+    "freeman-tukey": freeman_tukey_test,
+    "neyman": neyman_test,
+    "cressie-read": cressie_read_test,
+}
+
+
+class TestZeroNullOnlyTests:
+    @pytest.mark.parametrize("test", ZERO_NULL_ONLY.values(), ids=ZERO_NULL_ONLY.keys())
+    @pytest.mark.parametrize("null_lift", [0.03, -0.02])
+    def test_nonzero_absolute_null_raises(self, test, null_lift):
+        with pytest.raises(NotImplementedError, match="only supports a null lift of 0"):
+            test([1000, 1000], [100, 130], null_lift=null_lift, lift="absolute")
+
+    @pytest.mark.parametrize("method", ZERO_NULL_ONLY.keys())
+    def test_nonzero_null_raises_through_dispatcher(self, method):
+        with pytest.raises(NotImplementedError):
+            ab_test([1000, 1000], [100, 130], null_lift=0.03, lift="absolute", method=method)
+
+    @pytest.mark.parametrize("test", ZERO_NULL_ONLY.values(), ids=ZERO_NULL_ONLY.keys())
+    @pytest.mark.parametrize("lift", ["absolute", "relative"])
+    def test_zero_null_still_supported(self, test, lift):
+        pval = test([1000, 1000], [100, 130], null_lift=0.0, lift=lift)
+        assert 0.0 < pval < 0.05
+
+
 if __name__ == "__main__":
     pytest.main()
