@@ -1,6 +1,7 @@
 """Our wrapper for analyzing experiment results."""
 from __future__ import annotations
 
+import functools
 from typing import Any, ClassVar
 
 import numpy as np
@@ -112,6 +113,7 @@ class NormalTable(BaseContinuousTable):
         conf_int_method: str = "welch",
         alpha: float = 0.05,
         null_lift: float = 0.0,
+        equal_var: bool = True,
     ) -> str:
         """Analyzes the effect of our experiments through the NormalTable.
 
@@ -130,6 +132,10 @@ class NormalTable(BaseContinuousTable):
             The alpha level of our experiment, to be used to craft confidence intervals.
         null_lift : float
             Lift associated with null hypothesis. Defaults to 0.0.
+        equal_var : bool, default=True
+            Whether the score test assumes both groups share a common variance.
+            Only used when ``test_method='score'``; Welch's test always allows
+            unequal variances. See :func:`~ab_test.frequentist_normal.stats_tests.score_test`.
 
         Returns
         -------
@@ -143,7 +149,7 @@ class NormalTable(BaseContinuousTable):
         if test_method == "welch":
             test = welch_test
         elif test_method == "score":
-            test = score_test
+            test = functools.partial(score_test, equal_var=equal_var)
         else:
             raise NotImplementedError(f"No support for {test_method} test method")
         if lift in ["incremental", "roas", "revenue", "cpa"]:

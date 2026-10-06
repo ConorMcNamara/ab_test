@@ -7,6 +7,7 @@ import pytest
 from polars.testing import assert_frame_equal
 
 from ab_test.frequentist_normal.normal_table import NormalTable
+from ab_test.frequentist_normal.stats_tests import score_test
 
 
 class TestNormalTable:
@@ -299,6 +300,40 @@ class TestNormalTable:
         result = nt.analyze(test_method="score", conf_int_method="binary_search")
         assert "p-value" in result
         assert "*" in result
+
+    @staticmethod
+    def test_analyze_score_equal_var_changes_result():
+        nt = NormalTable(name="Test", metric_name="metric")
+        nt.add("A", 10.0, 1.0, 300)
+        nt.add("B", 10.3, 9.0, 150)
+        pooled = nt.analyze(lift="absolute", test_method="score", conf_int_method="binary_search")
+        separate = nt.analyze(
+            lift="absolute", test_method="score", conf_int_method="binary_search", equal_var=False
+        )
+        assert pooled != separate
+
+    @staticmethod
+    def test_analyze_score_unequal_var_uses_unequal_score_test(monkeypatch):
+        calls = []
+
+        def spy(*args, **kwargs):
+            calls.append(kwargs.get("equal_var"))
+            return score_test(*args, **kwargs)
+
+        monkeypatch.setattr("ab_test.frequentist_normal.normal_table.score_test", spy)
+        nt = NormalTable(name="Test", metric_name="metric")
+        nt.add("A", 10.0, 1.0, 300)
+        nt.add("B", 10.3, 9.0, 150)
+        nt.analyze(lift="absolute", test_method="score", conf_int_method="binary_search", equal_var=False)
+        assert calls
+        assert all(c is False for c in calls)
+
+    @staticmethod
+    def test_analyze_welch_ignores_equal_var():
+        nt = NormalTable(name="Test", metric_name="metric")
+        nt.add("A", 10.0, 1.0, 300)
+        nt.add("B", 10.3, 9.0, 150)
+        assert nt.analyze(equal_var=True) == nt.analyze(equal_var=False)
 
     @staticmethod
     def test_analyze_unknown_test_method_raises():
