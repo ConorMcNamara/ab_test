@@ -2,12 +2,12 @@
 
 import math
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
 import scipy.stats as ss
 
+from ab_test._binary_search import binary_search_interval
 from ab_test._lift import _SCALED_LIFTS, scale_bounds
 from ab_test.frequentist_binomial.stats_tests import score_test
 from ab_test.frequentist_binomial.utils import observed_lift
@@ -33,92 +33,12 @@ _LIMIT_PROBE = 1e-6
 _RELATIVE_CEILING = 100.0
 
 
-def _search_lower_bound(
-    test: Any,
-    trials: Any,
-    successes: Any,
-    lb_lb: float,
-    lb_ub: float,
-    alpha: float,
-    lift: str,
-    tol: float,
-) -> float:
-    # Both lifts are bounded below by -1. The observed control rate is not a
-    # bound for absolute lift, since the true rate can exceed it.
-    floor = -1.0 + _LIMIT_PROBE
-    if lb_ub <= floor:
-        return -1.0
-    eps = 0.01
-    while True:
-        # Clamp rather than step past the floor, so a bound between the last
-        # accepted value and the floor is still found.
-        lb_lb = max(lb_lb, floor)
-        pval = test(trials, successes, null_lift=lb_lb, lift=lift)
-        if pval < alpha:
-            break
-        if lb_lb <= floor:
-            return -1.0
-        lb_ub = lb_lb
-        lb_lb -= eps
-        eps *= 2
-    while (lb_ub - lb_lb) > tol:
-        lb = 0.5 * (lb_lb + lb_ub)
-        pval = test(trials, successes, null_lift=lb, lift=lift)
-        if pval >= alpha:
-            lb_ub = lb
-        else:
-            lb_lb = lb
-    return 0.5 * (lb_lb + lb_ub)
-
-
-def _search_upper_bound(
-    test: Any,
-    trials: Any,
-    successes: Any,
-    ub_lb: float,
-    ub_ub: float,
-    alpha: float,
-    lift: str,
-    tol: float,
-    upper_bound_exists: bool,
-) -> float:
-    unbounded = math.inf if lift == "relative" else 1.0
-    if not upper_bound_exists:
-        return unbounded
-    # Absolute lift is bounded above by 1; relative lift has no bound, so the
-    # search gives up past a 100x lift.
-    ceiling = _RELATIVE_CEILING if lift == "relative" else 1.0 - _LIMIT_PROBE
-    if ub_lb >= ceiling:
-        return unbounded
-    eps = 0.01
-    while True:
-        # Clamp rather than step past the ceiling, so a bound between the last
-        # accepted value and the ceiling is still found.
-        ub_ub = min(ub_ub, ceiling)
-        pval = test(trials, successes, null_lift=ub_ub, lift=lift)
-        if pval < alpha:
-            break
-        if ub_ub >= ceiling:
-            return unbounded
-        ub_lb = ub_ub
-        ub_ub += eps
-        eps *= 2
-    while (ub_ub - ub_lb) > tol:
-        ub = 0.5 * (ub_lb + ub_ub)
-        pval = test(trials, successes, null_lift=ub, lift=lift)
-        if pval >= alpha:
-            ub_lb = ub
-        else:
-            ub_ub = ub
-    return 0.5 * (ub_lb + ub_ub)
-
-
 def _accepted_relative_start(test: Any, trials: Any, successes: Any, alpha: float) -> tuple[float, float]:
     """Bracket for the lower-bound search when the observed relative lift is infinite.
 
     With no control successes there is no point estimate to start from, so
     find a lift the test accepts: try 1.0, then double. Returns
-    ``(rejected, accepted)`` for :func:`_search_lower_bound` to bisect, or
+    ``(rejected, accepted)`` for :func:`binary_search_interval` to bisect, or
     ``(1 - 0.01, 1.0)`` to search downwards when 1.0 is accepted. If even
     the 100x ceiling is rejected, the true bound lies above it, and the
     ceiling is returned as a conservative lower bound.
@@ -240,15 +160,23 @@ def confidence_interval(
                 ub_lb = ote
                 ub_ub = min(ote + 0.01, 1.0)
 
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                lb_future = executor.submit(
-                    _search_lower_bound, test, trials, successes, lb_lb, lb_ub, alpha, lift, tol
-                )
-                ub_future = executor.submit(
-                    _search_upper_bound, test, trials, successes, ub_lb, ub_ub, alpha, lift, tol, upper_bound_exists
-                )
-                lb = lb_future.result()
-                ub = ub_future.result()
+            # Both lifts are bounded below by -1, and absolute lift above by 1.
+            # Relative lift has no upper bound, so the search gives up past a 100x lift.
+            lb_found, ub_found = binary_search_interval(
+                lambda d: test(trials, successes, null_lift=d, lift=lift),
+                (lb_lb, lb_ub),
+                (ub_lb, ub_ub),
+                alpha=alpha,
+                lower_limit=-1.0 + _LIMIT_PROBE,
+                upper_limit=_RELATIVE_CEILING if lift == "relative" else 1.0 - _LIMIT_PROBE,
+                tol=tol,
+                search_upper=upper_bound_exists,
+            )
+            lb = lb_found if lb_found is not None else -1.0
+            if ub_found is not None:
+                ub = ub_found
+            else:
+                ub = math.inf if lift == "relative" else 1.0
         else:
             raise NotImplementedError(f"binary_search is not implemented for {test}")
     else:

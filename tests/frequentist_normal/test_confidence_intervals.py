@@ -129,6 +129,16 @@ class TestConfidenceIntervalComparison:
         assert score_test(means, variances, trials, null_lift=ub, lift="absolute") == pytest.approx(0.05, abs=1e-4)
 
     @staticmethod
+    def test_binary_search_absolute_lift_above_100():
+        means = [500.0, 650.0]
+        variances = [1e4, 1.2e4]
+        trials = [1000, 1000]
+        bs_lb, bs_ub = confidence_interval(means, variances, trials, method="binary_search", lift="absolute")
+        delta_lb, delta_ub = confidence_interval(means, variances, trials, method="delta", lift="absolute")
+        assert bs_lb == pytest.approx(delta_lb, abs=0.1)
+        assert bs_ub == pytest.approx(delta_ub, abs=0.1)
+
+    @staticmethod
     def test_methods_agree_absolute():
         """All methods should produce similar CIs for absolute lift."""
         means = [10.0, 11.0]
