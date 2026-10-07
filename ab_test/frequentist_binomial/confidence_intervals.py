@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import scipy.stats as ss
 
+from ab_test._lift import _SCALED_LIFTS, scale_bounds
 from ab_test.frequentist_binomial.stats_tests import score_test
 from ab_test.frequentist_binomial.utils import observed_lift
 
@@ -135,6 +136,9 @@ def confidence_interval(
     lift: str = "relative",
     method: str = "binary_search",
     tol: float = 1e-06,
+    *,
+    spend: float | None = None,
+    msrp: float | None = None,
 ) -> tuple[Any, ...]:
     """Calculate confidence intervals using the chosen method.
 
@@ -152,14 +156,20 @@ def confidence_interval(
         Threshold for significance. The confidence interval will have
         level 100(1-alpha)%. Defaults to 0.05, corresponding to a 95%
         confidence interval.
-     lift : ["relative", "absolute", "incremental", "roas", "revenue"]
+     lift : ["relative", "absolute", "incremental", "roas", "revenue", "cpa"]
         Whether to interpret the null lift relative to the baseline success
         rate, or in absolute terms. See Notes in
-        `maximum_likelihood_estimation`.
+        `maximum_likelihood_estimation`. The scaled lifts (incremental, roas,
+        revenue, cpa) are computed on the absolute scale and then scaled by
+        ``max(trials)`` and converted with ``spend`` or ``msrp``.
     method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald', 'delta'}
         How we want to calculate the confidence interval
     tol : float, default=1e-06
         The tolerance for our binary search. Lower values means narrower CIs
+    spend : float, optional
+        Campaign spend. Required for ``lift="roas"`` and ``lift="cpa"``.
+    msrp : float, optional
+        Revenue per unit. Required for ``lift="revenue"``.
 
     Returns
     -------
@@ -174,6 +184,11 @@ def confidence_interval(
     lift, and Donner & Zou's ratio interval for relative lift. ``wald`` and
     ``delta`` use the delta method.
     """
+    if lift in _SCALED_LIFTS:
+        # Build the interval where the variance lives (proportions), then convert its bounds.
+        abs_lb, abs_ub = confidence_interval(trials, successes, test, alpha, "absolute", method, tol)
+        scale = max(trials)
+        return scale_bounds(abs_lb * scale, abs_ub * scale, lift, spend, msrp)
     try:
         ote = observed_lift(trials, successes, lift=lift)
         upper_bound_exists = True

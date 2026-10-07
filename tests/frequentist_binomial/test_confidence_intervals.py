@@ -553,5 +553,41 @@ class TestSearchNearLimits:
         assert lb == -1.0
 
 
+class TestScaledLiftIntervals:
+    @staticmethod
+    @pytest.mark.parametrize("method", ["binary_search", "wilson", "wald", "delta"])
+    def test_incremental_is_absolute_interval_scaled(method):
+        # Used to give (19.97, 20.03): a count-scale estimate with a proportion-scale width.
+        lb, ub = confidence_interval([1000, 1000], [100, 120], lift="incremental", method=method)
+        abs_lb, abs_ub = confidence_interval([1000, 1000], [100, 120], lift="absolute", method=method)
+        assert lb == pytest.approx(1000 * abs_lb)
+        assert ub == pytest.approx(1000 * abs_ub)
+        assert lb < 20 < ub and ub - lb > 50
+
+    @staticmethod
+    def test_incremental_scales_by_larger_group():
+        lb, ub = confidence_interval([500, 2000], [50, 240], lift="incremental", method="wald")
+        abs_lb, abs_ub = confidence_interval([500, 2000], [50, 240], lift="absolute", method="wald")
+        assert (lb, ub) == pytest.approx((2000 * abs_lb, 2000 * abs_ub))
+
+    @staticmethod
+    def test_roas_and_revenue_use_spend_and_msrp():
+        abs_lb, abs_ub = confidence_interval([1000, 1000], [100, 120], lift="absolute", method="wald")
+        roas = confidence_interval([1000, 1000], [100, 120], lift="roas", method="wald", spend=500)
+        revenue = confidence_interval([1000, 1000], [100, 120], lift="revenue", method="wald", msrp=20)
+        assert roas == pytest.approx((1000 * abs_lb / 500, 1000 * abs_ub / 500))
+        assert revenue == pytest.approx((1000 * abs_lb * 20, 1000 * abs_ub * 20))
+
+    @staticmethod
+    def test_cpa_interval_unbounded_when_increment_may_be_zero():
+        lb, ub = confidence_interval([1000, 1000], [100, 120], lift="cpa", method="wald", spend=500)
+        assert lb > 0 and ub == np.inf
+
+    @staticmethod
+    def test_roas_requires_spend():
+        with pytest.raises(ValueError, match="spend"):
+            confidence_interval([1000, 1000], [100, 120], lift="roas", method="wald")
+
+
 if __name__ == "__main__":
     pytest.main()
