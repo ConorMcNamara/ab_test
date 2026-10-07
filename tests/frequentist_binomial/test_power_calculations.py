@@ -95,8 +95,9 @@ class TestScorePower:
 
     @staticmethod
     def test_minimum_detectable_lift_cannot_push_rate_above_one():
+        # Even a treatment rate of 99.99% gives only ~0.61 power with 10 per arm.
         with pytest.raises(ValueError, match="within \\[0, 1\\]"):
-            minimum_detectable_lift([20, 20], 0.6)
+            minimum_detectable_lift([10, 10], 0.6)
 
     @staticmethod
     def test_minimum_detectable_lift_near_rate_limit():
