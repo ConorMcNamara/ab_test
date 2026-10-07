@@ -179,6 +179,7 @@ def render_forest_plot(
     color: str | dict[str, Any] | list[Any] | None = None,
     experiment_name: str | None = None,
     metric_name: str | None = None,
+    dark_mode: bool = False,
 ) -> None:
     """Render a dot-and-whisker (forest) plot of point estimates and intervals.
 
@@ -209,6 +210,10 @@ def render_forest_plot(
     metric_name : str or None, default=None
         Name of the metric being plotted, included in the plot title and, for
         individual plots, the x-axis label.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template). Very dark palette colors, such as the
+        first colors of ``"tol"``, can be hard to see on it.
 
     Raises
     ------
@@ -336,6 +341,8 @@ def render_forest_plot(
         xaxis_title = lift_label
         yaxis_title = ""
     fig.update_layout(title_text=title, xaxis_title=xaxis_title, yaxis_title=yaxis_title)
+    if dark_mode:
+        fig.update_layout(template="plotly_dark")
     if reverse_plot:
         fig.update_layout(yaxis={"autorange": "reversed"})
     fig.show()  # type: ignore[no-untyped-call]
