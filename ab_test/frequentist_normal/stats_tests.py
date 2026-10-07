@@ -1,3 +1,5 @@
+"""Statistical tests to determine significance for normally distributed metrics."""
+
 from __future__ import annotations
 
 import math
@@ -8,11 +10,7 @@ import scipy.stats as ss
 
 from ab_test.frequentist_normal.utils import mle_under_null, validate_two_group
 
-__all__ = [
-    "welch_test",
-    "score_test",
-    "likelihood_ratio_test"
-]
+__all__ = ["welch_test", "score_test", "likelihood_ratio_test"]
 
 
 def welch_test(
@@ -146,16 +144,13 @@ def score_test(
 
     # A group's null variance is only zero when its mean is fit exactly, so it
     # contributes nothing to the statistic.
-    ts = sum(
-        n * (m - u) ** 2 / s2
-        for n, m, u, s2 in zip(trials[:2], means[:2], mu, sigma2_by_group)
-        if s2 > 1e-12
-    )
+    ts = sum(n * (m - u) ** 2 / s2 for n, m, u, s2 in zip(trials[:2], means[:2], mu, sigma2_by_group) if s2 > 1e-12)
 
     if crit is None:
         pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
         return float(pval)
     return bool(ts >= crit)
+
 
 def likelihood_ratio_test(
     means: np.ndarray[Any, Any] | list[Any],

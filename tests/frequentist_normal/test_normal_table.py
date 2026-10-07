@@ -49,24 +49,28 @@ class TestNormalTable:
         nt = NormalTable(name="Test Experiment", metric_name="revenue")
         nt.add("Holdout", 10.0, 4.0, 1000)
         nt.add("Test", 11.0, 5.0, 1000)
-        expected = pd.DataFrame({
-            "cell_name": ["Holdout", "Test"],
-            "means": [10.0, 11.0],
-            "variances": [4.0, 5.0],
-            "trials": [1000, 1000],
-        })
+        expected = pd.DataFrame(
+            {
+                "cell_name": ["Holdout", "Test"],
+                "means": [10.0, 11.0],
+                "variances": [4.0, 5.0],
+                "trials": [1000, 1000],
+            }
+        )
         pd.testing.assert_frame_equal(nt.to_df(), expected)
 
     def test_to_df_polars(self):
         nt = NormalTable(name="Test Experiment", metric_name="revenue")
         nt.add("Holdout", 10.0, 4.0, 1000)
         nt.add("Test", 11.0, 5.0, 1000)
-        expected = pl.DataFrame({
-            "cell_name": ["Holdout", "Test"],
-            "means": [10.0, 11.0],
-            "variances": [4.0, 5.0],
-            "trials": [1000, 1000],
-        })
+        expected = pl.DataFrame(
+            {
+                "cell_name": ["Holdout", "Test"],
+                "means": [10.0, 11.0],
+                "variances": [4.0, 5.0],
+                "trials": [1000, 1000],
+            }
+        )
         assert_frame_equal(nt.to_df(method="polars"), expected)
 
     @pytest.mark.parametrize(
@@ -307,9 +311,7 @@ class TestNormalTable:
         nt.add("A", 10.0, 1.0, 300)
         nt.add("B", 10.3, 9.0, 150)
         pooled = nt.analyze(lift="absolute", test_method="score", conf_int_method="binary_search")
-        separate = nt.analyze(
-            lift="absolute", test_method="score", conf_int_method="binary_search", equal_var=False
-        )
+        separate = nt.analyze(lift="absolute", test_method="score", conf_int_method="binary_search", equal_var=False)
         assert pooled != separate
 
     @staticmethod

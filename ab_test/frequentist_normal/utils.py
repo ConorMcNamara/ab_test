@@ -1,3 +1,5 @@
+"""General utility functions for normally distributed metrics."""
+
 import math
 from typing import Any
 
@@ -189,10 +191,7 @@ def mle_under_null(
         mu_a = (n_a * mean_a + n_b * (mean_b - null_lift)) / (n_a + n_b)
         mu = [mu_a, mu_a + null_lift]
     sum_sq = (
-        (n_a - 1) * variances[0]
-        + (n_b - 1) * variances[1]
-        + n_a * (mean_a - mu[0]) ** 2
-        + n_b * (mean_b - mu[1]) ** 2
+        (n_a - 1) * variances[0] + (n_b - 1) * variances[1] + n_a * (mean_a - mu[0]) ** 2 + n_b * (mean_b - mu[1]) ** 2
     )
     sigma2 = sum_sq / (n_a + n_b)
     return [float(mu[0]), float(mu[1])], float(sigma2)

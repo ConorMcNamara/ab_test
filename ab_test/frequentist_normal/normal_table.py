@@ -1,4 +1,5 @@
 """Our wrapper for analyzing experiment results."""
+
 from __future__ import annotations
 
 import functools
@@ -15,6 +16,16 @@ from ab_test.frequentist_normal.utils import observed_lift
 
 
 class NormalTable(BaseContinuousTable):
+    """A class for analyzing experiment results on continuous, normally distributed metrics.
+
+    Examples
+    --------
+    >>> table = NormalTable("Checkout redesign", "order value")
+    >>> table = table.add("Control", 52.0, 144.0, 1000).add("Treatment", 54.5, 150.0, 1000)
+    >>> print(table.analyze(lift="absolute"))  # doctest: +SKIP
+    >>> print(table.analyze(lift="absolute", test_method="score", equal_var=False))  # doctest: +SKIP
+    """
+
     _columns: ClassVar[list[str]] = ["cell_name", "means", "variances", "trials"]
     _pyspark_types: ClassVar[dict[str, str]] = {
         "cell_name": "StringType",
@@ -55,7 +66,7 @@ class NormalTable(BaseContinuousTable):
             "trials": total_n,
         }
 
-    def add(self, cell_name: str, means: float, variances: float, trials: int) -> "NormalTable":
+    def add(self, cell_name: str, means: float, variances: float, trials: int) -> NormalTable:
         """Add cells to our contingency table.
 
         Parameters
@@ -81,7 +92,7 @@ class NormalTable(BaseContinuousTable):
         self.trials.append(trials)
         return self
 
-    def add_data(self, cell_name: str, data: np.generic | np.ndarray | list | tuple) -> "NormalTable":
+    def add_data(self, cell_name: str, data: np.generic | np.ndarray | list | tuple) -> NormalTable:
         """Add a cell from raw data, computing summary statistics automatically.
 
         Parameters
@@ -208,9 +219,7 @@ class NormalTable(BaseContinuousTable):
             "ci_upper": ub,
         }
         table_headers = (
-            ["Metric", "Metric Name"]
-            + self.names
-            + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", "p-value"]
+            ["Metric", "Metric Name"] + self.names + ["Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", "p-value"]
         )
         str_pvalue = f"{p_value}" if p_value >= alpha else f"{p_value}*"
         if lift == "relative":
@@ -228,15 +237,8 @@ class NormalTable(BaseContinuousTable):
                 + [str_pvalue]
             ]
         else:
-            table_list = [
-                [lift, self.metric_name]
-                + cell_values
-                + [test_lift, lb, ub]
-                + [str_pvalue]
-            ]
-        return_string: str = tabulate(
-            table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=","
-        )
+            table_list = [[lift, self.metric_name] + cell_values + [test_lift, lb, ub] + [str_pvalue]]
+        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
         return_string += (
             f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
         )

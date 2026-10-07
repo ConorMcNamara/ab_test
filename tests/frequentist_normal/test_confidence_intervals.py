@@ -21,7 +21,11 @@ class TestConfidenceIntervalComparison:
         expected_low = 0.8138359430750653
         expected_high = 1.1861640569249348
         actual_low, actual_high = confidence_interval(
-            means, variances, trials, method="welch", lift="absolute",
+            means,
+            variances,
+            trials,
+            method="welch",
+            lift="absolute",
         )
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
@@ -34,7 +38,11 @@ class TestConfidenceIntervalComparison:
         expected_low = 0.0805342057292233
         expected_high = 0.1194657942707767
         actual_low, actual_high = confidence_interval(
-            means, variances, trials, method="welch", lift="relative",
+            means,
+            variances,
+            trials,
+            method="welch",
+            lift="relative",
         )
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
@@ -47,7 +55,11 @@ class TestConfidenceIntervalComparison:
         expected_low = 0.8140614903086311
         expected_high = 1.1859385096913688
         actual_low, actual_high = confidence_interval(
-            means, variances, trials, method="z", lift="absolute",
+            means,
+            variances,
+            trials,
+            method="z",
+            lift="absolute",
         )
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
@@ -60,7 +72,11 @@ class TestConfidenceIntervalComparison:
         expected_low = 0.08055778953008934
         expected_high = 0.11944221046991067
         actual_low, actual_high = confidence_interval(
-            means, variances, trials, method="z", lift="relative",
+            means,
+            variances,
+            trials,
+            method="z",
+            lift="relative",
         )
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
@@ -73,7 +89,11 @@ class TestConfidenceIntervalComparison:
         expected_low = 0.8140614903086315
         expected_high = 1.1859385096913686
         actual_low, actual_high = confidence_interval(
-            means, variances, trials, method="delta", lift="absolute",
+            means,
+            variances,
+            trials,
+            method="delta",
+            lift="absolute",
         )
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
@@ -86,7 +106,11 @@ class TestConfidenceIntervalComparison:
         expected_low = 0.08055778953008938
         expected_high = 0.11944221046991063
         actual_low, actual_high = confidence_interval(
-            means, variances, trials, method="delta", lift="relative",
+            means,
+            variances,
+            trials,
+            method="delta",
+            lift="relative",
         )
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
@@ -99,7 +123,11 @@ class TestConfidenceIntervalComparison:
         expected_low = 0.8139474487304688
         expected_high = 1.1860525512695312
         actual_low, actual_high = confidence_interval(
-            means, variances, trials, method="binary_search", lift="absolute",
+            means,
+            variances,
+            trials,
+            method="binary_search",
+            lift="absolute",
         )
         assert actual_low == pytest.approx(expected_low, abs=1e-4)
         assert actual_high == pytest.approx(expected_high, abs=1e-4)
@@ -112,7 +140,11 @@ class TestConfidenceIntervalComparison:
         expected_low = 0.08139495849609377
         expected_high = 0.11860504150390624
         actual_low, actual_high = confidence_interval(
-            means, variances, trials, method="binary_search", lift="relative",
+            means,
+            variances,
+            trials,
+            method="binary_search",
+            lift="relative",
         )
         assert actual_low == pytest.approx(expected_low, abs=1e-4)
         assert actual_high == pytest.approx(expected_high, abs=1e-4)
@@ -122,9 +154,7 @@ class TestConfidenceIntervalComparison:
         means = [10.0, 11.0]
         variances = [4.0, 5.0]
         trials = [1000, 1000]
-        lb, ub = confidence_interval(
-            means, variances, trials, test=score_test, method="binary_search", lift="absolute"
-        )
+        lb, ub = confidence_interval(means, variances, trials, test=score_test, method="binary_search", lift="absolute")
         assert score_test(means, variances, trials, null_lift=lb, lift="absolute") == pytest.approx(0.05, abs=1e-4)
         assert score_test(means, variances, trials, null_lift=ub, lift="absolute") == pytest.approx(0.05, abs=1e-4)
 
