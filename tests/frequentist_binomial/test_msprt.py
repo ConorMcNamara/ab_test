@@ -81,6 +81,28 @@ class TestMsprtTest:
         assert p_default != pytest.approx(p_custom)
 
     @staticmethod
+    def test_msprt_default_tau_is_relative_to_pooled_rate():
+        trials = [5000, 5000]
+        successes = [500, 600]
+        assert msprt_test(trials, successes) == pytest.approx(msprt_test(trials, successes, tau=0.1 * 1100 / 10000))
+
+    @staticmethod
+    def test_msprt_default_tau_floored_at_null_effect():
+        trials = [5000, 5000]
+        successes = [500, 600]
+        expected = msprt_test(trials, successes, null_lift=0.05, lift="absolute", tau=0.05)
+        assert msprt_test(trials, successes, null_lift=0.05, lift="absolute") == pytest.approx(expected)
+
+    @staticmethod
+    def test_msprt_default_tau_does_not_shrink_with_n():
+        # A tau tied to the standard error makes the z threshold constant (~3.26),
+        # so a fixed z of 3.5 would reject at every n and type-I error -> 1.
+        n = 10_000_000
+        se = np.sqrt(2 * 0.1 * 0.9 / n)
+        successes = [n // 10, round((0.1 + 3.5 * se) * n)]
+        assert msprt_test([n, n], successes, lift="absolute") > 0.05
+
+    @staticmethod
     def test_msprt_crit():
         trials = [1000, 1000]
         successes = [100, 200]

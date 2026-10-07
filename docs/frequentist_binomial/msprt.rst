@@ -9,8 +9,13 @@ positive rate, but mSPRT p-values remain valid at any stopping time.
 
 Based on Johari et al. (2017), the test mixes over a Gaussian prior
 ``N(0, tau^2)`` on the effect size. When ``tau`` is not specified, it defaults
-to the standard error of the difference under the pooled null, providing a
-unit-information prior that scales naturally with the data. The always-valid
+to the larger of ``0.1`` times the pooled success rate (so the mixture covers
+roughly +/-10% relative lifts) and the absolute effect implied by the null
+lift, which keeps confidence sequences informative for rare events. ``tau``
+must not shrink with the sample size (for
+example, by tying it to the standard error), or the test loses its
+always-valid guarantee. For best power, set ``tau`` (in absolute-rate units)
+to the effect sizes typical of past experiments. The always-valid
 p-value is ``min(1, 1 / Lambda_n)`` where ``Lambda_n`` is the likelihood ratio.
 
 The module also includes
