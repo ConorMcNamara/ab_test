@@ -92,7 +92,7 @@ class NormalTable(BaseContinuousTable):
         self.trials.append(trials)
         return self
 
-    def add_data(self, cell_name: str, data: np.generic | np.ndarray | list | tuple) -> NormalTable:
+    def add_data(self, cell_name: str, data: np.ndarray[Any, Any] | list[float] | tuple[float, ...]) -> NormalTable:
         """Add a cell from raw data, computing summary statistics automatically.
 
         Parameters
@@ -106,9 +106,10 @@ class NormalTable(BaseContinuousTable):
         -------
         NormalTable, to be chained with other methods
         """
-        means = float(np.mean(data))
-        variances = float(np.var(data, ddof=1))
-        trials = int(len(data))
+        values = np.asarray(data, dtype=float)
+        means = float(np.mean(values))
+        variances = float(np.var(values, ddof=1))
+        trials = int(values.size)
         cell_dict = {"means": means, "variances": variances, "trials": trials}
         self.cells["table"][cell_name] = cell_dict
         self.names.append(cell_name)
