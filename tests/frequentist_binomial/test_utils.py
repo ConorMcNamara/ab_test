@@ -55,103 +55,52 @@ class TestMisc:
 
     @staticmethod
     @pytest.mark.parametrize(
-        "group_sizes,baseline,null_lift,alt_lift,expected_p_alt",
+        "group_sizes,baseline,null_lift,alt_lift,lift",
         [
-            ([1000, 1000], 0.10, 0.0, 0.10, [0.09502262, 0.10452489]),
-            ([1000, 1000], 0.10, 0.0, -0.10, [0.10497238, 0.09447514]),
-            ([1000, 1000], 0.10, 0.10, 0.20, [0.09525275, 0.1143033]),
-            ([200, 1800], 0.10, 0.0, 0.10, [0.09167368, 0.10084104]),
-            ([1000, 1000], 0.0001, 0.0, 0.10, [9.50226256e-05, 1.04524886e-04]),
+            ([1000, 1000], 0.10, 0.0, 0.10, "relative"),
+            ([1000, 1000], 0.10, 0.0, -0.10, "relative"),
+            ([1000, 1000], 0.10, 0.10, 0.20, "relative"),
+            ([200, 1800], 0.10, 0.0, 0.10, "relative"),
+            ([1000, 1000], 0.0001, 0.0, 0.10, "relative"),
+            ([1000, 1000], 0.10, 0.0, 0.10, "absolute"),
+            ([1000, 1000], 0.10, 0.0, -0.05, "absolute"),
+            ([1000, 1000], 0.10, 0.10, 0.20, "absolute"),
+            ([200, 1800], 0.10, 0.0, 0.10, "absolute"),
+            ([1000, 1000], 0.0001, 0.0, 0.00005, "absolute"),
         ],
     )
-    def test_simple_hypothesis_from_composite_relative_lift(
-        group_sizes: np.ndarray,
-        baseline: float,
-        null_lift: float,
-        alt_lift: float,
-        expected_p_alt: float,
-    ):
-        # Note: we used cvxpy to solve the problem directly, but then
-        # hard-coded the result so I don't need to have cvxpy as a dependency.
-        #
-        # na = group_sizes[0]
-        # nb = group_sizes[1]
-        # p_null_a = baseline
-        # p_null_b = p_null_a * (1 + null_lift)
-        # p_alt = cp.Variable(2)
-        # objective = cp.Minimize(
-        #     (na / (p_null_a * (1 - p_null_a))) * (p_alt[0] - p_null_a) ** 2
-        #     + (nb / (p_null_b * (1 - p_null_b))) * (p_alt[1] - p_null_b) ** 2
-        # )
-        # constraints = [0 <= p_alt, p_alt <= 1, p_alt[1] == p_alt[0] * (1 + alt_lift)]
-        # prob = cp.Problem(objective, constraints)
-        # prob.solve()
-        # expected_p_alt = p_alt.value
+    def test_simple_hypothesis_from_composite(group_sizes, baseline, null_lift, alt_lift, lift):
+        p_null, p_alt = simple_hypothesis_from_composite(group_sizes, baseline, null_lift, alt_lift, lift=lift)
 
-        actual_p_null, actual_p_alt = simple_hypothesis_from_composite(
-            group_sizes, baseline, null_lift, alt_lift, lift="relative"
-        )
+        # The alternative is taken at face value.
+        expected_b = baseline * (1 + alt_lift) if lift == "relative" else baseline + alt_lift
+        assert p_alt == pytest.approx([baseline, expected_b])
 
-        assert actual_p_null[0] == baseline
-        assert actual_p_null[1] == (1 + null_lift) * actual_p_null[0]
+        # The null rates satisfy H0 ...
+        if lift == "relative":
+            assert p_null[1] == pytest.approx((1 + null_lift) * p_null[0])
+        else:
+            assert p_null[1] == pytest.approx(p_null[0] + null_lift)
 
-        assert actual_p_alt[1] == (1 + alt_lift) * actual_p_alt[0]
-        assert actual_p_alt[0] >= 0.0
-        assert actual_p_alt[0] <= 1.0
-        assert actual_p_alt[1] >= 0.0
-        assert actual_p_alt[1] <= 1.0
+        # ... and maximise the likelihood of the counts expected under the alternative.
+        na, nb = group_sizes
+        sa, sb = na * p_alt[0], nb * p_alt[1]
 
-        assert actual_p_alt == pytest.approx(expected_p_alt)
+        def neg_log_lik(pa):
+            pb = pa * (1 + null_lift) if lift == "relative" else pa + null_lift
+            return -(xlogy(sa, pa) + xlogy(na - sa, 1 - pa) + xlogy(sb, pb) + xlogy(nb - sb, 1 - pb))
+
+        hi = 1 / (1 + null_lift) if lift == "relative" else 1 - null_lift
+        brute = minimize_scalar(neg_log_lik, bounds=(1e-12, hi - 1e-12), method="bounded", options={"xatol": 1e-12})
+        assert p_null[0] == pytest.approx(brute.x, rel=1e-6)
+        if null_lift == 0.0:
+            assert p_null == pytest.approx([(sa + sb) / (na + nb)] * 2)
 
     @staticmethod
-    @pytest.mark.parametrize(
-        "group_sizes,baseline,null_lift,alt_lift,expected_p_alt",
-        [
-            ([1000, 1000], 0.10, 0.0, 0.10, [0.05, 0.15]),
-            ([1000, 1000], 0.10, 0.0, -0.10, [0.15, 0.05]),
-            ([1000, 1000], 0.10, 0.10, 0.20, [0.064, 0.264]),
-            ([200, 1800], 0.10, 0.0, 0.10, [0.01, 0.11]),
-            ([1000, 1000], 0.0001, 0.0, 0.00005, [0.000075, 0.000125]),
-        ],
-    )
-    def test_simple_hypothesis_from_composite_absolute_lift(
-        group_sizes: np.ndarray,
-        baseline: float,
-        null_lift: float,
-        alt_lift: float,
-        expected_p_alt: np.ndarray,
-    ):
-        # Note: we used cvxpy to solve the problem directly, but then
-        # hard-coded the result so I don't need to have cvxpy as a dependency.
-        #
-        # na = group_sizes[0]
-        # nb = group_sizes[1]
-        # p_null_a = baseline
-        # p_null_b = p_null_a + null_lift
-        # p_alt = cp.Variable(2)
-        # objective = cp.Minimize(
-        #     (na / (p_null_a * (1 - p_null_a))) * (p_alt[0] - p_null_a) ** 2
-        #     + (nb / (p_null_b * (1 - p_null_b))) * (p_alt[1] - p_null_b) ** 2
-        # )
-        # constraints = [0 <= p_alt, p_alt <= 1, p_alt[1] == p_alt[0] + alt_lift]
-        # prob = cp.Problem(objective, constraints)
-        # prob.solve()
-        # expected_p_alt = p_alt.value
-
-        actual_p_null, actual_p_alt = simple_hypothesis_from_composite(
-            group_sizes, baseline, null_lift, alt_lift, lift="absolute"
-        )
-
-        assert actual_p_null[0] == baseline
-        assert actual_p_null[1] == actual_p_null[0] + null_lift
-
-        assert actual_p_alt[1] == actual_p_alt[0] + alt_lift
-        assert actual_p_alt[0] >= 0.0
-        assert actual_p_alt[0] <= 1.0
-        assert actual_p_alt[1] >= 0.0
-        assert actual_p_alt[1] <= 1.0
-
-        assert actual_p_alt == pytest.approx(expected_p_alt)
+    @pytest.mark.parametrize("alt_lift, lift", [(10.0, "relative"), (-1.0, "relative"), (0.95, "absolute")])
+    def test_simple_hypothesis_from_composite_rejects_impossible_alternative(alt_lift, lift):
+        with pytest.raises(ValueError, match=r"must be in \(0, 1\)"):
+            simple_hypothesis_from_composite([1000, 1000], 0.10, 0.0, alt_lift, lift=lift)
 
     @staticmethod
     @pytest.mark.parametrize(
