@@ -58,6 +58,12 @@ def _pvalue_decision(pval: Any, crit: float | None) -> float | bool:
     return bool(pval <= crit)
 
 
+def _require_zero_null(null_lift: float, test_name: str) -> None:
+    """Reject a nonzero null for tests that can only test for no difference."""
+    if null_lift != 0:
+        raise NotImplementedError(f"{test_name} only supports a null lift of 0")
+
+
 def _power_divergence_test(
     trials: np.ndarray[Any, Any] | list[Any],
     successes: np.ndarray[Any, Any] | list[Any],
@@ -72,6 +78,7 @@ def _power_divergence_test(
     log-likelihood tests, which differ only in the ``lambda_`` parameter.
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
+    _require_zero_null(null_lift, f"The {lambda_} test")
     contingency_table = _contingency_table(trials, successes)
     result = ss.chi2_contingency(contingency_table, correction=False, lambda_=lambda_)  # type: ignore[no-untyped-call, attr-defined, var-annotated]
     return _test_result(result.statistic, result.pvalue, crit)
@@ -446,10 +453,12 @@ def fisher_test(
 
     Notes
     -----
-    Only supports two experiment groups, and only an absolute lift (or a
-    relative lift with a null of 0%).
+    Only supports two experiment groups and a null lift of 0 (no difference
+    between groups), on either lift scale. These tests cannot be inverted
+    into ``binary_search`` confidence intervals.
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
+    _require_zero_null(null_lift, "fisher_test")
     contingency_table = _contingency_table(trials, successes)
     _, pval = ss.fisher_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined, arg-type]
     return _pvalue_decision(pval, crit)
@@ -468,10 +477,12 @@ def barnard_exact_test(
 
     Notes
     -----
-    Only supports two experiment groups, and only an absolute lift (or a
-    relative lift with a null of 0%).
+    Only supports two experiment groups and a null lift of 0 (no difference
+    between groups), on either lift scale. These tests cannot be inverted
+    into ``binary_search`` confidence intervals.
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
+    _require_zero_null(null_lift, "barnard_exact_test")
     contingency_table = _contingency_table(trials, successes)
     barnard = ss.barnard_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     return _test_result(barnard.statistic, barnard.pvalue, crit)
@@ -493,10 +504,12 @@ def boschloo_exact_test(
 
     Notes
     -----
-    Only supports two experiment groups, and only an absolute lift (or a
-    relative lift with a null of 0%).
+    Only supports two experiment groups and a null lift of 0 (no difference
+    between groups), on either lift scale. These tests cannot be inverted
+    into ``binary_search`` confidence intervals.
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
+    _require_zero_null(null_lift, "boschloo_exact_test")
     contingency_table = _contingency_table(trials, successes)
     boschloo = ss.boschloo_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     return _pvalue_decision(boschloo.pvalue, crit)
@@ -515,8 +528,9 @@ def modified_log_likelihood_test(
 
     Notes
     -----
-    Only supports two experiment groups, and only an absolute lift (or a
-    relative lift with a null of 0%).
+    Only supports two experiment groups and a null lift of 0 (no difference
+    between groups), on either lift scale. These tests cannot be inverted
+    into ``binary_search`` confidence intervals.
     """
     return _power_divergence_test(trials, successes, "mod-log-likelihood", null_lift, lift, crit)
 
@@ -534,8 +548,9 @@ def freeman_tukey_test(
 
     Notes
     -----
-    Only supports two experiment groups, and only an absolute lift (or a
-    relative lift with a null of 0%).
+    Only supports two experiment groups and a null lift of 0 (no difference
+    between groups), on either lift scale. These tests cannot be inverted
+    into ``binary_search`` confidence intervals.
     """
     return _power_divergence_test(trials, successes, "freeman-tukey", null_lift, lift, crit)
 
@@ -553,8 +568,9 @@ def neyman_test(
 
     Notes
     -----
-    Only supports two experiment groups, and only an absolute lift (or a
-    relative lift with a null of 0%).
+    Only supports two experiment groups and a null lift of 0 (no difference
+    between groups), on either lift scale. These tests cannot be inverted
+    into ``binary_search`` confidence intervals.
     """
     return _power_divergence_test(trials, successes, "neyman", null_lift, lift, crit)
 
@@ -572,7 +588,8 @@ def cressie_read_test(
 
     Notes
     -----
-    Only supports two experiment groups, and only an absolute lift (or a
-    relative lift with a null of 0%).
+    Only supports two experiment groups and a null lift of 0 (no difference
+    between groups), on either lift scale. These tests cannot be inverted
+    into ``binary_search`` confidence intervals.
     """
     return _power_divergence_test(trials, successes, "cressie-read", null_lift, lift, crit)

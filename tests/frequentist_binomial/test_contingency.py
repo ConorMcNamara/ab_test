@@ -8,7 +8,7 @@ from polars.testing import assert_frame_equal
 
 from ab_test.frequentist_binomial.contingency import ContingencyTable
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
-from ab_test.frequentist_binomial.stats_tests import wald_test
+from ab_test.frequentist_binomial.stats_tests import ab_test, likelihood_ratio_test, score_test, wald_test, z_test
 
 
 class TestContingencyTable:
@@ -310,6 +310,52 @@ class TestContingencyTableWald:
     def test_analyze_relative_lift_not_supported():
         with pytest.raises(NotImplementedError):
             TestContingencyTableWald._table().analyze(lift="relative", test_method="wald")
+
+
+class TestAnalyzeTestMapping:
+    @staticmethod
+    def _table():
+        return ContingencyTable("Mapping", "conversion").add("Control", 100, 1000).add("Treatment", 130, 1000)
+
+    @pytest.mark.parametrize(
+        "method, test",
+        [("score", score_test), ("likelihood", likelihood_ratio_test), ("z", z_test), ("wald", wald_test)],
+    )
+    def test_binary_search_inverts_the_chosen_test(self, method, test):
+        table = self._table()
+        table.analyze(lift="absolute", test_method=method, conf_int_method="binary_search")
+        lb, ub = confidence_interval([1000, 1000], [100, 130], test=test, lift="absolute")
+        assert table.incremental_results["ci_lower"] == pytest.approx(lb)
+        assert table.incremental_results["ci_upper"] == pytest.approx(ub)
+
+    @pytest.mark.parametrize(
+        "method", ["fisher", "barnard", "boschloo", "modified_likelihood", "freeman-tukey", "neyman", "cressie-read"]
+    )
+    def test_binary_search_with_non_invertible_test_raises(self, method):
+        with pytest.raises(ValueError, match=f"test_method={method!r} cannot be inverted"):
+            self._table().analyze(lift="absolute", test_method=method, conf_int_method="binary_search")
+
+    @pytest.mark.parametrize("method", ["fisher", "neyman", "cressie-read"])
+    def test_non_invertible_test_works_with_non_search_interval(self, method):
+        table = self._table()
+        table.analyze(lift="absolute", test_method=method, conf_int_method="wilson")
+        expected = ab_test([1000, 1000], [100, 130], null_lift=0.0, lift="absolute", method=method)
+        assert table.incremental_results["p_value"] == pytest.approx(expected)
+        lb, ub = confidence_interval([1000, 1000], [100, 130], lift="absolute", method="wilson")
+        assert table.incremental_results["ci_lower"] == pytest.approx(lb)
+        assert table.incremental_results["ci_upper"] == pytest.approx(ub)
+
+    @staticmethod
+    def test_non_invertible_test_rejects_nonzero_null():
+        with pytest.raises(NotImplementedError):
+            TestAnalyzeTestMapping._table().analyze(
+                lift="absolute", test_method="fisher", conf_int_method="wilson", null_lift=0.02
+            )
+
+    @staticmethod
+    def test_unknown_test_method_raises():
+        with pytest.raises(ValueError):
+            TestAnalyzeTestMapping._table().analyze(lift="absolute", test_method="not-a-test", conf_int_method="wilson")
 
 
 if __name__ == "__main__":
