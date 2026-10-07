@@ -1,5 +1,6 @@
 """Methods to calculate the power of a test."""
 
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -10,6 +11,10 @@ import scipy.stats as ss
 from ab_test._display import apply_dark_mode
 from ab_test._lift import _SCALED_LIFTS, from_absolute, to_absolute
 from ab_test.frequentist_binomial.utils import simple_hypothesis_from_composite
+
+# Expansion steps when searching for a minimum detectable lift; each halves the gap to the
+# feasible limit, so 50 steps reach within ~1e-15 of it.
+_MAX_EXPANSIONS = 50
 
 __all__ = [
     "score_power",
@@ -174,18 +179,19 @@ def minimum_detectable_lift(
 
     tol = 1e-6
 
-    # Find an extremum bound on the MDL
-    mdl_inner = 0.0
-    if drop:
-        if internal_lift == "relative":
-            mdl_extremum = -0.2
-        else:
-            mdl_extremum = -0.99 * baseline
+    # The alternative rate must stay in (0, 1): a relative drop cannot pass -100%,
+    # and an increase cannot push the rate above 1.
+    if internal_lift == "relative":
+        limit = -1.0 if drop else (1 - baseline) / baseline
     else:
-        if internal_lift == "relative":
-            mdl_extremum = 0.2
-        else:
-            mdl_extremum = 0.99 * (1 - baseline)
+        limit = -baseline if drop else 1 - baseline
+
+    # Find an extremum bound on the MDL, approaching the limit without crossing it
+    mdl_inner = 0.0
+    if internal_lift == "relative":
+        mdl_extremum = math.copysign(min(0.2, 0.5 * abs(limit)), limit)
+    else:
+        mdl_extremum = 0.99 * limit
 
     pwr = abtest_power(
         group_sizes,
@@ -197,14 +203,14 @@ def minimum_detectable_lift(
         lift=internal_lift,
     )
 
-    while pwr < 1 - beta:
+    for _ in range(_MAX_EXPANSIONS):
+        if pwr >= 1 - beta:
+            break
         mdl_inner = mdl_extremum
-        if internal_lift == "relative":
+        if internal_lift == "relative" and abs(2 * mdl_extremum) < abs(limit):
             mdl_extremum *= 2
-        elif drop:
-            mdl_extremum = 0.5 * (-baseline + mdl_extremum)
         else:
-            mdl_extremum = 0.5 * ((1 - baseline) + mdl_extremum)
+            mdl_extremum = 0.5 * (limit + mdl_extremum)
 
         pwr = abtest_power(
             group_sizes,
@@ -214,6 +220,12 @@ def minimum_detectable_lift(
             null_lift=internal_null,
             power=power,
             lift=internal_lift,
+        )
+    else:
+        direction = "drop" if drop else "lift"
+        raise ValueError(
+            f"No {direction} keeping the treatment rate within [0, 1] reaches power {1 - beta}. "
+            "Consider larger group sizes, a smaller target power, or a larger alpha."
         )
 
     while abs(mdl_extremum - mdl_inner) > tol:

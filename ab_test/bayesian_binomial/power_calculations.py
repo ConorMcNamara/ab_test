@@ -173,6 +173,18 @@ def _search_min_sample_size(
     return high
 
 
+# Largest treatment rate a lift search may imply: a rate of exactly 1 breaks the Beta
+# parameterizations used in the simulations.
+_MAX_RATE = 1 - 1e-9
+
+
+def _max_feasible_lift(baseline: float, lift: str) -> float:
+    """Largest lift whose implied treatment rate stays below 1."""
+    if lift == "relative":
+        return _MAX_RATE / baseline - 1
+    return _MAX_RATE - baseline
+
+
 def _search_min_lift(
     power_fn: Callable[[float], float],
     target_power: float,
@@ -182,21 +194,20 @@ def _search_min_lift(
 ) -> float:
     """Find the smallest lift reaching ``target_power``.
 
-    Doubles a candidate lift from 0.01 until ``power_fn`` meets ``target_power``,
-    then binary-searches the resulting bracket to within ``tol``.
+    Doubles a candidate lift from 0.01, capped at ``max_lift``, until
+    ``power_fn`` meets ``target_power``, then binary-searches the resulting
+    bracket to within ``tol``. ``max_lift`` itself is always evaluated.
 
     Raises
     ------
     ValueError
-        With ``error_message`` if ``target_power`` is not reached within ``max_lift``.
+        With ``error_message`` if ``target_power`` is not reached at ``max_lift``.
     """
-    low, high = 0.0, 0.01
-    while high <= max_lift:
-        if power_fn(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(error_message)
+    low, high = 0.0, min(0.01, max_lift)
+    while power_fn(high) < target_power:
+        if high >= max_lift:
+            raise ValueError(error_message)
+        low, high = high, min(high * 2, max_lift)
 
     while high - low > tol:
         mid = (low + high) / 2
@@ -205,6 +216,19 @@ def _search_min_lift(
         else:
             low = mid
     return high
+
+
+def _unreachable_lift_message(target_power: float, max_lift: float, baseline: float, lift: str) -> str:
+    """Error message for a lift search that cannot reach ``target_power``."""
+    feasible = _max_feasible_lift(baseline, lift)
+    if feasible < max_lift:
+        bound = f"any lift that keeps the treatment rate below 1 (up to {feasible:.4g})"
+    else:
+        bound = f"a lift of {max_lift}"
+    return (
+        f"Could not reach target power of {target_power} within {bound}. "
+        "Consider a smaller target power or larger group size."
+    )
 
 
 def bayes_power_lift(
@@ -639,8 +663,8 @@ def bayes_minimum_detectable_lift(
     Because power estimates are stochastic, results may vary slightly between
     calls. Increase ``n_samples`` for a more stable (but slower) result.
 
-    For ``lift="absolute"``, ensure ``baseline + max_lift <= 1.0``; otherwise
-    the implied treatment rate exceeds 1.
+    The search never implies a treatment rate of 1 or more: it stops at the
+    largest lift that keeps the rate below 1 if that is smaller than ``max_lift``.
 
     Parameters
     ----------
@@ -711,13 +735,9 @@ def bayes_minimum_detectable_lift(
     abs_mdl = _search_min_lift(
         _power,
         target_power,
-        max_lift,
+        min(max_lift, _max_feasible_lift(baseline, internal_lift)),
         tol,
-        error_message=(
-            f"Could not reach target power of {target_power} within "
-            f"a lift of {max_lift}. "
-            "Consider a smaller target power or larger group size."
-        ),
+        error_message=_unreachable_lift_message(target_power, max_lift, baseline, internal_lift),
     )
     if lift in _SCALED_LIFTS:
         return from_absolute(abs_mdl, lift, group_size, spend, msrp)
@@ -752,8 +772,8 @@ def bayes_minimum_detectable_lift_loss(
     Because power estimates are stochastic, results may vary slightly between
     calls. Increase ``n_samples`` for a more stable (but slower) result.
 
-    For ``lift="absolute"``, ensure ``baseline + max_lift <= 1.0``; otherwise
-    the implied treatment rate exceeds 1.
+    The search never implies a treatment rate of 1 or more: it stops at the
+    largest lift that keeps the rate below 1 if that is smaller than ``max_lift``.
 
     Parameters
     ----------
@@ -824,13 +844,9 @@ def bayes_minimum_detectable_lift_loss(
     abs_mdl = _search_min_lift(
         _power,
         target_power,
-        max_lift,
+        min(max_lift, _max_feasible_lift(baseline, internal_lift)),
         tol,
-        error_message=(
-            f"Could not reach target power of {target_power} within "
-            f"a lift of {max_lift}. "
-            "Consider a smaller target power or larger group size."
-        ),
+        error_message=_unreachable_lift_message(target_power, max_lift, baseline, internal_lift),
     )
     if lift in _SCALED_LIFTS:
         return from_absolute(abs_mdl, lift, group_size, spend, msrp)

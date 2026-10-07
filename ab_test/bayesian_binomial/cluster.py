@@ -28,6 +28,7 @@ from tabulate import tabulate
 
 from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
+from ab_test.bayesian_binomial.power_calculations import _max_feasible_lift, _search_min_lift
 
 __all__ = [
     "BayesianClusterRandomizedTrial",
@@ -1067,30 +1068,6 @@ def _search_min_clusters(
     return high
 
 
-def _search_min_lift(
-    power_fn: Any,
-    target_power: float,
-    max_lift: float,
-    tol: float,
-    error_message: str,
-) -> float:
-    low, high = 0.0, 0.01
-    while high <= max_lift:
-        if power_fn(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(error_message)
-
-    while high - low > tol:
-        mid = (low + high) / 2
-        if power_fn(mid) >= target_power:
-            high = mid
-        else:
-            low = mid
-    return high
-
-
 def cluster_bayes_minimum_clusters(
     icc: float,
     cluster_size: int,
@@ -1294,15 +1271,15 @@ def cluster_bayes_minimum_detectable_lift(
             confidence_level=confidence_level,
         )
 
+    search_max = min(max_lift, _max_feasible_lift(baseline, lift))
+    bound = f"a lift of {max_lift}" if search_max == max_lift else "any lift that keeps the rate below 1"
     return _search_min_lift(
         _power,
         target_power,
-        max_lift,
+        search_max,
         tol,
         error_message=(
-            f"Could not reach target power of {target_power} within "
-            f"a lift of {max_lift}. "
-            "Consider more clusters or lower ICC."
+            f"Could not reach target power of {target_power} within {bound}. Consider more clusters or lower ICC."
         ),
     )
 
@@ -1366,15 +1343,15 @@ def cluster_bayes_minimum_detectable_lift_loss(
             loss_threshold=loss_threshold,
         )
 
+    search_max = min(max_lift, _max_feasible_lift(baseline, lift))
+    bound = f"a lift of {max_lift}" if search_max == max_lift else "any lift that keeps the rate below 1"
     return _search_min_lift(
         _power,
         target_power,
-        max_lift,
+        search_max,
         tol,
         error_message=(
-            f"Could not reach target power of {target_power} within "
-            f"a lift of {max_lift}. "
-            "Consider more clusters or lower ICC."
+            f"Could not reach target power of {target_power} within {bound}. Consider more clusters or lower ICC."
         ),
     )
 

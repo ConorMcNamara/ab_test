@@ -478,6 +478,15 @@ class TestClusterBayesMinimumClustersLoss:
         assert k >= 2
 
 
+class TestClusterBayesMinimumDetectableLiftRateBound:
+    @staticmethod
+    def test_search_stays_below_rate_of_one():
+        # Used to raise numpy's "b <= 0" once baseline * (1 + lift) reached 1.
+        np.random.seed(0)
+        mdl = cluster_bayes_minimum_detectable_lift(3, 10, 0.3, 0.3, n_samples=300, mc_samples=100)
+        assert 0 < mdl < (1 - 0.3) / 0.3
+
+
 class TestClusterBayesMinimumDetectableLift:
     @staticmethod
     def test_returns_float():
