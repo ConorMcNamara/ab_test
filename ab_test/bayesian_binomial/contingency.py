@@ -162,6 +162,14 @@ class BayesianContingencyTable(BaseContingencyTable):
         """
         if len(self.names) != 2:
             raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
+        self._analyze_settings = {
+            "cred_int_method": cred_int_method,
+            "confidence_level": confidence_level,
+            "is_sample": is_sample,
+            "n_samples": n_samples,
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+        }
         lift = lift.casefold()
         if lift in ["relative", "absolute"]:
             results = calculate_metrics(
