@@ -250,6 +250,16 @@ class TestBayesianDiffInDiffRoas:
         assert dd.segment_results is not None
 
 
+class TestBayesianDiffInDiffCpa:
+    @staticmethod
+    @pytest.mark.parametrize("method", ["analyze", "plot"])
+    def test_cpa_rejected(method):
+        t1 = _make_table("A", 100, 1000, 130, 1000, spend=500.0)
+        t2 = _make_table("B", 120, 1000, 125, 1000, spend=500.0)
+        with pytest.raises(ValueError, match="lift='roas'"):
+            getattr(BayesianDiffInDiff(t1, t2), method)(lift="cpa")
+
+
 class TestBayesianDiffInDiffRevenue:
     @staticmethod
     def test_revenue_missing_msrp_raises():

@@ -29,7 +29,12 @@ __all__ = [
     "BayesianDiffInDiff",
 ]
 
-_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue", "cpa"})
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+_CPA_ERROR = (
+    "lift='cpa' is not supported for difference-in-differences: CPA is spend / incremental conversions, so a "
+    "difference of segment CPAs has no posterior mean and is not monotone in the effects being compared. "
+    "Use lift='roas' (incremental conversions per dollar) instead."
+)
 
 
 def _credible_interval_from_samples(
@@ -58,7 +63,7 @@ def _compute_segment_samples(
         One table per segment, each with exactly 2 cells.
     lift : str
         One of ``"absolute"``, ``"relative"``, ``"incremental"``,
-        ``"roas"``, ``"revenue"``, or ``"cpa"``.
+        ``"roas"``, or ``"revenue"``.
     n_samples : int
         Number of posterior samples to draw per variant.
 
@@ -89,17 +94,13 @@ def _compute_segment_samples(
         if lift == "relative":
             safe_c = np.where(samples_c == 0, 1e-9, samples_c)
             segment_lift = (samples_t - samples_c) / safe_c
-        elif lift in ("incremental", "roas", "revenue", "cpa"):
+        elif lift in ("incremental", "roas", "revenue"):
             n_max = max(n_c, n_t)
             segment_lift = (samples_t - samples_c) * n_max
             if lift == "roas":
                 if table.spend is None:
                     raise ValueError(f"spend must be set on segment {table.experiment_name!r} for ROAS")
                 segment_lift = segment_lift / table.spend
-            elif lift == "cpa":
-                if table.spend is None:
-                    raise ValueError(f"spend must be set on segment {table.experiment_name!r} for CPA")
-                segment_lift = np.where(np.abs(segment_lift) > 1e-12, table.spend / segment_lift, np.inf)
             elif lift == "revenue":
                 if table.msrp is None:
                     raise ValueError(f"msrp must be set on segment {table.experiment_name!r} for revenue")
@@ -191,7 +192,9 @@ class BayesianDiffInDiff:
         ----------
         lift : str, default="absolute"
             Scale for treatment effects: ``"absolute"``, ``"relative"``,
-            ``"incremental"``, ``"roas"``, or ``"revenue"``.
+            ``"incremental"``, ``"roas"``, or ``"revenue"``. ``"cpa"`` is
+            rejected because differences of CPAs are not well defined; use
+            ``"roas"`` instead.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -207,6 +210,8 @@ class BayesianDiffInDiff:
             estimate, and pairwise DiD comparisons.
         """
         lift = lift.casefold()
+        if lift == "cpa":
+            raise ValueError(_CPA_ERROR)
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
@@ -335,7 +340,9 @@ class BayesianDiffInDiff:
         ----------
         lift : str, default="absolute"
             Scale for treatment effects: ``"absolute"``, ``"relative"``,
-            ``"incremental"``, ``"roas"``, or ``"revenue"``.
+            ``"incremental"``, ``"roas"``, or ``"revenue"``. ``"cpa"`` is
+            rejected because differences of CPAs are not well defined; use
+            ``"roas"`` instead.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -353,6 +360,8 @@ class BayesianDiffInDiff:
             ``"plotly_dark"`` template).
         """
         lift = lift.casefold()
+        if lift == "cpa":
+            raise ValueError(_CPA_ERROR)
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
@@ -410,7 +419,6 @@ class BayesianDiffInDiff:
             "incremental": "Incremental Conversions",
             "roas": "Return on Ad Spend",
             "revenue": "Revenue",
-            "cpa": "Cost Per Acquisition",
         }
         tick_formats = {
             "absolute": ",.1%",
@@ -418,7 +426,6 @@ class BayesianDiffInDiff:
             "incremental": ",",
             "roas": "$,",
             "revenue": "$,",
-            "cpa": "$,",
         }
         lift_label = lift_labels[lift]
         fig.update_layout(

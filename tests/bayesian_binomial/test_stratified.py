@@ -402,3 +402,56 @@ class TestBayesianStratifiedEdgeCases:
             .add("Treatment", successes=30, trials=200, alpha=1, beta=1, stratum="s2")
         )
         assert isinstance(st, BayesianStratifiedContingencyTable)
+
+
+def _cpa_table():
+    table = BayesianStratifiedContingencyTable("CPA", "conv", spend=1000)
+    for k in ("A", "B"):
+        table.add("Control", 100, 1000, 1, 1, stratum=k)
+        table.add("Treatment", 110, 1000, 1, 1, stratum=k)
+    return table
+
+
+class TestBayesianStratifiedCpa:
+    @staticmethod
+    def test_point_estimate_is_spend_over_mean_increment():
+        # Used to report the (undefined) mean of spend / increment: $73 with a (-$460, $505) interval.
+        np.random.seed(0)
+        table = _cpa_table()
+        table.analyze(lift="cpa")
+        r = table.pooled_results
+        assert r["lift"] == pytest.approx(50.0, rel=0.05)
+        assert 0 < r["ci_lower"] < r["lift"] < r["ci_upper"]
+
+    @staticmethod
+    def test_interval_unbounded_when_no_increment_is_plausible():
+        np.random.seed(0)
+        table = _cpa_table()
+        table.analyze(lift="cpa")
+        assert table.pooled_results["prob_t_gt_c"] < 0.975
+        assert table.pooled_results["ci_upper"] == np.inf
+
+    @staticmethod
+    def test_loss_rope_and_tau_not_on_cpa_scale():
+        np.random.seed(0)
+        table = _cpa_table()
+        output = table.analyze(lift="cpa")
+        assert table.pooled_results["expected_loss"] < 0.01
+        assert np.isnan(table.pooled_results["prob_rope"])
+        assert np.isnan(table.heterogeneity_results["tau_mean"])
+        assert "Between-stratum tau: n/a" in output
+
+    @staticmethod
+    def test_analyze_by_stratum_cpa():
+        np.random.seed(0)
+        table = _cpa_table()
+        table.analyze_by_stratum(lift="cpa")
+        for result in table.stratum_results.values():
+            assert result["effect"] == pytest.approx(100.0, rel=0.05)
+            assert result["ci_lower"] > 0
+
+    @staticmethod
+    def test_plot_cpa(monkeypatch):
+        monkeypatch.setattr("plotly.graph_objects.Figure.show", lambda self: None)
+        np.random.seed(0)
+        _cpa_table().plot(lift="cpa", n_samples=10_000)
