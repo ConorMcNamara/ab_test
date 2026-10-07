@@ -148,6 +148,26 @@ class TestNormalTable:
         assert nt.trials == [500, 500]
 
     @staticmethod
+    def test_add_data_accepts_list_tuple_and_array():
+        values = [9.5, 10.0, 11.5, 12.0, 8.0]
+        tables = [
+            NormalTable(name="Test", metric_name="metric").add_data("A", data)
+            for data in (values, tuple(values), np.array(values))
+        ]
+        for table in tables:
+            assert table.means == pytest.approx([float(np.mean(values))])
+            assert table.variances == pytest.approx([float(np.var(values, ddof=1))])
+            assert table.trials == [5]
+
+    @staticmethod
+    def test_add_data_counts_every_observation_in_2d_input():
+        data = np.arange(12, dtype=float).reshape(3, 4)
+        nt = NormalTable(name="Test", metric_name="metric").add_data("A", data)
+        assert nt.trials == [12]
+        assert nt.means == pytest.approx([float(np.mean(data))])
+        assert nt.variances == pytest.approx([float(np.var(data, ddof=1))])
+
+    @staticmethod
     def test_add_chaining():
         nt = NormalTable(name="Test", metric_name="metric")
         result = nt.add("A", 10.0, 4.0, 1000).add("B", 11.0, 5.0, 1000)
