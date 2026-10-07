@@ -83,6 +83,33 @@ class TestEstimateICC:
         result = estimate_icc([50, 50, 50, 50], [100, 100, 100, 100])
         assert result >= 0.0
 
+    @staticmethod
+    def test_groups_remove_between_arm_difference():
+        # No clustering within arms, only a 10% vs 20% treatment effect.
+        successes, trials = [50, 50, 50, 100, 100, 100], [500] * 6
+        assert estimate_icc(successes, trials) > 0.02
+        assert estimate_icc(successes, trials, groups=["c", "c", "c", "t", "t", "t"]) == 0.0
+
+    @staticmethod
+    def test_groups_unbiased_with_treatment_effect():
+        rng = np.random.default_rng(0)
+        rho, estimates = 0.05, []
+        for _ in range(500):
+            p = np.r_[rng.beta(0.1 * 19, 0.9 * 19, 10), rng.beta(0.2 * 19, 0.8 * 19, 10)]
+            trials = rng.integers(250, 751, 20)
+            estimates.append(estimate_icc(rng.binomial(trials, p), trials, groups=np.repeat([0, 1], 10)))
+        assert np.mean(estimates) == pytest.approx(rho, abs=0.005)
+
+    @staticmethod
+    def test_groups_length_mismatch_raises():
+        with pytest.raises(ValueError, match="one label per cluster"):
+            estimate_icc([10, 12, 8], [100, 100, 100], groups=[0, 1])
+
+    @staticmethod
+    def test_groups_need_more_clusters_than_groups():
+        with pytest.raises(ValueError, match="more clusters than groups"):
+            estimate_icc([10, 12], [100, 100], groups=[0, 1])
+
 
 # ---------------------------------------------------------------------------
 # design_effect
@@ -325,6 +352,16 @@ class TestClusterRandomizedTrial:
         crt.analyze()
         assert isinstance(crt.deff, float)
         assert crt.deff >= 1.0
+
+    @staticmethod
+    def test_icc_not_inflated_by_treatment_effect():
+        crt = ClusterRandomizedTrial()
+        for i in range(3):
+            crt.add(f"c{i}", 50, 500, group="control")
+            crt.add(f"t{i}", 100, 500, group="treatment")
+        crt.analyze()
+        assert crt.icc == 0.0
+        assert crt.deff == 1.0
 
     @staticmethod
     def test_summary_dict_keys():
