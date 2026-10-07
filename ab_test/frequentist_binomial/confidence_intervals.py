@@ -1,6 +1,7 @@
 """Calculates confidence intervals for AB Tests."""
 
 import math
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -108,6 +109,24 @@ def _search_upper_bound(
     return 0.5 * (ub_lb + ub_ub)
 
 
+def _mover_ratio_interval(
+    p_A: float, lower1: float, upper1: float, p_B: float, lower2: float, upper2: float
+) -> tuple[float, float]:
+    """MOVER interval for the ratio p_B / p_A from single-proportion intervals.
+
+    Donner, A. & Zou, G. Y. (2012). "Closed-form confidence intervals for
+    functions of the normal mean and standard deviation." Section 3.
+    """
+    prod = p_A * p_B
+    lb_denom = upper1 * (2 * p_A - upper1)
+    ub_denom = lower1 * (2 * p_A - lower1)
+    lb_disc = max(prod**2 - lower2 * upper1 * (2 * p_B - lower2) * (2 * p_A - upper1), 0.0)
+    ub_disc = max(prod**2 - upper2 * lower1 * (2 * p_B - upper2) * (2 * p_A - lower1), 0.0)
+    lb = (prod - math.sqrt(lb_disc)) / lb_denom if lb_denom != 0 else 0.0
+    ub = (prod + math.sqrt(ub_disc)) / ub_denom if ub_denom > 0 else math.inf
+    return max(lb, 0.0), ub
+
+
 def confidence_interval(
     trials: np.ndarray[Any, Any] | list[Any],
     successes: np.ndarray[Any, Any] | list[Any],
@@ -149,7 +168,11 @@ def confidence_interval(
 
     Notes
     -----
-    Uses binary search to compute a confidence interval.
+    ``binary_search`` inverts ``test``. ``wilson``, ``jeffrey``,
+    ``agresti-coull`` and ``clopper-pearson`` combine the two single-group
+    intervals with the MOVER method: Newcombe's hybrid interval for absolute
+    lift, and Donner & Zou's ratio interval for relative lift. ``wald`` and
+    ``delta`` use the delta method.
     """
     try:
         ote = observed_lift(trials, successes, lift=lift)
@@ -184,28 +207,32 @@ def confidence_interval(
         else:
             raise NotImplementedError(f"binary_search is not implemented for {test}")
     else:
-        if method in ["wilson", "jeffrey", "agresti-coull", "clopper-pearson", "wald"]:
-            if method == "wilson":
-                z_critical = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
-                lower1, upper1 = wilson_interval(successes[0], trials[0], alpha, z_critical)
-                lower2, upper2 = wilson_interval(successes[1], trials[1], alpha, z_critical)
-            elif method == "jeffrey":
-                lower1, upper1 = jeffrey_interval(successes[0], trials[0], alpha)
-                lower2, upper2 = jeffrey_interval(successes[1], trials[1], alpha)
-            elif method == "agresti-coull":
-                z_critical = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
-                lower1, upper1 = agresti_coull_interval(successes[0], trials[0], alpha, z_critical)
-                lower2, upper2 = agresti_coull_interval(successes[1], trials[1], alpha, z_critical)
-            elif method == "clopper-pearson":
-                lower1, upper1 = clopper_pearson_interval(successes[0], trials[0], alpha)
-                lower2, upper2 = clopper_pearson_interval(successes[1], trials[1], alpha)
+        if method in ["wilson", "jeffrey", "agresti-coull", "clopper-pearson"]:
+            single_intervals: dict[str, Callable[..., tuple[Any, ...]]] = {
+                "wilson": wilson_interval,
+                "jeffrey": jeffrey_interval,
+                "agresti-coull": agresti_coull_interval,
+                "clopper-pearson": clopper_pearson_interval,
+            }
+            single_interval = single_intervals[method]
+            p_A = successes[0] / trials[0]
+            p_B = successes[1] / trials[1]
+            lower1, upper1 = single_interval(successes[0], trials[0], alpha)
+            lower2, upper2 = single_interval(successes[1], trials[1], alpha)
+            if lift == "relative":
+                lb, ub = _mover_ratio_interval(p_A, lower1, upper1, p_B, lower2, upper2)
+                lb, ub = lb - 1, ub - 1
             else:
-                z_critical = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
-                lower1, upper1 = wald_interval(successes[0], trials[0], alpha, z_critical)
-                lower2, upper2 = wald_interval(successes[1], trials[1], alpha, z_critical)
+                # Newcombe's hybrid score interval (MOVER) for the difference
+                lb = ote - math.sqrt((p_B - lower2) ** 2 + (upper1 - p_A) ** 2)
+                ub = ote + math.sqrt((upper2 - p_B) ** 2 + (p_A - lower1) ** 2)
+        elif method == "wald":
+            # Wald intervals are symmetric, so combining half-widths is the delta method.
+            lower1, upper1 = wald_interval(successes[0], trials[0], alpha)
+            lower2, upper2 = wald_interval(successes[1], trials[1], alpha)
             var_pA = math.pow((upper1 - lower1) / 2, 2)
             var_pB = math.pow((upper2 - lower2) / 2, 2)
-            if lift == "relative" and method != "delta":
+            if lift == "relative":
                 p_A = successes[0] / trials[0]
                 p_B = successes[1] / trials[1]
                 var_g = var_pB / (p_A**2) + (p_B**2) * var_pA / (p_A**4)
@@ -279,9 +306,8 @@ def agresti_coull_interval(s: int, n: int, alpha: float = 0.05, z: float | None 
     z_squared = z * z
     n_tilde = n + z_squared
     p_tilde = (s + z_squared / 2) / n_tilde
-    return p_tilde - z * math.sqrt(p_tilde * (1 - p_tilde) / n_tilde), p_tilde + z * math.sqrt(
-        p_tilde * (1 - p_tilde) / n_tilde
-    )
+    half_width = z * math.sqrt(p_tilde * (1 - p_tilde) / n_tilde)
+    return max(p_tilde - half_width, 0.0), min(p_tilde + half_width, 1.0)
 
 
 def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
@@ -332,8 +358,8 @@ def clopper_pearson_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, 
     This is based off the Beta representation of Clopper-Pearson's formula. Note that Clopper-Pearson is
     an exact method, meaning that its intervals can be wider than other methods like Wilson or Jeffrey
     """
-    lb = ss.beta.ppf(alpha / 2, s, n - s + 1)  # type: ignore[no-untyped-call]
-    ub = ss.beta.ppf(1 - alpha / 2, s + 1, n - s)  # type: ignore[no-untyped-call]
+    lb = 0.0 if s == 0 else ss.beta.ppf(alpha / 2, s, n - s + 1)  # type: ignore[no-untyped-call]
+    ub = 1.0 if s == n else ss.beta.ppf(1 - alpha / 2, s + 1, n - s)  # type: ignore[no-untyped-call]
     return lb, ub
 
 
