@@ -120,7 +120,7 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 
 ### `test_method`
 
-`"score"`, `"likelihood"`, `"z"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`, `"msprt"`
+`"score"`, `"likelihood"`, `"z"`, `"wald"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`, `"msprt"`
 
 ### `conf_int_method`
 

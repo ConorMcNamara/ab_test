@@ -12,6 +12,8 @@ from ab_test.frequentist_binomial.stats_tests import (
     score_test,
     likelihood_ratio_test,
     z_test,
+    wald_test,
+    ab_test,
     fisher_test,
     barnard_exact_test,
     boschloo_exact_test,
@@ -181,6 +183,95 @@ class TestZTest:
         one = z_test(trials, successes, null_lift=0.0)
         two = z_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == two
+
+
+class TestWaldTest:
+    @staticmethod
+    def _reference(trials, successes, null_lift):
+        pa, pb = successes[0] / trials[0], successes[1] / trials[1]
+        se = math.sqrt(pa * (1 - pa) / trials[0] + pb * (1 - pb) / trials[1])
+        return 2 * ss.norm.sf(abs(pb - pa - null_lift) / se)
+
+    @pytest.mark.parametrize(
+        "trials, successes, null_lift",
+        [([1000, 1000], [100, 130], 0.0), ([1000, 1000], [100, 110], 0.0), ([500, 800], [20, 25], 0.01)],
+    )
+    def test_matches_formula(self, trials, successes, null_lift):
+        actual = wald_test(trials, successes, null_lift=null_lift, lift="absolute")
+        assert actual == pytest.approx(self._reference(trials, successes, null_lift))
+
+    @staticmethod
+    def test_uses_observed_variance_not_null_variance():
+        trials, successes = [1000, 1000], [100, 130]
+        wald = wald_test(trials, successes, lift="absolute")
+        score = score_test(trials, successes, lift="absolute")
+        assert wald == pytest.approx(0.0352853, abs=1e-6)
+        assert wald != pytest.approx(score, rel=1e-4)
+        assert wald == pytest.approx(score, rel=0.05)
+
+    @staticmethod
+    def test_null_equal_to_observed_lift():
+        assert wald_test([1000, 1000], [100, 130], null_lift=0.03, lift="absolute") == pytest.approx(1.0)
+
+    @staticmethod
+    def test_relative_zero_null_matches_absolute():
+        assert wald_test([1000, 1000], [100, 130], lift="relative") == wald_test(
+            [1000, 1000], [100, 130], lift="absolute"
+        )
+
+    @staticmethod
+    def test_nonzero_relative_null_raises():
+        with pytest.raises(NotImplementedError):
+            wald_test([1000, 1000], [100, 130], null_lift=0.1, lift="relative")
+
+    @staticmethod
+    def test_more_than_two_groups_raises():
+        with pytest.raises(NotImplementedError):
+            wald_test([1000, 1000, 1000], [100, 130, 120])
+
+    @staticmethod
+    def test_symmetric():
+        trials, successes = [1000, 1000], [100, 130]
+        one = wald_test(trials, successes, null_lift=0.01, lift="absolute")
+        two = wald_test(list(reversed(trials)), list(reversed(successes)), null_lift=-0.01, lift="absolute")
+        assert one == pytest.approx(two)
+
+    @staticmethod
+    def test_accepts_numpy_arrays():
+        actual = wald_test(np.array([1000, 1000]), np.array([100, 130]), lift="absolute")
+        assert actual == pytest.approx(wald_test([1000, 1000], [100, 130], lift="absolute"))
+
+    @pytest.mark.parametrize("crit", [1.96, 2.2])
+    def test_crit_agrees_with_p_value(self, crit):
+        trials, successes = [1000, 1000], [100, 130]
+        pval = wald_test(trials, successes, lift="absolute")
+        expected = bool(pval <= 2 * ss.norm.sf(crit))
+        assert wald_test(trials, successes, lift="absolute", crit=crit) is expected
+
+    @staticmethod
+    def test_zero_variance_contradicting_null_rejects():
+        assert wald_test([50, 50], [0, 50], null_lift=0.0, lift="absolute") == 0.0
+        assert wald_test([50, 50], [0, 50], null_lift=0.0, lift="absolute", crit=1.96) is True
+        assert wald_test([500, 500], [0, 0], null_lift=0.5, lift="absolute") == 0.0
+
+    @staticmethod
+    def test_zero_variance_matching_null_does_not_reject():
+        assert wald_test([500, 500], [0, 0], null_lift=0.0, lift="absolute") == 1.0
+        assert wald_test([500, 500], [0, 0], null_lift=0.0, lift="absolute", crit=1.96) is False
+        assert wald_test([50, 50], [0, 50], null_lift=1.0, lift="absolute") == 1.0
+
+    @staticmethod
+    def test_one_zero_group_uses_other_groups_variance():
+        trials, successes = [500, 500], [0, 3]
+        expected = TestWaldTest._reference(trials, successes, 0.0)
+        assert 0 < expected < 1
+        assert wald_test(trials, successes, lift="absolute") == pytest.approx(expected)
+
+    @staticmethod
+    def test_dispatched_by_ab_test():
+        expected = wald_test([1000, 1000], [100, 130], null_lift=0.0, lift="absolute")
+        actual = ab_test([1000, 1000], [100, 130], null_lift=0.0, lift="absolute", method="wald")
+        assert actual == expected
 
 
 class TestFisherTest:

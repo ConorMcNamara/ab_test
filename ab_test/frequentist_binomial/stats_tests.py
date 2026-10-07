@@ -16,6 +16,7 @@ __all__ = [
     "score_test",
     "likelihood_ratio_test",
     "z_test",
+    "wald_test",
     "fisher_test",
     "barnard_exact_test",
     "boschloo_exact_test",
@@ -108,7 +109,7 @@ def ab_test(
      method : str
         How we plan on calculating the p_value or critical value of our
         experiment.  One of ``'score'``, ``'likelihood'``, ``'z'``,
-        ``'fisher'``, ``'barnard'``, ``'boschloo'``,
+        ``'wald'``, ``'fisher'``, ``'barnard'``, ``'boschloo'``,
         ``'modified_likelihood'``, ``'freeman-tukey'``, ``'neyman'``,
         ``'cressie-read'``, or ``'msprt'``.
 
@@ -133,6 +134,8 @@ def ab_test(
         val = likelihood_ratio_test(trials, successes, null_lift, lift, crit)
     elif method == "z":
         val = z_test(trials, successes, null_lift, lift, crit)
+    elif method == "wald":
+        val = wald_test(trials, successes, null_lift, lift, crit)
     elif method == "fisher":
         val = fisher_test(trials, successes, null_lift, lift, crit)
     elif method == "barnard":
@@ -286,7 +289,7 @@ def z_test(
     lift: str = "relative",
     crit: float | None = None,
 ) -> float | bool:
-    """Z test for 2x2 contingency table.
+    """Score test for a 2x2 contingency table, expressed as a z-statistic.
 
     Parameters
     ----------
@@ -301,7 +304,7 @@ def z_test(
         rate, or in absolute terms. Only absolute lift is currently supported,
         but a relative lift with null_lift 0 is also supported since this is
         equivalent to an absolute lift with null_lift 0. See Notes in
-        `maximum_likelihood_estimation`.
+        `mle_under_null`.
      crit : float, optional
         Critical value for the test statistic. If omitted, a p-value will be
         returned. If passed, a boolean will be returned corresponding to
@@ -315,12 +318,24 @@ def z_test(
      pval : float
         P-value. Returned if `crit` is None.
      stat_sig : boolean
-        True if the result is statistically significant, i.e. if the test
-        statistic is >= `crit`. Returned if `crit` is not None.
+        True if the result is statistically significant, i.e. if the absolute
+        z-statistic is >= `crit`. Returned if `crit` is not None. Note that
+        `crit` is on the standard normal scale (e.g. 1.96), unlike
+        `score_test`, whose `crit` is on the chi-squared scale.
 
     Notes
     -----
     Only supports two experiment groups at this time.
+
+    Despite the name, this is not a Wald test. The statistic is::
+
+        z = (pb_hat - pa_hat - null_lift) / sqrt(pa*(1 - pa)/na + pb*(1 - pb)/nb)
+
+    where ``pa`` and ``pb`` are the MLEs under H0 (see `mle_under_null`),
+    not the observed rates. Estimating the variance under the null makes this
+    the score test: ``z**2`` equals the `score_test` statistic, so the two
+    return the same p-value. A Wald test would use the observed rates in the
+    variance instead.
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
 
@@ -333,6 +348,83 @@ def z_test(
     if sigma2 <= 0:
         return 1.0 if crit is None else False
     z = (p1[1] - p1[0] - null_lift) / math.sqrt(sigma2)
+    if crit is None:
+        return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]
+    return bool(abs(z) >= crit)
+
+
+def wald_test(
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+    null_lift: float = 0.0,
+    lift: str = "relative",
+    crit: float | None = None,
+) -> float | bool:
+    """Wald test for a 2x2 contingency table, expressed as a z-statistic.
+
+    Parameters
+    ----------
+     trials : array_like
+        Number of trials in each group.
+     successes : array_like
+        Number of successes in each group.
+     null_lift : float
+        Lift associated with null hypothesis. Defaults to 0.0.
+     lift : ["relative", "absolute"]
+        Whether to interpret the null lift relative to the baseline success
+        rate, or in absolute terms. Only absolute lift is currently supported,
+        but a relative lift with null_lift 0 is also supported since this is
+        equivalent to an absolute lift with null_lift 0.
+     crit : float, optional
+        Critical value for the test statistic. If omitted, a p-value will be
+        returned. If passed, a boolean will be returned corresponding to
+        whether the result is statistically significant. Useful primarily for
+        simulations where we will be repeatedly assessing significance, since
+        calculating the critical value can be done once instead of repeatedly.
+        This makes such simulations about 5x faster.
+
+    Returns
+    -------
+     pval : float
+        P-value. Returned if `crit` is None.
+     stat_sig : boolean
+        True if the result is statistically significant, i.e. if the absolute
+        z-statistic is >= `crit`. Returned if `crit` is not None. Note that
+        `crit` is on the standard normal scale (e.g. 1.96), unlike
+        `score_test`, whose `crit` is on the chi-squared scale.
+
+    Notes
+    -----
+    Only supports two experiment groups at this time.
+
+    The statistic is::
+
+        z = (pb_hat - pa_hat - null_lift) / sqrt(pa_hat*(1 - pa_hat)/na + pb_hat*(1 - pb_hat)/nb)
+
+    where ``pa_hat`` and ``pb_hat`` are the observed success rates. `z_test`
+    has the same numerator but estimates the variance under H0, which makes
+    it the score test; the two agree closely in large samples.
+
+    Because the variance comes from the observed rates, the Wald test is
+    fragile near 0 and 1: a group with no successes (or no failures)
+    contributes no variance. When both groups do, the variance is zero, so
+    the test returns a p-value of 1 if the observed difference equals
+    ``null_lift`` and 0 otherwise. Inverting it then gives a zero-width
+    confidence interval, as with ``confidence_interval(method="wald")``. Prefer
+    `score_test` when rates are close to 0 or 1.
+    """
+    _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
+
+    pa, pb = mle_under_alternative(trials, successes)
+    diff = pb - pa - null_lift
+    sigma2 = float(pa * (1 - pa) / trials[0] + pb * (1 - pb) / trials[1])
+    if sigma2 <= 0:
+        # Zero estimated variance makes z infinite unless the difference is exactly the null.
+        significant = bool(abs(diff) > 1e-12)
+        if crit is None:
+            return 0.0 if significant else 1.0
+        return significant
+    z = diff / math.sqrt(sigma2)
     if crit is None:
         return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]
     return bool(abs(z) >= crit)

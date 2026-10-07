@@ -18,6 +18,7 @@ from ab_test.frequentist_binomial.stats_tests import (
     score_test,
     likelihood_ratio_test,
     z_test,
+    wald_test,
     cressie_read_test,
 )
 from ab_test.frequentist_binomial.utils import observed_lift
@@ -122,7 +123,7 @@ class ContingencyTable(BaseContingencyTable):
         test_method : str
             The method we plan to use to assess whether our result is
             statistically significant.  One of ``'score'``, ``'likelihood'``,
-            ``'z'``, ``'fisher'``, ``'barnard'``, ``'boschloo'``,
+            ``'z'``, ``'wald'``, ``'fisher'``, ``'barnard'``, ``'boschloo'``,
             ``'modified_likelihood'``, ``'freeman-tukey'``, ``'neyman'``,
             ``'cressie-read'``, or ``'msprt'``.
         conf_int_method : str
@@ -160,6 +161,8 @@ class ContingencyTable(BaseContingencyTable):
                 test_fn = likelihood_ratio_test
             elif test_method == "z":
                 test_fn = z_test
+            elif test_method == "wald":
+                test_fn = wald_test
             else:
                 test_fn = cressie_read_test
         if lift in ["incremental", "roas", "revenue", "cpa"]:

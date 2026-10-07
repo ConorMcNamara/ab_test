@@ -7,6 +7,8 @@ import pytest
 from polars.testing import assert_frame_equal
 
 from ab_test.frequentist_binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
+from ab_test.frequentist_binomial.stats_tests import wald_test
 
 
 class TestContingencyTable:
@@ -282,6 +284,32 @@ class TestContingencyTable:
             ]
         )
         assert expected == ct.analyze_individually()
+
+
+class TestContingencyTableWald:
+    @staticmethod
+    def _table():
+        return ContingencyTable("Wald test", "conversion").add("Control", 100, 1000).add("Treatment", 130, 1000)
+
+    @staticmethod
+    def test_analyze_uses_wald_p_value():
+        table = TestContingencyTableWald._table()
+        table.analyze(lift="absolute", test_method="wald")
+        expected = wald_test([1000, 1000], [100, 130], null_lift=0.0, lift="absolute")
+        assert table.incremental_results["p_value"] == pytest.approx(expected)
+
+    @staticmethod
+    def test_analyze_binary_search_inverts_wald_test():
+        table = TestContingencyTableWald._table()
+        table.analyze(lift="absolute", test_method="wald", conf_int_method="binary_search")
+        lb, ub = confidence_interval([1000, 1000], [100, 130], test=wald_test, lift="absolute")
+        assert table.incremental_results["ci_lower"] == pytest.approx(lb)
+        assert table.incremental_results["ci_upper"] == pytest.approx(ub)
+
+    @staticmethod
+    def test_analyze_relative_lift_not_supported():
+        with pytest.raises(NotImplementedError):
+            TestContingencyTableWald._table().analyze(lift="relative", test_method="wald")
 
 
 if __name__ == "__main__":
