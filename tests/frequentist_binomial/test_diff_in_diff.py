@@ -358,7 +358,8 @@ class TestDiffInDiffIncremental:
         dd = DiffInDiff(t1, t2)
         dd.analyze(lift="incremental")
         assert dd.pairwise_results is not None
-        np.testing.assert_allclose(dd.pairwise_results[0]["did_estimate"], 25.0, atol=1e-10)
+        # Pairwise comparisons are on the risk difference, the scale that is tested: 0.03 - 0.005.
+        np.testing.assert_allclose(dd.pairwise_results[0]["did_estimate"], 0.025, atol=1e-10)
 
     @staticmethod
     def test_incremental_output_format():
@@ -428,8 +429,48 @@ class TestDiffInDiffRevenue:
         dd = DiffInDiff(t1, t2)
         dd.analyze(lift="revenue")
         assert dd.pairwise_results is not None
-        expected_did = (30.0 * 25.0) - (5.0 * 25.0)
-        np.testing.assert_allclose(dd.pairwise_results[0]["did_estimate"], expected_did, atol=1e-10)
+        # Pairwise comparisons are on the risk difference, the scale that is tested: 0.03 - 0.005.
+        np.testing.assert_allclose(dd.pairwise_results[0]["did_estimate"], 0.025, atol=1e-10)
+
+
+class TestDiffInDiffScaledHeterogeneity:
+    @staticmethod
+    @pytest.mark.parametrize("lift", ["incremental", "roas", "revenue"])
+    def test_equal_rate_effects_in_different_sized_segments_are_homogeneous(lift):
+        # Same 2-point effect, 10x the size. Incremental used to give Q = 15.06, p = 1e-4.
+        t1 = _make_table("A", 100, 1000, 120, 1000, spend=500.0, msrp=20.0)
+        t2 = _make_table("B", 1000, 10000, 1200, 10000, spend=500.0, msrp=20.0)
+        dd = DiffInDiff(t1, t2)
+        dd.analyze(lift=lift)
+        assert dd.heterogeneity_results["Q_statistic"] == pytest.approx(0.0, abs=1e-10)
+        assert dd.pairwise_results[0]["raw_pvalue"] == pytest.approx(1.0)
+
+    @staticmethod
+    def test_matches_absolute_tests():
+        t1 = _make_table("A", 100, 1000, 140, 1000)
+        t2 = _make_table("B", 1000, 10000, 1100, 10000)
+        absolute, incremental = DiffInDiff(t1, t2), DiffInDiff(t1, t2)
+        absolute.analyze(lift="absolute")
+        incremental.analyze(lift="incremental")
+        assert incremental.heterogeneity_results == pytest.approx(absolute.heterogeneity_results)
+        assert incremental.pairwise_results[0]["raw_pvalue"] == pytest.approx(
+            absolute.pairwise_results[0]["raw_pvalue"]
+        )
+
+    @staticmethod
+    def test_output_labels_pairwise_scale():
+        t1 = _make_table("A", 100, 1000, 120, 1000)
+        t2 = _make_table("B", 1000, 10000, 1200, 10000)
+        assert "DiD (risk difference)" in DiffInDiff(t1, t2).analyze(lift="incremental")
+
+    @staticmethod
+    @pytest.mark.parametrize("method", ["analyze", "plot"])
+    def test_cpa_rejected(method):
+        # CPA gave Cochran's Q = nan and infinite standard errors.
+        t1 = _make_table("A", 100, 1000, 130, 1000, spend=500.0)
+        t2 = _make_table("B", 120, 1000, 125, 1000, spend=500.0)
+        with pytest.raises(ValueError, match="lift='roas'"):
+            getattr(DiffInDiff(t1, t2), method)(lift="cpa")
 
 
 class TestDiffInDiffPlotNewLifts:
