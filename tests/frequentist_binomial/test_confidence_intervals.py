@@ -64,11 +64,12 @@ class TestConfidenceIntervalComparison:
     def test_extremes_01():
         trials = [1000, 1000]
         successes = [0, 1]
-        # Relative lift is bounded below by -100%.
-        expected_low = -1.0
+        # The score test already rejects a ratio of 0.1 (lift -0.9), so the lower
+        # bound sits well above -100%; with no control successes there is no upper bound.
         expected_high = float("inf")
         actual_low, actual_high = confidence_interval(trials, successes)
-        assert actual_low == expected_low
+        assert actual_low == pytest.approx(-0.7395, abs=1e-3)
+        assert _crosses_alpha_at(score_test, trials, successes, actual_low, "relative", "lower")
         assert actual_high == expected_high
 
     @staticmethod
@@ -438,6 +439,83 @@ class TestWaldInterval:
     def test_relative_lift_not_supported():
         with pytest.raises(NotImplementedError):
             confidence_interval([1000, 1000], [100, 130], test=wald_test, lift="relative")
+
+
+def _crosses_alpha_at(test, trials, successes, bound, lift, side, alpha=0.05, h=1e-4):
+    inside = bound + h if side == "lower" else bound - h
+    outside = bound - h if side == "lower" else bound + h
+    return (
+        test(trials, successes, null_lift=inside, lift=lift)
+        >= alpha
+        > test(trials, successes, null_lift=outside, lift=lift)
+    )
+
+
+class TestSearchNearLimits:
+    """Binary search must not give up when a step jumps past a lift's limit."""
+
+    @pytest.mark.parametrize(
+        "test, trials, successes",
+        [
+            (score_test, [200, 200], [2, 5]),
+            (score_test, [50, 50], [1, 1]),
+            (score_test, [100, 100], [1, 4]),
+            (likelihood_ratio_test, [200, 200], [2, 5]),
+            (likelihood_ratio_test, [50, 50], [1, 1]),
+            (likelihood_ratio_test, [100, 100], [1, 4]),
+            (msprt_test, [200, 200], [2, 5]),
+        ],
+    )
+    def test_relative_lower_bound_found_near_minus_one(self, test, trials, successes):
+        lb, _ = confidence_interval(trials, successes, test=test, lift="relative")
+        assert lb > -1.0
+        assert _crosses_alpha_at(test, trials, successes, lb, "relative", "lower")
+
+    @pytest.mark.parametrize("trials, successes", [([50, 50], [1, 1]), ([100, 100], [1, 4])])
+    def test_msprt_keeps_fallback_when_floor_not_rejected(self, trials, successes):
+        # mSPRT is conservative enough here that even a ratio of ~0 is not rejected.
+        lb, _ = confidence_interval(trials, successes, test=msprt_test, lift="relative")
+        assert lb == -1.0
+        assert msprt_test(trials, successes, null_lift=-1 + 1e-6, lift="relative") >= 0.05
+
+    @staticmethod
+    def test_relative_lower_bound_regression_value():
+        # Used to report -1.0; the score test already rejects a ratio of 0.53 (lift -0.47).
+        lb, _ = confidence_interval([200, 200], [2, 5], test=score_test, lift="relative")
+        assert lb == pytest.approx(-0.433, abs=1e-3)
+        assert score_test([200, 200], [2, 5], null_lift=-0.47, lift="relative") < 0.05
+
+    @pytest.mark.parametrize("test", [score_test, likelihood_ratio_test, z_test])
+    def test_absolute_upper_bound_found_near_one(self, test):
+        # Used to report 1.0 after stepping past it.
+        _, ub = confidence_interval([200, 200], [0, 198], test=test, lift="absolute")
+        assert ub < 1.0
+        assert _crosses_alpha_at(test, [200, 200], [0, 198], ub, "absolute", "upper")
+
+    @staticmethod
+    def test_relative_upper_bound_found_below_ceiling():
+        # Used to report inf after stepping past the 100x search ceiling.
+        _, ub = confidence_interval([5000, 50], [9, 2], test=score_test, lift="relative")
+        assert ub < 100
+        assert _crosses_alpha_at(score_test, [5000, 50], [9, 2], ub, "relative", "upper")
+
+    @staticmethod
+    def test_observed_lift_beyond_relative_ceiling_stays_unbounded():
+        _, ub = confidence_interval([5000, 200], [8, 184], test=score_test, lift="relative")
+        assert ub == np.inf
+
+    @staticmethod
+    def test_observed_difference_of_one_stays_at_one():
+        _, ub = confidence_interval([20, 20], [0, 20], test=wald_test, lift="absolute")
+        assert ub == 1.0
+
+    @pytest.mark.parametrize(
+        "trials, successes, lift",
+        [([200, 200], [5, 0], "relative"), ([20, 20], [20, 0], "absolute")],
+    )
+    def test_genuinely_unbounded_lower_keeps_fallback(self, trials, successes, lift):
+        lb, _ = confidence_interval(trials, successes, test=score_test, lift=lift)
+        assert lb == -1.0
 
 
 if __name__ == "__main__":

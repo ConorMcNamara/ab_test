@@ -22,6 +22,12 @@ __all__ = [
 ]
 
 
+# Searches stop this far inside a lift's limit: at the limit itself (a ratio of
+# 0, or a difference of +/-1) the constrained MLE is degenerate. It matches the
+# default bisection tolerance.
+_LIMIT_PROBE = 1e-6
+
+
 def _search_lower_bound(
     test: Any,
     trials: Any,
@@ -32,31 +38,32 @@ def _search_lower_bound(
     lift: str,
     tol: float,
 ) -> float:
+    # Both lifts are bounded below by -1. The observed control rate is not a
+    # bound for absolute lift, since the true rate can exceed it.
+    floor = -1.0 + _LIMIT_PROBE
+    if lb_ub <= floor:
+        return -1.0
     eps = 0.01
-    lower_bound_exists = True
     while True:
-        # Both lifts are bounded below by -1. The observed control rate is not a
-        # bound for absolute lift, since the true rate can exceed it.
-        if lb_lb < -1 or (lift == "absolute" and lb_lb <= -1):
-            lower_bound_exists = False
-            break
+        # Clamp rather than step past the floor, so a bound between the last
+        # accepted value and the floor is still found.
+        lb_lb = max(lb_lb, floor)
         pval = test(trials, successes, null_lift=lb_lb, lift=lift)
-        if pval >= alpha:
-            lb_ub = lb_lb
-            lb_lb -= eps
-            eps *= 2
-        else:
+        if pval < alpha:
             break
-    if lower_bound_exists:
-        while (lb_ub - lb_lb) > tol:
-            lb = 0.5 * (lb_lb + lb_ub)
-            pval = test(trials, successes, null_lift=lb, lift=lift)
-            if pval >= alpha:
-                lb_ub = lb
-            else:
-                lb_lb = lb
-        return 0.5 * (lb_lb + lb_ub)
-    return -1.0
+        if lb_lb <= floor:
+            return -1.0
+        lb_ub = lb_lb
+        lb_lb -= eps
+        eps *= 2
+    while (lb_ub - lb_lb) > tol:
+        lb = 0.5 * (lb_lb + lb_ub)
+        pval = test(trials, successes, null_lift=lb, lift=lift)
+        if pval >= alpha:
+            lb_ub = lb
+        else:
+            lb_lb = lb
+    return 0.5 * (lb_lb + lb_ub)
 
 
 def _search_upper_bound(
@@ -70,32 +77,35 @@ def _search_upper_bound(
     tol: float,
     upper_bound_exists: bool,
 ) -> float:
-    if upper_bound_exists:
-        eps = 0.01
-        while True:
-            if ub_ub > 100 or (lift == "absolute" and ub_ub >= 1):
-                upper_bound_exists = False
-                break
-            pval = test(trials, successes, null_lift=ub_ub, lift=lift)
-            if pval >= alpha:
-                ub_lb = ub_ub
-                ub_ub += eps
-                eps *= 2
-            else:
-                break
-    if upper_bound_exists:
-        while (ub_ub - ub_lb) > tol:
-            ub = 0.5 * (ub_lb + ub_ub)
-            pval = test(trials, successes, null_lift=ub, lift=lift)
-            if pval >= alpha:
-                ub_lb = ub
-            else:
-                ub_ub = ub
-        return 0.5 * (ub_lb + ub_ub)
-    elif lift == "relative":
-        return math.inf
-    else:
-        return 1.0
+    unbounded = math.inf if lift == "relative" else 1.0
+    if not upper_bound_exists:
+        return unbounded
+    # Absolute lift is bounded above by 1; relative lift has no bound, so the
+    # search gives up past a 100x lift.
+    ceiling = 100.0 if lift == "relative" else 1.0 - _LIMIT_PROBE
+    if ub_lb >= ceiling:
+        return unbounded
+    eps = 0.01
+    while True:
+        # Clamp rather than step past the ceiling, so a bound between the last
+        # accepted value and the ceiling is still found.
+        ub_ub = min(ub_ub, ceiling)
+        pval = test(trials, successes, null_lift=ub_ub, lift=lift)
+        if pval < alpha:
+            break
+        if ub_ub >= ceiling:
+            return unbounded
+        ub_lb = ub_ub
+        ub_ub += eps
+        eps *= 2
+    while (ub_ub - ub_lb) > tol:
+        ub = 0.5 * (ub_lb + ub_ub)
+        pval = test(trials, successes, null_lift=ub, lift=lift)
+        if pval >= alpha:
+            ub_lb = ub
+        else:
+            ub_ub = ub
+    return 0.5 * (ub_lb + ub_ub)
 
 
 def confidence_interval(
