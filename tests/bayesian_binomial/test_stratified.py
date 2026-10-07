@@ -308,7 +308,33 @@ class TestBayesianStratifiedHeterogeneity:
         st.add("Control", successes=100, trials=1000, alpha=1, beta=1, stratum="s2")
         st.add("Treatment", successes=120, trials=1000, alpha=1, beta=1, stratum="s2")
         st.analyze(lift="absolute", n_samples=50_000)
+        # Two strata cannot pin tau down, but identical strata must not exclude tau = 0.
+        assert st.heterogeneity_results["tau_ci_lower"] < 0.001
+
+    @staticmethod
+    def test_identical_strata_interval_reaches_zero():
+        # The old spread-of-draws statistic gave tau = 0.0107 with interval (0.0031, 0.0205) here.
+        np.random.seed(0)
+        st = BayesianStratifiedContingencyTable("Test", "converted")
+        for k in range(4):
+            st.add("Control", successes=100, trials=1000, alpha=1, beta=1, stratum=f"s{k}")
+            st.add("Treatment", successes=100, trials=1000, alpha=1, beta=1, stratum=f"s{k}")
+        st.analyze(lift="absolute", n_samples=50_000)
+        assert st.heterogeneity_results["tau_ci_lower"] < 0.001
         assert st.heterogeneity_results["tau_mean"] < 0.01
+
+    @staticmethod
+    def test_tau_recovers_known_spread():
+        # Effects of 0, 2, 4 and 6 points have a between-stratum SD of about 0.022.
+        np.random.seed(0)
+        st = BayesianStratifiedContingencyTable("Test", "converted")
+        for k in range(4):
+            st.add("Control", successes=1000, trials=10_000, alpha=1, beta=1, stratum=f"s{k}")
+            st.add("Treatment", successes=1000 + 200 * k, trials=10_000, alpha=1, beta=1, stratum=f"s{k}")
+        st.analyze(lift="absolute", n_samples=50_000)
+        het = st.heterogeneity_results
+        assert het["tau_ci_lower"] < 0.0224 < het["tau_ci_upper"]
+        assert het["tau_mean"] == pytest.approx(0.0224, rel=0.35)
 
     @staticmethod
     def test_heterogeneous_strata_larger_tau():
@@ -455,3 +481,23 @@ class TestBayesianStratifiedCpa:
         monkeypatch.setattr("plotly.graph_objects.Figure.show", lambda self: None)
         np.random.seed(0)
         _cpa_table().plot(lift="cpa", n_samples=10_000)
+
+    @staticmethod
+    @pytest.mark.parametrize("treatment_successes", [95, 70])
+    def test_non_positive_mean_increment_gives_infinite_cpa(treatment_successes):
+        # A treatment that converts no better buys no conversions; spend / increment
+        # used to report a negative CPA outside its own interval.
+        np.random.seed(0)
+        table = BayesianStratifiedContingencyTable("CPA", "conv", spend=1000)
+        for k in ("A", "B"):
+            table.add("Control", 100, 1000, 1, 1, stratum=k)
+            table.add("Treatment", treatment_successes, 1000, 1, 1, stratum=k)
+        output = table.analyze(lift="cpa")
+        r = table.pooled_results
+        assert r["lift"] == np.inf
+        assert r["ci_lower"] <= r["lift"] <= r["ci_upper"]
+        assert "∞" in next(line for line in output.splitlines() if line.startswith("| Lift"))
+        table.analyze_by_stratum(lift="cpa")
+        for result in table.stratum_results.values():
+            assert result["effect"] == np.inf
+            assert result["ci_lower"] <= result["effect"] <= result["ci_upper"]

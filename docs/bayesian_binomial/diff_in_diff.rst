@@ -12,7 +12,11 @@ It computes:
 
 1. **Per-segment effects** with credible intervals and P(Treatment > Control)
 2. **Between-segment heterogeneity (tau)** — the posterior distribution of the
-   standard deviation of treatment effects across segments
+   standard deviation of the true treatment effects across segments, from a
+   normal random-effects model with a half-Cauchy prior on tau. Within-segment
+   sampling noise is not counted, so the interval reaches zero when segments
+   agree. With few segments the data say little about tau, so expect a wide
+   interval.
 3. **All pairwise DiD comparisons** with posterior probabilities P(lift_i > lift_j)
 
 This is the Bayesian counterpart to

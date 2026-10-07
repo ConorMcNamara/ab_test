@@ -250,6 +250,16 @@ class TestBayesianDiffInDiffRoas:
         assert dd.segment_results is not None
 
 
+class TestBayesianDiffInDiffHeterogeneity:
+    @staticmethod
+    def test_identical_segments_interval_reaches_zero():
+        np.random.seed(0)
+        tables = [_make_table(name, 100, 1000, 100, 1000) for name in ("A", "B", "C", "D")]
+        dd = BayesianDiffInDiff(*tables)
+        dd.analyze(n_samples=50_000)
+        assert dd.heterogeneity_results["tau_ci_lower"] < 0.001
+
+
 class TestBayesianDiffInDiffCpa:
     @staticmethod
     @pytest.mark.parametrize("method", ["analyze", "plot"])

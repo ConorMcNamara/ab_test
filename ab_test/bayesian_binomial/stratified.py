@@ -18,7 +18,7 @@ from tabulate import tabulate
 from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test._lift import scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
-from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
+from ab_test.bayesian_binomial.utils import _between_group_sd_samples, posterior_mean, sample_beta
 
 __all__ = [
     "BayesianStratifiedContingencyTable",
@@ -252,13 +252,16 @@ class BayesianStratifiedContingencyTable:
         monotone through zero, so the summary is computed on the incremental
         scale and then transformed: the point estimate is ``spend`` over the
         mean increment, and the interval bounds are the transformed quantiles.
+        A mean increment of zero or less buys no conversions, so its CPA is
+        infinite, matching how the interval bounds treat non-positive increments.
         """
         lo, hi = self._credible_interval(samples, confidence_level, method)
         prob_t_gt_c = float(np.mean(samples > 0))
         mean = float(np.mean(samples))
         if lift == "cpa":
             cpa_lo, cpa_hi = scale_bounds(lo, hi, "cpa", self.spend)
-            return float(scale_metric(mean, "cpa", self.spend)), cpa_lo, cpa_hi, prob_t_gt_c
+            cpa = float(scale_metric(mean, "cpa", self.spend)) if mean > 0 else np.inf
+            return cpa, cpa_lo, cpa_hi, prob_t_gt_c
         return mean, lo, hi, prob_t_gt_c
 
     @staticmethod
@@ -287,7 +290,11 @@ class BayesianStratifiedContingencyTable:
 
         Computes a pooled treatment effect via inverse-variance weighted
         posterior samples, along with credible intervals, P(T > C),
-        expected loss, ROPE probabilities, and a heterogeneity diagnostic.
+        expected loss, ROPE probabilities, and a heterogeneity diagnostic:
+        the posterior of the between-stratum standard deviation of the true
+        effects (tau) from a normal random-effects model, which does not count
+        within-stratum noise as heterogeneity. For relative lift, tau is on
+        the log risk-ratio scale. It is not reported for ``"cpa"``.
 
         Parameters
         ----------
@@ -363,12 +370,14 @@ class BayesianStratifiedContingencyTable:
         if lift == "cpa":
             tau_mean = tau_ci_lo = tau_ci_hi = float("nan")
         else:
-            display_stratum_samples = [
-                self._stratum_display_samples(s, max(trials[k, 0], trials[k, 1]), lift)
-                for k, s in enumerate(stratum_samples)
-            ]
-            stacked_display = np.vstack(display_stratum_samples)
-            tau_samples = np.std(stacked_display, axis=0, ddof=0)
+            # Heterogeneity on the pooling scale (log risk ratio for relative lift), so stratum size does not
+            # masquerade as a different effect; linear lifts are then rescaled like the pooled estimate.
+            tau_samples = _between_group_sd_samples(
+                [float(np.mean(s)) for s in stratum_samples], [float(np.var(s)) for s in stratum_samples], n_samples
+            )
+            if lift in ("incremental", "roas", "revenue"):
+                n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
+                tau_samples = scale_metric(tau_samples * n_max, lift, self.spend, self.msrp)
             tau_mean = float(np.mean(tau_samples))
             tau_ci_lo, tau_ci_hi = self._credible_interval(tau_samples, confidence_level, cred_int_method)
         self.heterogeneity_results = {

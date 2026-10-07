@@ -7,7 +7,8 @@ subgroup.  Accepts multiple
 objects (one per segment) and produces:
 
 1. Per-segment treatment effects with credible intervals
-2. A posterior estimate of between-segment heterogeneity (tau)
+2. A posterior estimate of between-segment heterogeneity (tau) from a normal
+   random-effects model, so within-segment noise is not counted as heterogeneity
 3. All pairwise DiD comparisons with posterior probabilities
 """
 
@@ -23,7 +24,7 @@ from tabulate import tabulate
 from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
-from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
+from ab_test.bayesian_binomial.utils import _between_group_sd_samples, posterior_mean, sample_beta
 
 __all__ = [
     "BayesianDiffInDiff",
@@ -233,8 +234,9 @@ class BayesianDiffInDiff:
                 "p_treatment": stats["p_treatments"][i],
             }
 
-        stacked = np.vstack(lift_samples)
-        tau_samples = np.std(stacked, axis=0, ddof=0)
+        tau_samples = _between_group_sd_samples(
+            [float(np.mean(s)) for s in lift_samples], [float(np.var(s)) for s in lift_samples], n_samples
+        )
         tau_mean = float(np.mean(tau_samples))
         tau_ci_lo, tau_ci_hi = _credible_interval_from_samples(tau_samples, confidence_level, cred_int_method)
         self.heterogeneity_results = {
