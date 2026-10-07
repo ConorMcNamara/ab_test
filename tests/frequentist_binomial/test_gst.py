@@ -348,19 +348,7 @@ class TestPlotGstPowerCurve:
 
 class TestPlotGstSensitivityCurve:
     @staticmethod
-    def test_returns_figure():
-        fig = plot_gst_sensitivity_curve(
-            baseline=0.10,
-            n_analyses=3,
-            sample_sizes=[2000, 4000, 6000, 8000, 10000],
-        )
+    def test_returns_figure_with_two_traces():
+        fig = plot_gst_sensitivity_curve(baseline=0.10, n_analyses=3, sample_sizes=[2000, 10000])
         assert isinstance(fig, go.Figure)
-
-    @staticmethod
-    def test_two_traces():
-        fig = plot_gst_sensitivity_curve(
-            baseline=0.10,
-            n_analyses=3,
-            sample_sizes=[2000, 4000, 6000, 8000, 10000],
-        )
         assert len(fig.data) == 2

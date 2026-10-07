@@ -221,6 +221,7 @@ class TestTimeTrendTest:
             assert result_lenient["trending"] is True or result_lenient["diagnosis"] == "stable"
 
     @staticmethod
+    @pytest.mark.slow
     def test_type_i_error_control() -> None:
         """Under a true constant effect, false positive rate should be near alpha."""
         rng = np.random.default_rng(123)

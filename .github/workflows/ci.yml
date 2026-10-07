@@ -79,11 +79,16 @@ jobs:
         with:
           enable-cache: true
 
+      # A project venv sits on the same drive as the uv cache, so packages are hardlinked
+      # rather than copied (a --system install copied them, taking ~55s on Windows).
       - name: Install package with dev dependencies
-        run: uv pip install --system ".[dev]"
+        run: uv sync --locked --extra dev --python ${{ matrix.python-version }}
 
-      - name: Run tests with coverage
-        run: pytest -m "not slow" --cov=ab_test --cov-report=xml --cov-report=term-missing
+      # Coverage is only uploaded from one job, so the others skip tracing it.
+      - name: Run tests
+        run: >-
+          uv run --no-sync pytest -m "not slow"
+          ${{ (matrix.os == 'ubuntu-latest' && matrix.python-version == needs.setup.outputs.anchor) && '--cov=ab_test --cov-report=xml --cov-report=term-missing' || '--no-cov' }}
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == needs.setup.outputs.anchor
