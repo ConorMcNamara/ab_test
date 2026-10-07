@@ -15,7 +15,13 @@ import scipy.stats as ss
 
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import (
+    apply_dark_mode,
+    combine_lift_panels,
+    convert_to_tabulate_str,
+    resolve_plot_color,
+    tabulate_summary,
+)
 from ab_test._lift import scale_bounds, scale_metric
 
 try:
@@ -557,6 +563,8 @@ class StratifiedContingencyTable:
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
             ``"roas"``, ``"revenue"``, or ``"cpa"``.
+            ``"both"`` draws absolute and relative lift side by side, sharing
+            the y-axis, each with its own interval.
         alpha : float, default=0.05
             Significance level for confidence intervals.
         reverse_plot : bool, default=True
@@ -573,6 +581,29 @@ class StratifiedContingencyTable:
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
         """
+        if isinstance(lift, str) and lift.casefold() == "both":
+            figures = [
+                self._plot_figure(lift=panel_lift, alpha=alpha, reverse_plot=reverse_plot, color=color)
+                for panel_lift in ("absolute", "relative")
+            ]
+            fig = combine_lift_panels(
+                figures,
+                f"{self.experiment_name} — {self.metric_name} (Risk Difference and Relative Lift)",
+                ["Risk Difference", "Relative Lift"],
+            )
+        else:
+            fig = self._plot_figure(lift=lift, alpha=alpha, reverse_plot=reverse_plot, color=color)
+        apply_dark_mode(fig, dark_mode)
+        fig.show()  # type: ignore[no-untyped-call]
+
+    def _plot_figure(
+        self,
+        lift: str = "relative",
+        alpha: float = 0.05,
+        reverse_plot: bool = True,
+        color: str | dict[str, Any] | list[Any] | None = None,
+    ) -> go.Figure:
+        """Build the forest plot for a single lift (see :meth:`plot`)."""
         lift = self._validate_lift(lift)
         successes, trials_arr, strata_names = self._build_arrays()
 
@@ -680,5 +711,4 @@ class StratifiedContingencyTable:
         )
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
-        apply_dark_mode(fig, dark_mode)
-        fig.show()  # type: ignore[no-untyped-call]
+        return fig

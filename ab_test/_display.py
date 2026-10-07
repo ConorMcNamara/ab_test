@@ -18,6 +18,7 @@ __all__ = [
     "convert_to_tabulate_str",
     "render_forest_plot",
     "apply_dark_mode",
+    "combine_lift_panels",
     "tabulate_summary",
 ]
 
@@ -212,6 +213,52 @@ def apply_dark_mode(fig: go.Figure, dark_mode: bool) -> go.Figure:
     if dark_mode:
         fig.update_layout(template="plotly_dark")
     return fig
+
+
+def combine_lift_panels(figures: list[go.Figure], title: str, panel_titles: list[str]) -> go.Figure:
+    """Place single-lift forest plots side by side, sharing the y-axis.
+
+    Each figure becomes one panel: its traces, vertical reference lines and
+    x-axis tick format are copied over, and its legend entries are kept only
+    for the first panel. Layout taken from the first figure: template, legend
+    visibility, y-axis title and a reversed y-axis.
+
+    Parameters
+    ----------
+    figures : list of plotly.graph_objects.Figure
+        One finished single-lift figure per panel, with the same rows.
+    title : str
+        Title of the combined figure.
+    panel_titles : list of str
+        x-axis title of each panel.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        The combined figure.
+    """
+    combined = make_subplots(rows=1, cols=len(figures), shared_yaxes=True, horizontal_spacing=0.08)
+    for col, (panel, panel_title) in enumerate(zip(figures, panel_titles, strict=True), start=1):
+        layout: Any = panel.layout
+        traces: Any = panel.data
+        for trace in traces:
+            if col > 1:
+                trace.showlegend = False
+            combined.add_trace(trace, row=1, col=col)
+        for shape in layout.shapes:
+            if shape.type == "line" and shape.x0 == shape.x1:
+                combined.add_vline(x=shape.x0, line=shape.line.to_plotly_json(), opacity=shape.opacity, row=1, col=col)
+        axis = layout.xaxis
+        combined.update_xaxes(
+            title_text=panel_title, tickformat=axis.tickformat, tickprefix=axis.tickprefix, row=1, col=col
+        )
+    first: Any = figures[0].layout
+    combined.update_layout(
+        title_text=title, template=first.template, showlegend=first.showlegend, yaxis_title=first.yaxis.title.text
+    )
+    if first.yaxis.autorange == "reversed":
+        combined.update_yaxes(autorange="reversed")
+    return combined
 
 
 def render_forest_plot(
