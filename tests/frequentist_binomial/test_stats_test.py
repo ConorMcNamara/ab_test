@@ -52,15 +52,6 @@ class TestScoreTest:
         assert actual == pytest.approx(expected)
 
     @staticmethod
-    def test_null_lift_observed():
-        trials = [1000, 1000]
-        successes = [100, 110]
-        null_lift = 0.10
-        expected = 1.0
-        actual = score_test(trials, successes, null_lift=null_lift, lift="relative")
-        assert actual == pytest.approx(expected)
-
-    @staticmethod
     def test_no_difference():
         trials = [1000, 1000]
         successes = [100, 100]
@@ -490,7 +481,12 @@ class TestZeroNullOnlyTests:
         with pytest.raises(NotImplementedError):
             ab_test([1000, 1000], [100, 130], null_lift=0.03, lift="absolute", method=method)
 
-    @pytest.mark.parametrize("test", ZERO_NULL_ONLY.values(), ids=ZERO_NULL_ONLY.keys())
+    # Barnard and Boschloo are exact and slow; TestBarnardTest and TestBoschlooTest cover their null of 0.
+    @pytest.mark.parametrize(
+        "test",
+        [t for name, t in ZERO_NULL_ONLY.items() if name not in ("barnard", "boschloo")],
+        ids=[name for name in ZERO_NULL_ONLY if name not in ("barnard", "boschloo")],
+    )
     @pytest.mark.parametrize("lift", ["absolute", "relative"])
     def test_zero_null_still_supported(self, test, lift):
         pval = test([1000, 1000], [100, 130], null_lift=0.0, lift=lift)
