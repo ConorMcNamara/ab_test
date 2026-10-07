@@ -499,6 +499,8 @@ class TestSearchNearLimits:
             (likelihood_ratio_test, [50, 50], [1, 1]),
             (likelihood_ratio_test, [100, 100], [1, 4]),
             (msprt_test, [200, 200], [2, 5]),
+            # The default mSPRT tau is at least the null effect, so a ratio near 0 is rejected here.
+            (msprt_test, [100, 100], [1, 4]),
         ],
     )
     def test_relative_lower_bound_found_near_minus_one(self, test, trials, successes):
@@ -506,7 +508,7 @@ class TestSearchNearLimits:
         assert lb > -1.0
         assert _crosses_alpha_at(test, trials, successes, lb, "relative", "lower")
 
-    @pytest.mark.parametrize("trials, successes", [([50, 50], [1, 1]), ([100, 100], [1, 4])])
+    @pytest.mark.parametrize("trials, successes", [([50, 50], [1, 1])])
     def test_msprt_keeps_fallback_when_floor_not_rejected(self, trials, successes):
         # mSPRT is conservative enough here that even a ratio of ~0 is not rejected.
         lb, _ = confidence_interval(trials, successes, test=msprt_test, lift="relative")
