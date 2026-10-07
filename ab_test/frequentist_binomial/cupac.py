@@ -45,7 +45,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import scipy.stats as ss
 
-from ab_test._display import resolve_plot_color
+from ab_test._display import apply_dark_mode, resolve_plot_color
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
@@ -618,7 +618,7 @@ class CupacExperiment:
         return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
         return return_string
 
-    def plot(self, color: str | dict[str, Any] | list[Any] | None = None) -> None:
+    def plot(self, color: str | dict[str, Any] | list[Any] | None = None, *, dark_mode: bool = False) -> None:
         """Plot unadjusted vs adjusted estimates with confidence intervals.
 
         Parameters
@@ -626,6 +626,9 @@ class CupacExperiment:
         color : str, list, dict, or None, optional
             Color specification. Supports colorblind-friendly palette names
             (e.g. ``"ibm"``), a list of colors, or None for Plotly defaults.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
         """
         if self._results is None:
             self.fit()
@@ -675,6 +678,7 @@ class CupacExperiment:
             template="plotly_white",
             yaxis={"autorange": "reversed"},
         )
+        apply_dark_mode(fig, dark_mode)
         fig.show()
 
 
@@ -819,6 +823,8 @@ def plot_cupac_power_curve(
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot statistical power as a function of total sample size with CUPAC adjustment.
 
@@ -848,6 +854,9 @@ def plot_cupac_power_curve(
     n_points : int, optional
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 100.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -936,6 +945,7 @@ def plot_cupac_power_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig
 
 
@@ -949,6 +959,8 @@ def plot_cupac_sensitivity_curve(
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of total sample size with CUPAC adjustment.
 
@@ -978,6 +990,9 @@ def plot_cupac_sensitivity_curve(
     n_points : int, optional
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 100.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -1061,4 +1076,5 @@ def plot_cupac_sensitivity_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig

@@ -227,6 +227,8 @@ class BaseContingencyTable:
         is_individual: bool = True,
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> None:
         """Plot the point estimates as well as confidence/credible intervals.
 
@@ -244,6 +246,8 @@ class BaseContingencyTable:
             ``"tol_muted"``, ``"tol_light"``.
             If a list, each item corresponds to a color for the relevant group.
             If a dict, keys are group names and values are colors.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines.
 
         Raises
         ------
@@ -269,6 +273,7 @@ class BaseContingencyTable:
             color=color,
             experiment_name=self.experiment_name,
             metric_name=self.metric_name,
+            dark_mode=dark_mode,
         )
 
     def __str__(self) -> str:

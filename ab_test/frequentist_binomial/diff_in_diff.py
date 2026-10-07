@@ -20,7 +20,7 @@ import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 from tabulate import tabulate
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color
 from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_binomial.contingency import ContingencyTable
 
@@ -420,6 +420,8 @@ class DiffInDiff:
         alpha: float = 0.05,
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> None:
         """Forest plot of per-segment treatment effects.
 
@@ -436,6 +438,9 @@ class DiffInDiff:
         color : str, dict, list, or None, default=None
             Colorblind palette name, mapping of segment names to colors,
             list of colors, or ``None`` for Plotly defaults.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
         """
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
@@ -508,4 +513,5 @@ class DiffInDiff:
             template="plotly_white",
         )
 
+        apply_dark_mode(fig, dark_mode)
         fig.show()

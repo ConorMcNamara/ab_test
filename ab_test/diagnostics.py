@@ -14,6 +14,7 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 
+from ab_test._display import apply_dark_mode
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
 from ab_test.frequentist_binomial.stats_tests import ab_test
 from ab_test.frequentist_binomial.utils import observed_lift
@@ -100,6 +101,8 @@ def time_trend_test(
     trials_b: np.ndarray[Any, Any] | list[int],
     alpha: float = 0.05,
     labels: list[str] | np.ndarray[Any, Any] | None = None,
+    *,
+    dark_mode: bool = False,
 ) -> dict[str, Any]:
     """Test whether the treatment effect is stable over time.
 
@@ -123,6 +126,9 @@ def time_trend_test(
     labels : array_like or None, optional
         Display labels for each period (e.g. dates).  When ``None``,
         periods are numbered ``1, 2, …, T``.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -243,6 +249,7 @@ def time_trend_test(
         template="plotly_white",
     )
 
+    apply_dark_mode(fig, dark_mode)
     return {
         "slope": slope,
         "slope_se": slope_se,

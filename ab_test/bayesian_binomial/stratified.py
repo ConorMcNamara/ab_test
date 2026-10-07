@@ -15,7 +15,7 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 from tabulate import tabulate
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test._lift import scale_metric
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
@@ -479,6 +479,8 @@ class BayesianStratifiedContingencyTable:
         cred_int_method: Literal["credible", "hdi"] = "credible",
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> None:
         """Forest plot of per-stratum and pooled treatment effects.
 
@@ -502,6 +504,9 @@ class BayesianStratifiedContingencyTable:
         color : str, list, dict, or None, default=None
             Colorblind palette name, mapping of stratum names to colors,
             list of colors, or ``None`` for Plotly defaults.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
         """
         lift = self._validate_lift(lift)
         successes, trials, alphas, betas, strata_names = self._build_arrays()
@@ -614,4 +619,5 @@ class BayesianStratifiedContingencyTable:
         )
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
+        apply_dark_mode(fig, dark_mode)
         fig.show()  # type: ignore[no-untyped-call]

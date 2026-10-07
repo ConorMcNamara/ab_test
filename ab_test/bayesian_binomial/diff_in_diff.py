@@ -20,7 +20,7 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 from tabulate import tabulate
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
@@ -326,6 +326,8 @@ class BayesianDiffInDiff:
         cred_int_method: Literal["credible", "hdi"] = "credible",
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> None:
         """Forest plot of per-segment treatment effects.
 
@@ -346,6 +348,9 @@ class BayesianDiffInDiff:
         color : str, dict, list, or None, default=None
             Colorblind palette name, mapping of segment names to colors,
             list of colors, or ``None`` for Plotly defaults.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
         """
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
@@ -424,4 +429,5 @@ class BayesianDiffInDiff:
             template="plotly_white",
         )
 
+        apply_dark_mode(fig, dark_mode)
         fig.show()

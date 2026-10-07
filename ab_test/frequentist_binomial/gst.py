@@ -25,6 +25,7 @@ import plotly.graph_objects as go
 import scipy.stats as ss
 from scipy.optimize import brentq
 
+from ab_test._display import apply_dark_mode
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
@@ -499,8 +500,14 @@ class GroupSequentialDesign:
         result += f"\n\nDesign: {self._n_analyses} analyses, alpha={self._alpha}, sided={self._sided}"
         return result
 
-    def plot_boundaries(self) -> go.Figure:
+    def plot_boundaries(self, *, dark_mode: bool = False) -> go.Figure:
         """Plot z-boundaries across analyses.
+
+        Parameters
+        ----------
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
 
         Returns
         -------
@@ -541,6 +548,7 @@ class GroupSequentialDesign:
             hovermode="x unified",
             legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
         )
+        apply_dark_mode(fig, dark_mode)
         return fig
 
 
@@ -753,6 +761,8 @@ def plot_gst_power_curve(
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot power vs sample size for GST and fixed-horizon designs.
 
@@ -782,6 +792,9 @@ def plot_gst_power_curve(
         Fraction of units in each group. Defaults to ``[0.5, 0.5]``.
     n_points : int
         Number of sample-size points when ``sample_sizes`` is ``None``.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -872,6 +885,7 @@ def plot_gst_power_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig
 
 
@@ -888,6 +902,8 @@ def plot_gst_sensitivity_curve(
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift vs sample size for GST and fixed-horizon.
 
@@ -917,6 +933,9 @@ def plot_gst_sensitivity_curve(
         Fraction of units in each group. Defaults to ``[0.5, 0.5]``.
     n_points : int
         Number of sample-size points when ``sample_sizes`` is ``None``.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -1001,4 +1020,5 @@ def plot_gst_sensitivity_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig

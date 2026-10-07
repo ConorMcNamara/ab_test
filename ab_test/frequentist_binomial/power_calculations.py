@@ -7,6 +7,7 @@ import numpy as np
 import plotly.graph_objects as go
 import scipy.stats as ss
 
+from ab_test._display import apply_dark_mode
 from ab_test._lift import _SCALED_LIFTS, from_absolute, to_absolute
 from ab_test.frequentist_binomial.utils import simple_hypothesis_from_composite
 
@@ -365,6 +366,8 @@ def plot_power_curve(
     n_points: int = 100,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot statistical power as a function of total sample size.
 
@@ -394,6 +397,9 @@ def plot_power_curve(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -462,6 +468,7 @@ def plot_power_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig
 
 
@@ -477,6 +484,8 @@ def plot_sensitivity_curve(
     n_points: int = 100,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of total sample size.
 
@@ -506,6 +515,9 @@ def plot_sensitivity_curve(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -582,4 +594,5 @@ def plot_sensitivity_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig

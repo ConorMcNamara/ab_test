@@ -16,6 +16,7 @@ __all__ = [
     "resolve_plot_color",
     "convert_to_tabulate_str",
     "render_forest_plot",
+    "apply_dark_mode",
     "tabulate_summary",
 ]
 
@@ -170,6 +171,27 @@ def tabulate_summary(row_labels: list[str], values: list[Any]) -> str:
     return result
 
 
+def apply_dark_mode(fig: go.Figure, dark_mode: bool) -> go.Figure:
+    """Switch a figure to Plotly's dark template when ``dark_mode`` is True.
+
+    Parameters
+    ----------
+    fig : plotly.graph_objects.Figure
+        The figure to restyle in place.
+    dark_mode : bool
+        If True, use the ``"plotly_dark"`` template (dark background, light
+        text and gridlines). If False, the figure is left unchanged.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        The same figure, for chaining.
+    """
+    if dark_mode:
+        fig.update_layout(template="plotly_dark")
+    return fig
+
+
 def render_forest_plot(
     names: list[str],
     individual_results: dict[str, dict[str, float]],
@@ -179,6 +201,7 @@ def render_forest_plot(
     color: str | dict[str, Any] | list[Any] | None = None,
     experiment_name: str | None = None,
     metric_name: str | None = None,
+    dark_mode: bool = False,
 ) -> None:
     """Render a dot-and-whisker (forest) plot of point estimates and intervals.
 
@@ -209,6 +232,10 @@ def render_forest_plot(
     metric_name : str or None, default=None
         Name of the metric being plotted, included in the plot title and, for
         individual plots, the x-axis label.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template). Very dark palette colors, such as the
+        first colors of ``"tol"``, can be hard to see on it.
 
     Raises
     ------
@@ -336,6 +363,7 @@ def render_forest_plot(
         xaxis_title = lift_label
         yaxis_title = ""
     fig.update_layout(title_text=title, xaxis_title=xaxis_title, yaxis_title=yaxis_title)
+    apply_dark_mode(fig, dark_mode)
     if reverse_plot:
         fig.update_layout(yaxis={"autorange": "reversed"})
     fig.show()  # type: ignore[no-untyped-call]

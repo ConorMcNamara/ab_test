@@ -15,7 +15,7 @@ import scipy.stats as ss
 
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test._lift import scale_bounds, scale_metric
 
 try:
@@ -543,6 +543,8 @@ class StratifiedContingencyTable:
         alpha: float = 0.05,
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> None:
         """Forest plot of per-stratum and pooled treatment effects.
 
@@ -567,6 +569,9 @@ class StratifiedContingencyTable:
             stratum (last entry is used for the pooled row).
             If a dict, keys are stratum names (use ``"Overall"`` for
             the pooled row).
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
         """
         lift = self._validate_lift(lift)
         successes, trials_arr, strata_names = self._build_arrays()
@@ -675,4 +680,5 @@ class StratifiedContingencyTable:
         )
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
+        apply_dark_mode(fig, dark_mode)
         fig.show()  # type: ignore[no-untyped-call]
