@@ -150,10 +150,19 @@ class TestGroupSequentialDesign:
 
     @staticmethod
     def test_obf_5_looks_known_boundaries():
+        # Lan-DeMets O'Brien-Fleming, K=5, two-sided alpha=0.05 (gsDesign / rpact / ldbounds).
         d = GroupSequentialDesign(5, alpha=0.05)
-        expected = [4.3826, 3.1040, 2.5600, 2.2560, 2.0720]
+        expected = [4.8769, 3.3569, 2.6803, 2.2898, 2.0310]
         for actual, exp in zip(d.boundaries, expected):
-            assert actual == pytest.approx(exp, abs=0.05)
+            assert actual == pytest.approx(exp, abs=0.02)
+
+    @staticmethod
+    @pytest.mark.parametrize("spending", [obrien_fleming_spending, pocock_spending])
+    def test_two_sided_matches_one_sided_at_half_alpha(spending):
+        two = GroupSequentialDesign(5, alpha=0.05, spending_function=spending)
+        one = GroupSequentialDesign(5, alpha=0.025, spending_function=spending, sided="one")
+        np.testing.assert_allclose(two.boundaries, one.boundaries, atol=1e-9)
+        np.testing.assert_allclose(two.nominal_alpha, 2 * one.nominal_alpha, atol=1e-12)
 
     @staticmethod
     def test_invalid_n_analyses():

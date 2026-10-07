@@ -210,6 +210,24 @@ def _boundary_objective(
     return total_mass - _inside_mass(new_density, grid, c, sided) - target
 
 
+def _cumulative_spend(
+    spending_function: Callable[[float, float], float],
+    info_fractions: np.ndarray[Any, Any],
+    alpha: float,
+    sided: str,
+) -> np.ndarray[Any, Any]:
+    """Cumulative alpha spent at each analysis, summed over both sides when two-sided.
+
+    A two-sided design spends ``alpha / 2`` on each side, so the per-side spend is
+    ``spending_function(t, alpha / 2)``. This matches gsDesign, rpact and ldbounds;
+    for spending functions that are linear in alpha (Pocock, power family) it equals
+    ``spending_function(t, alpha)``, but for O'Brien-Fleming it does not.
+    """
+    if sided == "two":
+        return np.array([2 * spending_function(t, alpha / 2) for t in info_fractions])
+    return np.array([spending_function(t, alpha) for t in info_fractions])
+
+
 def _compute_boundaries(
     n_analyses: int,
     alpha: float,
@@ -222,7 +240,7 @@ def _compute_boundaries(
     dz = grid[1] - grid[0]
 
     boundaries = np.zeros(n_analyses)
-    cum_spend = np.array([spending_function(t, alpha) for t in info_fractions])
+    cum_spend = _cumulative_spend(spending_function, info_fractions, alpha, sided)
     delta_spend = np.diff(np.concatenate(([0.0], cum_spend)))
 
     if sided == "two":
@@ -300,10 +318,14 @@ class GroupSequentialDesign:
     n_analyses : int
         Number of planned analyses (interim + final), at least 1.
     alpha : float
-        Overall two-sided type-I error rate. Defaults to 0.05.
+        Overall type-I error rate: two-sided when ``sided="two"`` (``alpha / 2``
+        per side), one-sided when ``sided="one"``. Defaults to 0.05.
     spending_function : callable
         Alpha spending function with signature ``(t, alpha) -> float``.
-        Defaults to :func:`obrien_fleming_spending`.
+        Defaults to :func:`obrien_fleming_spending`. For two-sided designs it
+        is applied to ``alpha / 2`` on each side, the convention used by
+        gsDesign and rpact, so ``sided="two", alpha=0.05`` and
+        ``sided="one", alpha=0.025`` give the same boundaries.
     info_fractions : array_like or None
         Information fractions at each analysis, strictly increasing with the
         last element equal to 1.0. Defaults to equally spaced fractions.
@@ -353,7 +375,7 @@ class GroupSequentialDesign:
 
         self._boundaries = _compute_boundaries(n_analyses, alpha, spending_function, info_fractions_arr, sided)
 
-        cum = np.array([spending_function(t, alpha) for t in info_fractions_arr])
+        cum = _cumulative_spend(spending_function, info_fractions_arr, alpha, sided)
         self._nominal_alpha = cum
         self._incremental_alpha = np.diff(np.concatenate(([0.0], cum)))
 
