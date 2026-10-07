@@ -781,6 +781,25 @@ class TestLinMethod:
         assert "Lin" in result
 
     @staticmethod
+    def test_ate_is_lin_estimator():
+        # Lin's ATE is the gap between per-arm OLS fits evaluated at the overall covariate mean.
+        df = _make_experiment_data(n_control=600, n_treatment=1400, treatment_effect=0.03)
+        x, y = df["pre_visits"].to_numpy(), df["converted"].to_numpy(dtype=float)
+        is_t = (df["group"] == "treatment").to_numpy()
+        fits = [np.polyfit(x[m], y[m], 1) for m in (is_t, ~is_t)]
+        expected = np.polyval(fits[0], x.mean()) - np.polyval(fits[1], x.mean())
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
+        assert exp.ate == pytest.approx(expected, rel=1e-8)
+
+    @staticmethod
+    def test_cupac_ate_is_regression_coefficient():
+        df = _make_experiment_data(n_control=600, n_treatment=1400, treatment_effect=0.03)
+        X = np.column_stack([np.ones(len(df)), (df["group"] == "treatment").to_numpy(float), df["pre_visits"]])
+        expected = _ols_fit(X, df["converted"].to_numpy(dtype=float))[1]
+        exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment").fit()
+        assert exp.ate == pytest.approx(expected, rel=1e-8)
+
+    @staticmethod
     def test_summary_keys():
         df = _make_experiment_data()
         exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
