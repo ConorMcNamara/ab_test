@@ -148,21 +148,21 @@ def _search_min_sample_size(
 ) -> int:
     """Find the smallest per-group sample size reaching ``target_power``.
 
-    Doubles a candidate size from 100 until ``power_fn`` meets ``target_power``,
-    then binary-searches the resulting bracket.
+    Checks 100 first (searching below it if that is already enough), otherwise
+    doubles a candidate size, capped at ``max_n``, until ``power_fn`` meets
+    ``target_power``, then binary-searches the resulting bracket. ``max_n``
+    itself is always evaluated.
 
     Raises
     ------
     ValueError
-        With ``error_message`` if ``target_power`` is not reached within ``max_n``.
+        With ``error_message`` if ``target_power`` is not reached at ``max_n``.
     """
-    low, high = 100, 200
-    while high <= max_n:
-        if power_fn(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(error_message)
+    low, high = 0, min(100, max_n)
+    while power_fn(high) < target_power:
+        if high >= max_n:
+            raise ValueError(error_message)
+        low, high = high, min(high * 2, max_n)
 
     while high - low > 1:
         mid = (low + high) // 2

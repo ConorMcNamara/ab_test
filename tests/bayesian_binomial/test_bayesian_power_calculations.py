@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from ab_test.bayesian_binomial.power_calculations import (
+    _search_min_sample_size,
     bayes_minimum_detectable_lift,
     bayes_minimum_detectable_lift_loss,
     bayes_minimum_sample_size,
@@ -552,3 +553,22 @@ class TestMinimumDetectableLiftRateBound:
         np.random.seed(0)
         with pytest.raises(ValueError, match="keeps the treatment rate below 1"):
             bayes_minimum_detectable_lift_loss(3, [1, 1], [1, 1], 0.3, lift="relative", n_samples=300, mc_samples=100)
+
+
+class TestSearchMinSampleSize:
+    @staticmethod
+    @pytest.mark.parametrize("threshold", [1, 37, 100, 101, 2500])
+    def test_returns_exact_threshold(threshold):
+        # Used to return at least 101: n <= 100 was assumed underpowered without being checked.
+        n = _search_min_sample_size(lambda n: float(n >= threshold), 0.8, 10_000, "unreachable")
+        assert n == threshold
+
+    @staticmethod
+    def test_max_n_itself_is_evaluated():
+        # Used to raise: doubling jumped from 800 to 1600 without trying max_n = 1000.
+        assert _search_min_sample_size(lambda n: float(n >= 900), 0.8, 1000, "unreachable") == 900
+
+    @staticmethod
+    def test_unreachable_raises():
+        with pytest.raises(ValueError, match="unreachable"):
+            _search_min_sample_size(lambda n: 0.0, 0.8, 1000, "unreachable")
