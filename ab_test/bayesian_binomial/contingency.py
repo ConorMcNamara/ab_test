@@ -9,7 +9,7 @@ from scipy.stats import beta
 from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test._lift import scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
@@ -341,6 +341,8 @@ class BayesianContingencyTable(BaseContingencyTable):
         confidence_level: float = 0.95,
         n_samples: int = 100_000,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> go.Figure:
         """Plot the posterior Beta distributions for each variant as an interactive figure.
 
@@ -362,6 +364,9 @@ class BayesianContingencyTable(BaseContingencyTable):
             ``"tol_bright"``, ``"tol_vibrant"``, ``"tol_muted"``, ``"tol_light"``.
             If a list, each item corresponds to a variant in order. If a dict,
             keys are variant names and values are colors.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
 
         Returns
         -------
@@ -437,4 +442,5 @@ class BayesianContingencyTable(BaseContingencyTable):
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
 
+        apply_dark_mode(fig, dark_mode)
         return fig

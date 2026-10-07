@@ -7,6 +7,7 @@ import numpy as np
 import plotly.graph_objects as go
 from joblib import Parallel, delayed
 
+from ab_test._display import apply_dark_mode
 from ab_test._lift import _SCALED_LIFTS, from_absolute, to_absolute
 
 __all__ = [
@@ -854,6 +855,7 @@ def plot_bayes_power_curve(
     msrp: float | None = None,
     *,
     n_jobs: int = 1,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot Bayesian power as a function of per-group sample size.
 
@@ -890,6 +892,9 @@ def plot_bayes_power_curve(
     n_points : int, optional
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 50.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -977,6 +982,7 @@ def plot_bayes_power_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig
 
 
@@ -997,6 +1003,7 @@ def plot_bayes_sensitivity_curve(
     msrp: float | None = None,
     *,
     n_jobs: int = 1,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of per-group sample size.
 
@@ -1031,6 +1038,9 @@ def plot_bayes_sensitivity_curve(
     n_points : int, optional
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 50.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -1119,4 +1129,5 @@ def plot_bayes_sensitivity_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig

@@ -22,7 +22,7 @@ import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 from tabulate import tabulate
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 
 __all__ = [
@@ -557,6 +557,8 @@ class BayesianClusterRandomizedTrial:
         cred_int_method: Literal["credible", "hdi"] = "credible",
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> None:
         """Forest plot of per-cluster proportions and pooled credible interval.
 
@@ -579,6 +581,9 @@ class BayesianClusterRandomizedTrial:
         color : str, list, dict, or None, default=None
             Colorblind palette name, mapping of group names to colors,
             list of colors, or ``None`` for Plotly defaults.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
         """
         if self.pooled_results is None or self.model_params is None:
             self.analyze(
@@ -655,6 +660,7 @@ class BayesianClusterRandomizedTrial:
         )
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
+        apply_dark_mode(fig, dark_mode)
         fig.show()  # type: ignore[no-untyped-call]
 
     def plot_pdf(
@@ -662,6 +668,8 @@ class BayesianClusterRandomizedTrial:
         confidence_level: float = 0.95,
         n_samples: int = 100_000,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> go.Figure:
         """Plot overlapping Beta posterior PDFs for both arms.
 
@@ -673,6 +681,9 @@ class BayesianClusterRandomizedTrial:
             Number of posterior samples for HDI computation.
         color : str, list, dict, or None, default=None
             Colorblind palette name, list of colors, or ``None``.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
 
         Returns
         -------
@@ -741,6 +752,7 @@ class BayesianClusterRandomizedTrial:
             template="plotly_white",
             legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
         )
+        apply_dark_mode(fig, dark_mode)
         return fig
 
 
@@ -1310,6 +1322,8 @@ def plot_cluster_bayes_power_curve(
     mc_samples: int = 500,
     cluster_counts: np.ndarray[Any, Any] | list[int] | None = None,
     n_points: int = 20,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot Bayesian CRT power as a function of clusters per arm.
 
@@ -1341,6 +1355,9 @@ def plot_cluster_bayes_power_curve(
         Explicit cluster counts to evaluate. When ``None``, auto-ranges.
     n_points : int, default=20
         Number of points when ``cluster_counts`` is ``None``.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -1400,6 +1417,7 @@ def plot_cluster_bayes_power_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig
 
 
@@ -1416,6 +1434,8 @@ def plot_cluster_bayes_sensitivity_curve(
     mc_samples: int = 500,
     cluster_counts: np.ndarray[Any, Any] | list[int] | None = None,
     n_points: int = 20,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of clusters per arm.
 
@@ -1445,6 +1465,9 @@ def plot_cluster_bayes_sensitivity_curve(
         Explicit cluster counts to evaluate. When ``None``, auto-ranges.
     n_points : int, default=20
         Number of points when ``cluster_counts`` is ``None``.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -1496,4 +1519,5 @@ def plot_cluster_bayes_sensitivity_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig

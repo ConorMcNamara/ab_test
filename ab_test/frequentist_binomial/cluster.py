@@ -23,7 +23,7 @@ import numpy as np
 import plotly.graph_objects as go
 import scipy.stats as ss
 
-from ab_test._display import convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test.frequentist_binomial.randomization_inference import cluster_randomization_test
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
@@ -641,6 +641,8 @@ class ClusterRandomizedTrial:
         alpha: float = 0.05,
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
     ) -> None:
         """Forest plot of per-cluster proportions and arm estimates.
 
@@ -655,6 +657,9 @@ class ClusterRandomizedTrial:
         color : str, list, dict, or None
             Color specification (see
             :func:`~ab_test._display.resolve_plot_color`).
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines (Plotly's
+            ``"plotly_dark"`` template).
         """
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
@@ -729,6 +734,7 @@ class ClusterRandomizedTrial:
             template="plotly_white",
             yaxis={"autorange": "reversed" if reverse_plot else True},
         )
+        apply_dark_mode(fig, dark_mode)
         fig.show()
 
 
@@ -748,6 +754,8 @@ def plot_cluster_power_curve(
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot statistical power with and without cluster adjustment.
 
@@ -773,6 +781,9 @@ def plot_cluster_power_curve(
         Fraction of units in each group. Defaults to 50/50.
     n_points : int
         Number of points when auto-ranging. Defaults to 100.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -861,6 +872,7 @@ def plot_cluster_power_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig
 
 
@@ -875,6 +887,8 @@ def plot_cluster_sensitivity_curve(
     sample_sizes: np.ndarray[Any, Any] | list[int] | None = None,
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
+    *,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift with and without cluster adjustment.
 
@@ -900,6 +914,9 @@ def plot_cluster_sensitivity_curve(
         Fraction of units in each group. Defaults to 50/50.
     n_points : int
         Number of points when auto-ranging. Defaults to 100.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -983,4 +1000,5 @@ def plot_cluster_sensitivity_curve(
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    apply_dark_mode(fig, dark_mode)
     return fig

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import plotly.graph_objects as go
 
+from ab_test._display import apply_dark_mode
 from ab_test.frequentist_binomial.utils import mle_under_alternative, mle_under_null, observed_lift, validate_two_group
 
 if TYPE_CHECKING:
@@ -154,6 +155,7 @@ def plot_msprt_over_time(
     null_lift: float = 0.0,
     *,
     tau: float | None = None,
+    dark_mode: bool = False,
 ) -> go.Figure:
     """Plot the mSPRT point estimate and confidence sequence over time.
 
@@ -173,6 +175,9 @@ def plot_msprt_over_time(
     tau : float or None, optional
         Scale of the Gaussian mixing distribution. When ``None``, auto-derived
         at each checkpoint.
+    dark_mode : bool, default=False
+        Render on a dark background with light text and gridlines (Plotly's
+        ``"plotly_dark"`` template).
 
     Returns
     -------
@@ -250,4 +255,5 @@ def plot_msprt_over_time(
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
 
+    apply_dark_mode(fig, dark_mode)
     return fig

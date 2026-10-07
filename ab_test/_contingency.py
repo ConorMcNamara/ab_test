@@ -227,6 +227,7 @@ class BaseContingencyTable:
         is_individual: bool = True,
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
+        *,
         dark_mode: bool = False,
     ) -> None:
         """Plot the point estimates as well as confidence/credible intervals.
