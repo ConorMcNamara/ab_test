@@ -25,7 +25,7 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 | **Equivalence testing** | TOST (two one-sided tests) and Bayesian ROPE equivalence | [frequentist](docs/frequentist_binomial/equivalence.rst) · [bayesian](docs/bayesian_binomial/equivalence.rst) |
 | **Randomization inference** | Assumption-free permutation p-values, individual- and cluster-level, with parallel Monte Carlo | [docs](docs/frequentist_binomial/randomization_inference.rst) |
 | **Multiple testing** | Bonferroni, Sidak, Holm (FWER), Benjamini-Hochberg (FDR) | [docs](docs/corrections.rst) |
-| **Cluster-randomized trials** | Frequentist cluster-summary Welch test with ICC and design effect; Bayesian beta-binomial hierarchical model with design-effect-adjusted posteriors and simulation-based assurance | [frequentist](docs/frequentist_binomial/cluster.rst) · [bayesian](docs/bayesian_binomial/cluster.rst) |
+| **Cluster-randomized trials** | Frequentist cluster-summary Welch test with ICC and design effect; Bayesian beta-binomial hierarchical model (posterior integrates over the ICC) and simulation-based assurance | [frequentist](docs/frequentist_binomial/cluster.rst) · [bayesian](docs/bayesian_binomial/cluster.rst) |
 | **Diagnostics** | Sample ratio mismatch (SRM), time-trend (novelty/primacy) detection, and placebo tests | [docs](docs/diagnostics.rst) |
 | **Lift types** | Relative, absolute, incremental, ROAS, CPA, and revenue — all methods | — |
 
