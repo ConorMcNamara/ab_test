@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pytest
 
-from ab_test._display import combine_lift_panels, render_forest_plot
+from ab_test._display import combine_lift_panels, format_percent, render_forest_plot
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 from ab_test.bayesian_binomial.diff_in_diff import BayesianDiffInDiff
 from ab_test.bayesian_binomial.stratified import BayesianStratifiedContingencyTable
@@ -233,3 +233,42 @@ class TestCombineLiftPanels:
         assert (fig.layout.xaxis.tickformat, fig.layout.xaxis2.tickformat) == (",.1%", "$,")
         assert fig.layout.title.text == "Title"
         assert fig.layout.showlegend is True
+
+
+class TestFormatPercent:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "fraction, expected",
+        [(0.95, "95"), (0.975, "97.5"), (0.025, "2.5"), (0.003, "0.3"), (0.997, "99.7"), (0.05, "5"), (0.9, "90")],
+    )
+    def test_keeps_fractional_percentages(fraction, expected):
+        # round() gave "2" for 2.5 and "0" for 0.3; int() gave "97" for 97.5.
+        assert format_percent(fraction) == expected
+
+
+class TestConfidenceLabels:
+    @staticmethod
+    def test_frequentist_cluster_labels_fractional_alpha():
+        from ab_test.frequentist_binomial.cluster import ClusterRandomizedTrial
+
+        crt = ClusterRandomizedTrial("x", "conversion")
+        for i, (s, n) in enumerate([(48, 500), (52, 510), (45, 490)]):
+            crt.add(f"c{i}", s, n, group="control")
+        for i, (s, n) in enumerate([(63, 500), (67, 510), (60, 490)]):
+            crt.add(f"t{i}", s, n, group="treatment")
+        output = crt.analyze(alpha=0.025)
+        assert "2.5% level" in output and "97.5% Confidence Interval" in output
+
+    @staticmethod
+    def test_diff_in_diff_labels_match_other_modules():
+        # Used int(), so alpha = 0.025 gave "97%" here but "98%" in modules using round().
+        from ab_test.frequentist_binomial.contingency import ContingencyTable
+        from ab_test.frequentist_binomial.diff_in_diff import DiffInDiff
+
+        tables = []
+        for name in ("A", "B"):
+            table = ContingencyTable(name, "conversion")
+            table.add("Control", 100, 1000)
+            table.add("Treatment", 120, 1000)
+            tables.append(table)
+        assert "97.5% Confidence Interval" in DiffInDiff(*tables).analyze(alpha=0.025)

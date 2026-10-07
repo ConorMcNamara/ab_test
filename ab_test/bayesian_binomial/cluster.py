@@ -26,7 +26,13 @@ import scipy.stats as ss
 from scipy.special import betaln, expit
 from tabulate import tabulate
 
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import (
+    apply_dark_mode,
+    convert_to_tabulate_str,
+    format_percent,
+    resolve_plot_color,
+    tabulate_summary,
+)
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.power_calculations import _max_feasible_lift, _search_min_lift
 
@@ -496,7 +502,7 @@ class BayesianClusterRandomizedTrial:
             f" | Clusters: {n_ctrl} {ctrl}, {n_treat} {treat}"
         )
 
-        ci_pct = int(confidence_level * 100)
+        ci_pct = format_percent(confidence_level)
         return_string += f"\n* next to the prob means it exceeds our confidence level at {ci_pct}% level"
         return_string += f"\n** {ci_pct}% Credible Interval"
         return_string += "\n*** Region of Practical Equivalence"
@@ -564,7 +570,7 @@ class BayesianClusterRandomizedTrial:
 
         table_headers = ["Group", "Cluster", "Post. Mean", "CI Lower **", "CI Upper **", "N"]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
-        return_string += f"\n** {int(confidence_level * 100)}% Credible Interval"
+        return_string += f"\n** {format_percent(confidence_level)}% Credible Interval"
         return return_string
 
     def summary(

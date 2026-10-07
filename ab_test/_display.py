@@ -20,6 +20,7 @@ __all__ = [
     "apply_dark_mode",
     "combine_lift_panels",
     "tabulate_summary",
+    "format_percent",
 ]
 
 # Colorblind-friendly palettes keyed by name. "wong" and "ito" are aliases for
@@ -34,6 +35,15 @@ COLORBLIND_PALETTES: dict[str, list[str]] = {
     "tol_muted": ["#cc6677", "#332288", "#ddcc77", "#117733", "#88ccee", "#882255", "#44aa99", "#999933", "#aa4499"],
     "tol_light": ["#77aadd", "#ee8866", "#eedd88", "#ffaabb", "#99ddff", "#44bb99", "#bbcc33", "#bbcc33"],
 }
+
+
+def format_percent(fraction: float) -> str:
+    """Format a probability as a percentage label without rounding it to an integer.
+
+    ``0.95`` gives ``"95"``, ``0.975`` gives ``"97.5"`` and ``0.003`` gives ``"0.3"``,
+    where ``round`` would give ``"98"`` (banker's rounding to an even integer) or ``"0"``.
+    """
+    return f"{round(fraction * 100, 6):g}"
 
 
 def _format_infinity(value: float) -> str:

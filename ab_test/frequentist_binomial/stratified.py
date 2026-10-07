@@ -20,6 +20,7 @@ from ab_test._display import (
     apply_dark_mode,
     combine_lift_panels,
     convert_to_tabulate_str,
+    format_percent,
     resolve_plot_color,
     tabulate_summary,
 )
@@ -533,9 +534,9 @@ class StratifiedContingencyTable:
                 return_string += f"\nBreslow-Day homogeneity p-value: {bd_pvalue:.4f}"
 
         return_string += (
-            f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
+            f"\n* next to the p-value means it's statistically significant at the {format_percent(alpha)}% level"
         )
-        return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
+        return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
         return return_string
 
     def analyze_by_stratum(
@@ -583,7 +584,7 @@ class StratifiedContingencyTable:
 
         table_headers = ["Stratum"] + self._cell_names + ["Lift", "CI Lower **", "CI Upper **", "N"]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
-        return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
+        return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
         return return_string
 
     def plot(

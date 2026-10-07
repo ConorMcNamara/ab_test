@@ -23,7 +23,13 @@ import numpy as np
 import plotly.graph_objects as go
 import scipy.stats as ss
 
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import (
+    apply_dark_mode,
+    convert_to_tabulate_str,
+    format_percent,
+    resolve_plot_color,
+    tabulate_summary,
+)
 from ab_test.frequentist_binomial.randomization_inference import cluster_randomization_test
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
@@ -644,9 +650,9 @@ class ClusterRandomizedTrial:
             footer += f" | Welch df: {welch_df:.1f}"
         return_string += footer
         return_string += (
-            f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
+            f"\n* next to the p-value means it's statistically significant at the {format_percent(alpha)}% level"
         )
-        return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
+        return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
         return return_string
 
     @property

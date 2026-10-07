@@ -8,7 +8,13 @@ from scipy.stats import beta
 from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import (
+    apply_dark_mode,
+    convert_to_tabulate_str,
+    format_percent,
+    resolve_plot_color,
+    tabulate_summary,
+)
 from ab_test._lift import from_absolute, scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
@@ -284,9 +290,9 @@ class BayesianContingencyTable(BaseContingencyTable):
         )
         return_string = tabulate_summary(row_labels, values)
         return_string += (
-            f"\n* next to the prob means it exceeds our confidence level at {round(confidence_level * 100)}% level"
+            f"\n* next to the prob means it exceeds our confidence level at {format_percent(confidence_level)}% level"
         )
-        return_string += f"\n** {round(confidence_level * 100)}% Credible Interval"
+        return_string += f"\n** {format_percent(confidence_level)}% Credible Interval"
         return_string += "\n*** Region of Practical Equivalence"
         return return_string
 
@@ -353,7 +359,7 @@ class BayesianContingencyTable(BaseContingencyTable):
             "Cred. Int. Upper**",
         ]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
-        return_string += f"\n** {round(confidence_level * 100)}% Credible Interval"
+        return_string += f"\n** {format_percent(confidence_level)}% Credible Interval"
         return return_string
 
     def plot_pdf(
