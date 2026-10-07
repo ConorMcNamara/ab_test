@@ -217,7 +217,6 @@ class TestScoreTest:
             score_test(means, variances, trials)
 
 
-
 class TestScoreTestUnequalVariance:
     @staticmethod
     def _samples():

@@ -70,15 +70,23 @@ class TestValidateTwoGroup:
     def test_nonzero_relative_null_rejected():
         with pytest.raises(NotImplementedError):
             validate_two_group(
-                [1, 2], [100, 200], [4, 5],
-                null_lift=0.1, lift="relative", allow_relative_null=False,
+                [1, 2],
+                [100, 200],
+                [4, 5],
+                null_lift=0.1,
+                lift="relative",
+                allow_relative_null=False,
             )
 
     @staticmethod
     def test_nonzero_relative_null_allowed():
         validate_two_group(
-            [1, 2], [100, 200], [4, 5],
-            null_lift=0.1, lift="relative", allow_relative_null=True,
+            [1, 2],
+            [100, 200],
+            [4, 5],
+            null_lift=0.1,
+            lift="relative",
+            allow_relative_null=True,
         )
 
 
@@ -126,9 +134,7 @@ class TestMleUnderAlternative:
         rng = np.random.default_rng(0)
         x1 = rng.normal(10, 2, 120)
         x2 = rng.normal(11, 2, 80)
-        mu, sigma2 = mle_under_alternative(
-            [x1.mean(), x2.mean()], [x1.var(ddof=1), x2.var(ddof=1)], [len(x1), len(x2)]
-        )
+        mu, sigma2 = mle_under_alternative([x1.mean(), x2.mean()], [x1.var(ddof=1), x2.var(ddof=1)], [len(x1), len(x2)])
         expected = (((x1 - x1.mean()) ** 2).sum() + ((x2 - x2.mean()) ** 2).sum()) / 200
         assert mu == pytest.approx([x1.mean(), x2.mean()])
         assert sigma2 == pytest.approx(expected)
@@ -146,7 +152,6 @@ class TestMleUnderAlternative:
         _, sigma2_alt = mle_under_alternative(*args)
         _, sigma2_null = mle_under_null(*args, null_lift=0.0)
         assert sigma2_alt <= sigma2_null
-
 
 
 class TestMleUnequalVariance:
@@ -185,11 +190,15 @@ class TestMleUnequalVariance:
     def test_relative_matches_grid_search():
         means, variances, trials = [10.0, 10.4], [1.0, 9.0], [300, 150]
         mu, _ = mle_under_null(means, variances, trials, null_lift=0.02, lift="relative", equal_var=False)
-        assert mu[0] == pytest.approx(TestMleUnequalVariance._grid_argmax(means, variances, trials, 1.02, 0.0), abs=1e-4)
+        assert mu[0] == pytest.approx(
+            TestMleUnequalVariance._grid_argmax(means, variances, trials, 1.02, 0.0), abs=1e-4
+        )
 
     @staticmethod
     def test_observed_lift_recovers_sample_moments():
-        mu, sigma2 = mle_under_null([10.0, 11.0], [1.0, 9.0], [300, 150], null_lift=1.0, lift="absolute", equal_var=False)
+        mu, sigma2 = mle_under_null(
+            [10.0, 11.0], [1.0, 9.0], [300, 150], null_lift=1.0, lift="absolute", equal_var=False
+        )
         assert mu == pytest.approx([10.0, 11.0])
         assert sigma2 == pytest.approx([299 / 300 * 1.0, 149 / 150 * 9.0])
 
