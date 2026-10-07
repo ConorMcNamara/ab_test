@@ -95,12 +95,14 @@ class TestMsprtTest:
 
     @staticmethod
     def test_msprt_default_tau_does_not_shrink_with_n():
-        # A tau tied to the standard error makes the z threshold constant (~3.26),
-        # so a fixed z of 3.5 would reject at every n and type-I error -> 1.
+        # A tau tied to the standard error makes the z threshold a constant 3.66 at
+        # alpha=0.05, so z=3.75 would be rejected at every n. A fixed tau makes the
+        # threshold grow with n (about 3.83 here).
         n = 10_000_000
         se = np.sqrt(2 * 0.1 * 0.9 / n)
-        successes = [n // 10, round((0.1 + 3.5 * se) * n)]
+        successes = [n // 10, round((0.1 + 3.75 * se) * n)]
         assert msprt_test([n, n], successes, lift="absolute") > 0.05
+        assert msprt_test([n, n], successes, lift="absolute", tau=se) < 0.05
 
     @staticmethod
     def test_msprt_crit():
