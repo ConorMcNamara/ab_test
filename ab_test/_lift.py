@@ -19,6 +19,13 @@ __all__ = [
 
 _SCALED_LIFTS = frozenset({"incremental", "roas", "revenue", "cpa"})
 
+CPA_THRESHOLD_ERROR = (
+    "Threshold checks (ROPE, equivalence, P(lift > t)) are not supported for lift='cpa': CPA is not monotone "
+    "in the difference between variants and is infinite when they are equal, so an interval on the CPA scale "
+    "does not mean 'no practical difference'. Use lift='roas' (incremental conversions per dollar) or "
+    "lift='incremental' instead."
+)
+
 
 def to_absolute(
     lift_value: float,

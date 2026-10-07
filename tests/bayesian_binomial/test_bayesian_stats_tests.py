@@ -52,20 +52,24 @@ class TestStatsTests:
         assert actual_prob == pytest.approx(expected_prob, abs=1e-02)
 
     @staticmethod
-    def test_calculate_rope_cpa():
+    def test_calculate_rope_rejects_cpa():
+        # |CPA| <= delta means the variants differ a lot, so a CPA ROPE answers the wrong question.
         rng = np.random.default_rng(42)
-        sample_a = rng.beta(101, 901, size=100_000)
-        sample_b = rng.beta(111, 891, size=100_000)
-        result = calculate_rope(sample_a, sample_b, lift="cpa", low=0, high=20, trials=(1000, 1000), spend=100)
-        assert 0 < result["prob_in_rope"] < 1
-        assert 0 < result["prob_lift_exceeds"] < 1
+        sample_a = rng.beta(101, 901, size=1_000)
+        sample_b = rng.beta(111, 891, size=1_000)
+        with pytest.raises(ValueError, match="not supported for lift='cpa'"):
+            calculate_rope(sample_a, sample_b, lift="cpa", low=0, high=20, trials=(1000, 1000), spend=100)
 
     @staticmethod
-    def test_calculate_rope_cpa_requires_spend():
-        sample_a = np.array([0.1, 0.1])
-        sample_b = np.array([0.11, 0.11])
+    def test_calculate_metrics_cpa_has_no_rope():
+        result = calculate_metrics([100, 110], [1000, 1000], [1, 1], [1, 1], 10_000, lift="cpa", spend=100)
+        assert np.isnan(result["Probability of ROPE"])
+        assert 0 < result["Proportion of samples where B exceeds A"] < 1
+
+    @staticmethod
+    def test_calculate_metrics_cpa_requires_spend():
         with pytest.raises(ValueError, match="spend must be provided"):
-            calculate_rope(sample_a, sample_b, lift="cpa", trials=(1000, 1000))
+            calculate_metrics([100, 110], [1000, 1000], [1, 1], [1, 1], 1_000, lift="cpa")
 
 
 if __name__ == "__main__":

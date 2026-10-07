@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 
-from ab_test._lift import compute_sample_lift
+from ab_test._lift import CPA_THRESHOLD_ERROR, compute_sample_lift
 
 __all__ = ["bayes_equivalence_test"]
 
@@ -45,8 +45,10 @@ def bayes_equivalence_test(
         is ``[-delta, delta]`` in the scale specified by ``lift``.
     n_samples : int, optional
         Number of posterior samples to draw per variant.  Default is 10 000.
-    lift : {"absolute", "relative", "incremental", "revenue", "roas", "cpa"}
+    lift : {"absolute", "relative", "incremental", "revenue", "roas"}
         How to compute the lift between variants.  Default is ``"absolute"``.
+        ``"cpa"`` is not supported: CPA is not monotone in ``B - A`` and is
+        infinite when the variants are equal. Use ``"roas"`` instead.
     threshold : float, optional
         Posterior probability threshold for declaring equivalence.
         Default is 0.95.
@@ -74,11 +76,13 @@ def bayes_equivalence_test(
     Raises
     ------
     ValueError
-        If ``delta <= 0``, or required parameters for the chosen ``lift``
-        are missing.
+        If ``delta <= 0``, ``lift="cpa"``, or required parameters for the
+        chosen ``lift`` are missing.
     """
     if delta <= 0:
         raise ValueError("delta must be positive")
+    if lift == "cpa":
+        raise ValueError(CPA_THRESHOLD_ERROR)
 
     successes_arr = np.asarray(successes)
     trials_arr = np.asarray(trials)
