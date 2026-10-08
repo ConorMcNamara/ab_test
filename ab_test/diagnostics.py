@@ -14,7 +14,7 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 
-from ab_test._display import apply_dark_mode
+from ab_test._display import apply_dark_mode, format_percent
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
 from ab_test.frequentist_binomial.stats_tests import ab_test
 from ab_test.frequentist_binomial.utils import observed_lift
@@ -122,7 +122,8 @@ def time_trend_test(
     trials_b : array_like
         Per-period trials for variant B, length *T*.
     alpha : float, optional
-        Significance level for the trend test.  Default is 0.05.
+        Significance level for the trend test, and the level of the
+        per-period error bars (100(1 - alpha)% intervals).  Default is 0.05.
     labels : array_like or None, optional
         Display labels for each period (e.g. dates).  When ``None``,
         periods are numbered ``1, 2, …, T``.
@@ -207,9 +208,9 @@ def time_trend_test(
         go.Scatter(  # type: ignore[attr-defined]
             x=display_labels,
             y=period_lift,
-            error_y=dict(type="data", array=1.96 * period_se, visible=True),
+            error_y=dict(type="data", array=float(ss.norm.isf(alpha / 2)) * period_se, visible=True),
             mode="markers",
-            name="Period lift",
+            name=f"Period lift ({format_percent(1 - alpha)}% CI)",
             marker=dict(size=8, color="#636EFA"),
         )
     )
