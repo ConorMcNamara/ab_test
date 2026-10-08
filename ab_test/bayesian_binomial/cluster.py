@@ -22,7 +22,6 @@ from typing import Any, Literal, Self
 
 import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
-import scipy.stats as ss
 from scipy.special import betaln, expit
 from tabulate import tabulate
 
@@ -327,8 +326,6 @@ class BayesianClusterRandomizedTrial:
     def _fit_model(self) -> dict[str, Any]:
         arms = self._build_arm_arrays()
         params: dict[str, Any] = {}
-        all_s: list[np.ndarray[Any, Any]] = []
-        all_n: list[np.ndarray[Any, Any]] = []
 
         for g in self._groups:
             s, n = arms[g]
@@ -342,13 +339,11 @@ class BayesianClusterRandomizedTrial:
                 "logit_mu_grid": logit_mu,
                 "mu_weights": mu_weights,
             }
-            all_s.append(s)
-            all_n.append(n)
 
-        pooled_s = np.concatenate(all_s)
-        pooled_n = np.concatenate(all_n)
-        pooled_a, pooled_b = estimate_beta_binomial_params(pooled_s, pooled_n)
-        params["pooled_icc"] = beta_binomial_icc(pooled_a, pooled_b)
+        # Each arm's ICC is measured around its own rate, so averaging them (weighted by cluster
+        # count) does not count the treatment effect as clustering, unlike fitting pooled clusters.
+        n_clusters = {g: len(arms[g][0]) for g in self._groups}
+        params["pooled_icc"] = sum(n_clusters[g] * params[g]["icc"] for g in self._groups) / sum(n_clusters.values())
 
         self.model_params = params
         return params
@@ -363,7 +358,12 @@ class BayesianClusterRandomizedTrial:
 
     @property
     def pooled_icc(self) -> float:
-        """Pooled intra-cluster correlation across both arms."""
+        """Intra-cluster correlation pooled across arms.
+
+        The cluster-count-weighted average of the arms' posterior mean ICCs.
+        Each is measured around its own arm's rate, so a treatment effect is
+        not counted as between-cluster variation.
+        """
         if self.model_params is None:
             self._fit_model()
         assert self.model_params is not None
@@ -756,7 +756,11 @@ class BayesianClusterRandomizedTrial:
         *,
         dark_mode: bool = False,
     ) -> go.Figure:
-        """Plot overlapping Beta posterior PDFs for both arms.
+        """Plot the posterior density of each arm's conversion rate.
+
+        The curves are the hierarchical model's posterior for each arm-level
+        rate (the quantity behind P(T > C)), not the fitted spread of
+        cluster-level rates, which is much wider.
 
         Parameters
         ----------
@@ -782,12 +786,12 @@ class BayesianClusterRandomizedTrial:
         plot_color = resolve_plot_color(color)
         fig = go.Figure()  # type: ignore[attr-defined]
 
-        x = np.linspace(0.001, 0.999, 1000)
-
         for gi, g in enumerate(self._groups):
             params = self.model_params[g]
-            a, b = params["a"], params["b"]
-            y = ss.beta.pdf(x, a, b)
+            logit_mu, weights = params["logit_mu_grid"], params["mu_weights"]
+            x = expit(logit_mu)
+            # Grid weights are masses on equal-width logit cells; convert to a density in the rate.
+            y = weights / (logit_mu[1] - logit_mu[0]) / (x * (1 - x))
 
             c = None
             if plot_color is not None:
@@ -806,11 +810,11 @@ class BayesianClusterRandomizedTrial:
                     y=y.tolist(),
                     mode="lines",
                     line=line_kw,
-                    name=f"{g} (a={a:.2f}, b={b:.2f})",
+                    name=f"{g} (posterior mean={params['mean']:.2%})",
                 )
             )
 
-            samples = np.random.beta(a, b, n_samples)
+            samples = _sample_mu(logit_mu, weights, n_samples)
             hdi_lo, hdi_hi = calculate_hdi_from_samples(samples, confidence_level)
             fig.add_shape(
                 type="line",

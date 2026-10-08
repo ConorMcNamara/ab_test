@@ -679,3 +679,28 @@ class TestCachedResults:
         before = crt.summary()["p_treatment"]
         crt.add("new_treatment_cluster", 400, 500, group="Treatment")
         assert crt.summary()["p_treatment"] > before
+
+
+class TestPlotPdfAndPooledIcc:
+    @staticmethod
+    def test_plot_pdf_shows_posterior_of_arm_rate():
+        # Used to plot Beta(a, b), the much wider spread of cluster-level rates.
+        np.random.seed(0)
+        crt = _make_crt()
+        fig = crt.plot_pdf()
+        for trace, group in zip(fig.data, ["Control", "Treatment"]):
+            x, y = np.asarray(trace.x), np.asarray(trace.y)
+            assert np.trapezoid(y, x) == pytest.approx(1.0, abs=1e-3)
+            assert np.trapezoid(x * y, x) == pytest.approx(crt.model_params[group]["mean"], abs=1e-4)
+        for shape in fig.layout.shapes:
+            assert shape.x1 - shape.x0 < 0.05
+
+    @staticmethod
+    def test_pooled_icc_not_inflated_by_treatment_effect():
+        # No clustering, 10% vs 20%: the old pooled fit reported about 0.02.
+        crt = BayesianClusterRandomizedTrial()
+        for i in range(10):
+            crt.add(f"c{i}", 50, 500, group="Control")
+            crt.add(f"t{i}", 100, 500, group="Treatment")
+        assert crt.pooled_icc < 0.005
+        assert crt.pooled_icc == pytest.approx(np.mean(list(crt.icc.values())))
