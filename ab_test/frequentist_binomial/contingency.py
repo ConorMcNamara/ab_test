@@ -140,7 +140,9 @@ class ContingencyTable(BaseContingencyTable):
         tau : float or None, optional
             Scale of the Gaussian mixing distribution for the mSPRT test.
             Only used when ``test_method="msprt"``. When ``None``, the scale
-            is derived from the data. See :func:`~ab_test.frequentist_binomial.msprt.msprt_test`.
+            is the larger of ``0.1`` times the pooled success rate and the
+            absolute null effect. See
+            :func:`~ab_test.frequentist_binomial.msprt.msprt_test`.
 
         Returns
         -------
@@ -148,6 +150,15 @@ class ContingencyTable(BaseContingencyTable):
         """
         if len(self.names) != 2:
             raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
+        # The null lift only affects the p-value, so it is not needed to redraw intervals.
+        self._analyze_settings = {
+            "test_method": test_method,
+            "conf_int_method": conf_int_method,
+            "alpha": alpha,
+            "tau": tau,
+            "n_permutations": n_permutations,
+            "seed": seed,
+        }
         lift = lift.casefold()
         invertible_tests = {
             "score": score_test,

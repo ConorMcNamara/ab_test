@@ -47,9 +47,9 @@ __all__ = [
     "plot_gst_sensitivity_curve",
 ]
 
-_N_GRID = 2001
-_Z_MAX = 8.0
-_SQRT_2PI = math.sqrt(2 * math.pi)
+_N_NODES = 2001  # Simpson nodes per look (odd)
+_Z_TAIL = 12.0  # continuation regions are truncated this many SDs from the mean
+_C_MAX = 38.0  # beyond this the normal tail underflows, so the boundary is infinite
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +81,7 @@ def obrien_fleming_spending(t: float, alpha: float = 0.05) -> float:
     if t >= 1:
         return alpha
     z = float(ss.norm.isf(alpha / 2))
-    return float(2 * (1 - ss.norm.cdf(z / math.sqrt(t))))
+    return float(2 * ss.norm.sf(z / math.sqrt(t)))
 
 
 def pocock_spending(t: float, alpha: float = 0.05) -> float:
@@ -143,74 +143,94 @@ def power_spending(t: float, alpha: float = 0.05, *, rho: float = 1.0) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Private helpers: grid-based numerical integration
+# Private helpers: recursive numerical integration
 # ---------------------------------------------------------------------------
 
 
-def _transition(
-    grid: np.ndarray[Any, Any],
-    t_prev: float,
-    t_curr: float,
-    drift: float,
-) -> tuple[np.ndarray[Any, Any], float]:
-    """Conditional mean (per grid point) and SD of the next z-statistic."""
-    sigma = math.sqrt((t_curr - t_prev) / t_curr)
-    means = grid * math.sqrt(t_prev / t_curr) + drift * (t_curr - t_prev) / math.sqrt(t_curr)
-    return means, sigma
-
-
-def _propagate_density(
-    density: np.ndarray[Any, Any],
-    grid: np.ndarray[Any, Any],
-    dz: float,
-    t_prev: float,
-    t_curr: float,
-    drift: float = 0.0,
-) -> np.ndarray[Any, Any]:
-    """Propagate the continuation density forward one analysis step.
-
-    Uses the transition kernel for the joint distribution of sequential
-    z-statistics under drift ``drift``.
-    """
-    means, sigma = _transition(grid, t_prev, t_curr, drift)
-    diff = grid[:, np.newaxis] - means[np.newaxis, :]
-    kernel = np.exp(-0.5 * (diff / sigma) ** 2) / (sigma * _SQRT_2PI)
-    return kernel @ (density * dz)
+def _simpson_nodes(lo: float, hi: float) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    """Composite Simpson nodes and weights on [lo, hi]."""
+    nodes = np.linspace(lo, hi, _N_NODES)
+    weights = np.ones(_N_NODES)
+    weights[1:-1:2] = 4.0
+    weights[2:-1:2] = 2.0
+    return nodes, weights * (hi - lo) / (3 * (_N_NODES - 1))
 
 
 def _exit_mass(
-    means: np.ndarray[Any, Any] | float,
-    sd: float,
-    boundary: float,
+    c: float,
+    mass: np.ndarray[Any, Any],
+    means: np.ndarray[Any, Any],
+    sigma: float,
     sided: str,
-) -> np.ndarray[Any, Any]:
-    """Probability that ``N(means, sd**2)`` falls outside the continuation region."""
-    upper = ss.norm.sf((boundary - np.asarray(means)) / sd)
+) -> float:
+    """Probability of crossing boundary ``c`` at this look, in closed form given the previous nodes."""
+    exit_prob = ss.norm.sf((c - means) / sigma)
     if sided == "two":
-        return upper + ss.norm.cdf((-boundary - np.asarray(means)) / sd)
-    return upper
+        exit_prob = exit_prob + ss.norm.cdf((-c - means) / sigma)
+    return float(mass @ exit_prob)
 
 
-def _continuation_density(
-    density: np.ndarray[Any, Any],
-    grid: np.ndarray[Any, Any],
-    dz: float,
-    boundary: float,
+def _sequential_recursion(
+    info_fractions: np.ndarray[Any, Any],
+    drift: float,
     sided: str,
-    mass: float,
-) -> np.ndarray[Any, Any]:
-    """Zero out density outside the continuation region and rescale it to ``mass``.
+    choose_boundary: Callable[[int, Callable[[float], float]], float],
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    """Recursive integration over the continuation regions (Jennison & Turnbull, 1999, ch. 19).
 
-    The rescaling absorbs the grid's discretisation error at the boundary, so
-    the exit and continuation probabilities always sum to one.
+    At each look the sub-density of the z-statistic over the continuation
+    region is held on Simpson nodes spanning that region, with the boundary as
+    an endpoint, so the probability of exiting at the next look is a smooth
+    function of the next boundary.
+
+    Parameters
+    ----------
+    choose_boundary : callable
+        ``(look, exit_mass_fn) -> boundary``, where ``exit_mass_fn(c)`` is the
+        probability of stopping at this look with boundary ``c``.
+
+    Returns
+    -------
+    tuple of ndarray
+        ``(boundaries, exit_probabilities)``.
     """
-    result = density.copy()
+    n_analyses = len(info_fractions)
+    boundaries = np.zeros(n_analyses)
+    exit_probs = np.zeros(n_analyses)
+    # Look 1 is a transition from a point mass at z = 0 with zero information.
+    nodes, mass, t_prev = np.zeros(1), np.ones(1), 0.0
+    for k, t in enumerate(info_fractions):
+        sigma = math.sqrt((t - t_prev) / t)
+        means = nodes * math.sqrt(t_prev / t) + drift * (t - t_prev) / math.sqrt(t)
+        boundaries[k] = choose_boundary(k, lambda c, m=mass, mu=means, sd=sigma: _exit_mass(c, m, mu, sd, sided))
+        exit_probs[k] = _exit_mass(boundaries[k], mass, means, sigma, sided)
+        if k == n_analyses - 1:
+            break
+        center = drift * math.sqrt(t)
+        hi = min(boundaries[k], center + _Z_TAIL)
+        lo = max(-boundaries[k], center - _Z_TAIL) if sided == "two" else center - _Z_TAIL
+        new_nodes, quad_weights = _simpson_nodes(lo, hi)
+        density = ss.norm.pdf((new_nodes[:, np.newaxis] - means[np.newaxis, :]) / sigma) @ mass / sigma
+        nodes, mass, t_prev = new_nodes, quad_weights * density, t
+    return boundaries, exit_probs
+
+
+def _cumulative_spend(
+    spending_function: Callable[[float, float], float],
+    info_fractions: np.ndarray[Any, Any],
+    alpha: float,
+    sided: str,
+) -> np.ndarray[Any, Any]:
+    """Cumulative alpha spent at each analysis, summed over both sides when two-sided.
+
+    A two-sided design spends ``alpha / 2`` on each side, so the per-side spend is
+    ``spending_function(t, alpha / 2)``. This matches gsDesign, rpact and ldbounds;
+    for spending functions that are linear in alpha (Pocock, power family) it equals
+    ``spending_function(t, alpha)``, but for O'Brien-Fleming it does not.
+    """
     if sided == "two":
-        result[np.abs(grid) >= boundary] = 0.0
-    else:
-        result[grid >= boundary] = 0.0
-    grid_mass = float(np.sum(result)) * dz
-    return result * (mass / grid_mass) if grid_mass > 0 else result
+        return np.array([2 * spending_function(t, alpha / 2) for t in info_fractions])
+    return np.array([spending_function(t, alpha) for t in info_fractions])
 
 
 def _compute_boundaries(
@@ -220,33 +240,21 @@ def _compute_boundaries(
     info_fractions: np.ndarray[Any, Any],
     sided: str,
 ) -> np.ndarray[Any, Any]:
-    """Compute z-scale boundaries via recursive integration and root-finding."""
-    grid = np.linspace(-_Z_MAX, _Z_MAX, _N_GRID)
-    dz = grid[1] - grid[0]
-
-    boundaries = np.zeros(n_analyses)
-    cum_spend = np.array([spending_function(t, alpha) for t in info_fractions])
+    """Compute z-scale boundaries that spend exactly the planned alpha at each look."""
+    cum_spend = _cumulative_spend(spending_function, info_fractions, alpha, sided)
     delta_spend = np.diff(np.concatenate(([0.0], cum_spend)))
 
-    if sided == "two":
-        boundaries[0] = float(ss.norm.isf(delta_spend[0] / 2))
-    else:
-        boundaries[0] = float(ss.norm.isf(delta_spend[0]))
+    def solve(k: int, exit_mass: Callable[[float], float]) -> float:
+        target = float(delta_spend[k])
+        # Spending too small to represent: the look can never stop the trial.
+        if target <= 0 or exit_mass(_C_MAX) >= target:
+            return math.inf
+        if exit_mass(0.0) <= target:
+            return 0.0
+        root: float = brentq(lambda c: exit_mass(c) - target, 0.0, _C_MAX, xtol=1e-10)  # type: ignore[assignment]
+        return root
 
-    density = _continuation_density(ss.norm.pdf(grid), grid, dz, boundaries[0], sided, 1.0 - cum_spend[0])
-
-    for k in range(1, n_analyses):
-        means, sigma = _transition(grid, info_fractions[k - 1], info_fractions[k], 0.0)
-        weights = density * dz
-
-        def spent(c: float, means: np.ndarray[Any, Any] = means, sigma: float = sigma) -> float:
-            return float(np.sum(weights * _exit_mass(means, sigma, c, sided))) - delta_spend[k]
-
-        boundaries[k] = brentq(spent, 0.1, _Z_MAX - 0.1)
-
-        new_density = _propagate_density(density, grid, dz, info_fractions[k - 1], info_fractions[k])
-        density = _continuation_density(new_density, grid, dz, boundaries[k], sided, 1.0 - cum_spend[k])
-
+    boundaries, _ = _sequential_recursion(info_fractions, 0.0, sided, solve)
     return boundaries
 
 
@@ -260,30 +268,8 @@ def _compute_exit_probabilities(
 
     The sum of exit probabilities is the overall rejection probability (power
     when drift > 0, type-I error when drift = 0).
-
-    Exit mass is integrated analytically from the continuation density at the
-    previous look, so only the continuation region (which lies inside the
-    boundaries) has to fit on the grid. Integrating the exit tails on the grid
-    loses mass once the drift pushes the density past ``_Z_MAX``.
     """
-    grid = np.linspace(-_Z_MAX, _Z_MAX, _N_GRID)
-    dz = grid[1] - grid[0]
-
-    n_analyses = len(boundaries)
-    exit_probs = np.zeros(n_analyses)
-
-    mean_first = drift * math.sqrt(info_fractions[0])
-    exit_probs[0] = float(_exit_mass(mean_first, 1.0, boundaries[0], sided))
-    remaining = 1.0 - exit_probs[0]
-    density = _continuation_density(ss.norm.pdf(grid, loc=mean_first), grid, dz, boundaries[0], sided, remaining)
-
-    for k in range(1, n_analyses):
-        means, sigma = _transition(grid, info_fractions[k - 1], info_fractions[k], drift)
-        exit_probs[k] = float(np.sum(density * dz * _exit_mass(means, sigma, boundaries[k], sided)))
-        remaining -= exit_probs[k]
-        new_density = _propagate_density(density, grid, dz, info_fractions[k - 1], info_fractions[k], drift)
-        density = _continuation_density(new_density, grid, dz, boundaries[k], sided, remaining)
-
+    _, exit_probs = _sequential_recursion(info_fractions, drift, sided, lambda k, _: float(boundaries[k]))
     return exit_probs
 
 
@@ -305,10 +291,14 @@ class GroupSequentialDesign:
     n_analyses : int
         Number of planned analyses (interim + final), at least 1.
     alpha : float
-        Overall two-sided type-I error rate. Defaults to 0.05.
+        Overall type-I error rate: two-sided when ``sided="two"`` (``alpha / 2``
+        per side), one-sided when ``sided="one"``. Defaults to 0.05.
     spending_function : callable
         Alpha spending function with signature ``(t, alpha) -> float``.
-        Defaults to :func:`obrien_fleming_spending`.
+        Defaults to :func:`obrien_fleming_spending`. For two-sided designs it
+        is applied to ``alpha / 2`` on each side, the convention used by
+        gsDesign and rpact, so ``sided="two", alpha=0.05`` and
+        ``sided="one", alpha=0.025`` give the same boundaries.
     info_fractions : array_like or None
         Information fractions at each analysis, strictly increasing with the
         last element equal to 1.0. Defaults to equally spaced fractions.
@@ -358,7 +348,7 @@ class GroupSequentialDesign:
 
         self._boundaries = _compute_boundaries(n_analyses, alpha, spending_function, info_fractions_arr, sided)
 
-        cum = np.array([spending_function(t, alpha) for t in info_fractions_arr])
+        cum = _cumulative_spend(spending_function, info_fractions_arr, alpha, sided)
         self._nominal_alpha = cum
         self._incremental_alpha = np.diff(np.concatenate(([0.0], cum)))
 

@@ -390,6 +390,15 @@ class TestBayesianContingencyTable:
         assert r["lift"] == pytest.approx(10.0, abs=2)
         assert r["ci_lower"] < r["lift"]
         assert r["ci_upper"] > r["lift"]
+        assert np.isnan(r["prob_rope"])
+
+    @staticmethod
+    def test_contingency_cpa_shows_rope_as_na():
+        bct = BayesianContingencyTable(name="CPA Test", spend=100, metric_name="conversions")
+        bct.add("Holdout", 100, 1_000, 1, 1)
+        bct.add("Test", 110, 1_000, 1, 1)
+        rope_row = next(line for line in bct.analyze(lift="cpa").splitlines() if "ROPE" in line)
+        assert "n/a" in rope_row
 
     @staticmethod
     def test_contingency_cpa_requires_spend():

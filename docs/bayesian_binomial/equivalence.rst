@@ -30,8 +30,10 @@ Usage
    result["prob_equivalent"]  # posterior P(-delta <= lift <= delta)
 
 ``lift`` sets the scale of ``delta`` and also accepts ``"incremental"``,
-``"roas"``, ``"revenue"`` and ``"cpa"`` (pass ``spend`` and ``msrp`` as
-needed). Results come from posterior sampling, so pass ``seed`` for
+``"roas"`` and ``"revenue"`` (pass ``spend`` and ``msrp`` as needed).
+``"cpa"`` is rejected: CPA is not monotone in the difference between variants
+and is infinite when they are equal, so ``|CPA| <= delta`` would mean the
+variants differ a lot. Use ``"roas"`` to express the effect per dollar. Results come from posterior sampling, so pass ``seed`` for
 reproducibility.
 
 API Reference

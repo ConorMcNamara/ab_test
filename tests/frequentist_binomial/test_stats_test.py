@@ -316,6 +316,20 @@ class TestBarnardTest:
         two = barnard_exact_test(list(reversed(trials)), list(reversed(successes)), null_lift=0.0)
         assert one == two
 
+    @staticmethod
+    @pytest.mark.parametrize("crit, expected", [(0.05, False), (0.06, True)])
+    def test_crit_is_compared_with_exact_pvalue(crit, expected):
+        # Exact p = 0.0554. Comparing |Wald statistic| with crit used to call this significant
+        # at crit=0.05 (and at crit=1.96).
+        assert barnard_exact_test([30, 30], [5, 12], crit=crit) is expected
+
+    @staticmethod
+    @pytest.mark.parametrize("test", [fisher_test, barnard_exact_test, boschloo_exact_test])
+    @pytest.mark.parametrize("crit", [1.96, 3.84, 0.0])
+    def test_exact_tests_reject_non_alpha_crit(test, crit):
+        with pytest.raises(ValueError, match="significance level"):
+            test([30, 30], [5, 12], crit=crit)
+
 
 @pytest.mark.slow
 class TestBoschlooTest:

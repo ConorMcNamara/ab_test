@@ -478,6 +478,15 @@ class TestClusterBayesMinimumClustersLoss:
         assert k >= 2
 
 
+class TestClusterBayesMinimumDetectableLiftRateBound:
+    @staticmethod
+    def test_search_stays_below_rate_of_one():
+        # Used to raise numpy's "b <= 0" once baseline * (1 + lift) reached 1.
+        np.random.seed(0)
+        mdl = cluster_bayes_minimum_detectable_lift(3, 10, 0.3, 0.3, n_samples=300, mc_samples=100)
+        assert 0 < mdl < (1 - 0.3) / 0.3
+
+
 class TestClusterBayesMinimumDetectableLift:
     @staticmethod
     def test_returns_float():
@@ -594,3 +603,58 @@ class TestPlotClusterBayesSensitivityCurve:
             mc_samples=100,
         )
         assert isinstance(fig, go.Figure)
+
+
+# ---------------------------------------------------------------------------
+# Hierarchical posterior calibration
+# ---------------------------------------------------------------------------
+
+
+def _beta_binomial_crt(rng, sizes, mu, icc):
+    kappa = 1 / icc - 1
+    crt = BayesianClusterRandomizedTrial()
+    for g in ("Control", "Treatment"):
+        successes = rng.binomial(sizes, rng.beta(mu * kappa, (1 - mu) * kappa, len(sizes)))
+        for i, (s, n) in enumerate(zip(successes, sizes)):
+            crt.add(f"{g}{i}", int(s), int(n), group=g)
+    return crt
+
+
+class TestHierarchicalPosterior:
+    @staticmethod
+    def test_reported_rates_match_posterior():
+        # Unequal cluster sizes: the unweighted mean of cluster rates is 30% in both
+        # arms, which used to be displayed next to a posterior centred elsewhere.
+        np.random.seed(0)
+        crt = BayesianClusterRandomizedTrial()
+        crt.add("c1", 50, 100, group="Control").add("c2", 100, 1000, group="Control")
+        crt.add("t1", 10, 100, group="Treatment").add("t2", 500, 1000, group="Treatment")
+        crt.analyze(lift="absolute")
+        r = crt.pooled_results
+        assert r["lift"] == pytest.approx(r["p_treatment"] - r["p_control"], abs=0.01)
+
+    @staticmethod
+    def test_icc_above_one_third_is_representable():
+        np.random.seed(0)
+        crt = _beta_binomial_crt(np.random.default_rng(0), np.full(40, 200), 0.3, 0.6)
+        assert min(crt.icc.values()) > 0.4
+
+    @staticmethod
+    def test_power_under_null_with_high_icc():
+        # Previously about 0.16 because the ICC was capped at 1/3.
+        np.random.seed(0)
+        power = cluster_bayes_power_lift(10, 200, 0.5, 0.1, alt_lift=0, n_samples=2000, mc_samples=500)
+        assert power <= 0.07
+
+    @staticmethod
+    @pytest.mark.slow
+    def test_null_false_positive_rate_with_unequal_cluster_sizes():
+        np.random.seed(0)
+        rng = np.random.default_rng(1)
+        sizes = np.where(np.arange(20) % 2, 360, 40)
+        hits = 0
+        for _ in range(200):
+            crt = _beta_binomial_crt(rng, sizes, 0.1, 0.05)
+            crt.analyze(lift="absolute", n_samples=20_000)
+            hits += crt.pooled_results["prob_t_gt_c"] >= 0.95
+        assert hits / 200 <= 0.08

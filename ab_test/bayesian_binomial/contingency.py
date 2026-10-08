@@ -139,7 +139,8 @@ class BayesianContingencyTable(BaseContingencyTable):
             Number of posterior samples to draw, by default 100_000.
         low_threshold : float, optional
             Lower bound of the Region of Practical Equivalence (ROPE),
-            by default -0.1.
+            by default -0.1. The ROPE is not computed for ``lift="cpa"``
+            (shown as n/a), since CPA is not monotone in the lift.
         high_threshold : float, optional
             Upper bound of the Region of Practical Equivalence (ROPE),
             by default 0.1.
@@ -162,6 +163,14 @@ class BayesianContingencyTable(BaseContingencyTable):
         """
         if len(self.names) != 2:
             raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
+        self._analyze_settings = {
+            "cred_int_method": cred_int_method,
+            "confidence_level": confidence_level,
+            "is_sample": is_sample,
+            "n_samples": n_samples,
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+        }
         lift = lift.casefold()
         if lift in ["relative", "absolute"]:
             results = calculate_metrics(
@@ -267,7 +276,11 @@ class BayesianContingencyTable(BaseContingencyTable):
             + convert_to_tabulate_str([test_lift, lb, ub], lift)
             + [str_pvalue]
             + [convert_to_tabulate_str(results["Expected loss"], "relative")]
-            + [convert_to_tabulate_str(results["Probability of ROPE"], "relative")]
+            + [
+                "n/a"
+                if np.isnan(results["Probability of ROPE"])
+                else convert_to_tabulate_str(results["Probability of ROPE"], "relative")
+            ]
         )
         return_string = tabulate_summary(row_labels, values)
         return_string += (

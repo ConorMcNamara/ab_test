@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 
-from ab_test._lift import compute_sample_lift
+from ab_test._lift import CPA_THRESHOLD_ERROR, compute_sample_lift
 from ab_test.bayesian_binomial.utils import sample_beta
 
 __all__ = [
@@ -49,10 +49,9 @@ def calculate_rope(
         - ``"roas"``: ``(B - A) * max(trials) / spend`` — incremental conversions
           per dollar spent; positive means B outperforms A. Requires ``trials``
           and ``spend``.
-        - ``"cpa"``: ``spend / ((B - A) * max(trials))`` — cost per incremental
-          conversion; lower means B is cheaper. Requires ``trials`` and ``spend``.
-
-        Default is ``"relative"``.
+        Default is ``"relative"``. ``"cpa"`` is not supported: CPA is not
+        monotone in ``B - A``, so an interval on the CPA scale does not
+        describe practical equivalence. Use ``"roas"`` instead.
     low : float, optional
         Lower bound of the ROPE. Default is -0.01.
     high : float, optional
@@ -82,9 +81,11 @@ def calculate_rope(
     NotImplementedError
         If ``lift`` is not one of the supported types.
     ValueError
-        If a required parameter (``trials``, ``spend``, or ``msrp``) is missing
-        for the chosen lift type.
+        If ``lift="cpa"``, or a required parameter (``trials``, ``spend``, or
+        ``msrp``) is missing for the chosen lift type.
     """
+    if lift == "cpa":
+        raise ValueError(CPA_THRESHOLD_ERROR)
     a = np.asarray(sample_a)
     b = np.asarray(sample_b)
     lift_arr = compute_sample_lift(a, b, lift=lift, trials=trials, spend=spend, msrp=msrp)
@@ -197,9 +198,11 @@ def calculate_metrics(
         Array of length 2 containing the beta prior parameters for variants A and B.
     n_samples : int
         Number of posterior samples to draw for each variant.
-    lift : {"relative", "absolute", "incremental", "revenue", "roas"}, optional
+    lift : {"relative", "absolute", "incremental", "revenue", "roas", "cpa"}, optional
         How to compute the lift between variants. Default is ``"relative"``.
-        See :func:`calculate_rope` for full semantics of each mode.
+        See :func:`calculate_rope` for full semantics of each mode. For
+        ``"cpa"`` the ROPE entries are NaN, since a ROPE on the CPA scale is
+        not meaningful.
     low_threshold : float, optional
         Lower bound of the ROPE. Default is -0.01.
     high_threshold : float, optional
@@ -224,16 +227,21 @@ def calculate_metrics(
     sample_b = sample_beta(successes[1], trials[1], alphas[1], betas[1], n_samples)
     prob_b_greater_a = float(np.mean(sample_b > sample_a))
     expected_loss = expected_loss_b(sample_a, sample_b)
-    rope = calculate_rope(
-        sample_a,
-        sample_b,
-        lift=lift,
-        low=low_threshold,
-        high=high_threshold,
-        trials=(int(trials[0]), int(trials[1])),
-        spend=spend,
-        msrp=msrp,
-    )
+    if lift == "cpa":
+        if spend is None:
+            raise ValueError("spend must be provided for lift='cpa'")
+        rope = {"prob_in_rope": np.nan, "prob_lift_exceeds": np.nan, "prob_lift_drops": np.nan}
+    else:
+        rope = calculate_rope(
+            sample_a,
+            sample_b,
+            lift=lift,
+            low=low_threshold,
+            high=high_threshold,
+            trials=(int(trials[0]), int(trials[1])),
+            spend=spend,
+            msrp=msrp,
+        )
     return {
         "Proportion of samples where B exceeds A": prob_b_greater_a,
         "Expected loss": expected_loss,

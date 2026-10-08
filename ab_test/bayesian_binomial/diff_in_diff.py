@@ -7,7 +7,8 @@ subgroup.  Accepts multiple
 objects (one per segment) and produces:
 
 1. Per-segment treatment effects with credible intervals
-2. A posterior estimate of between-segment heterogeneity (tau)
+2. A posterior estimate of between-segment heterogeneity (tau) from a normal
+   random-effects model, so within-segment noise is not counted as heterogeneity
 3. All pairwise DiD comparisons with posterior probabilities
 """
 
@@ -20,16 +21,21 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 from tabulate import tabulate
 
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import apply_dark_mode, combine_lift_panels, convert_to_tabulate_str, resolve_plot_color
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
-from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
+from ab_test.bayesian_binomial.utils import _between_group_sd_samples, posterior_mean, sample_beta
 
 __all__ = [
     "BayesianDiffInDiff",
 ]
 
-_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue", "cpa"})
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+_CPA_ERROR = (
+    "lift='cpa' is not supported for difference-in-differences: CPA is spend / incremental conversions, so a "
+    "difference of segment CPAs has no posterior mean and is not monotone in the effects being compared. "
+    "Use lift='roas' (incremental conversions per dollar) instead."
+)
 
 
 def _credible_interval_from_samples(
@@ -58,7 +64,7 @@ def _compute_segment_samples(
         One table per segment, each with exactly 2 cells.
     lift : str
         One of ``"absolute"``, ``"relative"``, ``"incremental"``,
-        ``"roas"``, ``"revenue"``, or ``"cpa"``.
+        ``"roas"``, or ``"revenue"``.
     n_samples : int
         Number of posterior samples to draw per variant.
 
@@ -89,17 +95,13 @@ def _compute_segment_samples(
         if lift == "relative":
             safe_c = np.where(samples_c == 0, 1e-9, samples_c)
             segment_lift = (samples_t - samples_c) / safe_c
-        elif lift in ("incremental", "roas", "revenue", "cpa"):
+        elif lift in ("incremental", "roas", "revenue"):
             n_max = max(n_c, n_t)
             segment_lift = (samples_t - samples_c) * n_max
             if lift == "roas":
                 if table.spend is None:
                     raise ValueError(f"spend must be set on segment {table.experiment_name!r} for ROAS")
                 segment_lift = segment_lift / table.spend
-            elif lift == "cpa":
-                if table.spend is None:
-                    raise ValueError(f"spend must be set on segment {table.experiment_name!r} for CPA")
-                segment_lift = np.where(np.abs(segment_lift) > 1e-12, table.spend / segment_lift, np.inf)
             elif lift == "revenue":
                 if table.msrp is None:
                     raise ValueError(f"msrp must be set on segment {table.experiment_name!r} for revenue")
@@ -191,7 +193,9 @@ class BayesianDiffInDiff:
         ----------
         lift : str, default="absolute"
             Scale for treatment effects: ``"absolute"``, ``"relative"``,
-            ``"incremental"``, ``"roas"``, or ``"revenue"``.
+            ``"incremental"``, ``"roas"``, or ``"revenue"``. ``"cpa"`` is
+            rejected because differences of CPAs are not well defined; use
+            ``"roas"`` instead.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -207,6 +211,8 @@ class BayesianDiffInDiff:
             estimate, and pairwise DiD comparisons.
         """
         lift = lift.casefold()
+        if lift == "cpa":
+            raise ValueError(_CPA_ERROR)
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
@@ -228,8 +234,9 @@ class BayesianDiffInDiff:
                 "p_treatment": stats["p_treatments"][i],
             }
 
-        stacked = np.vstack(lift_samples)
-        tau_samples = np.std(stacked, axis=0, ddof=0)
+        tau_samples = _between_group_sd_samples(
+            [float(np.mean(s)) for s in lift_samples], [float(np.var(s)) for s in lift_samples], n_samples
+        )
         tau_mean = float(np.mean(tau_samples))
         tau_ci_lo, tau_ci_hi = _credible_interval_from_samples(tau_samples, confidence_level, cred_int_method)
         self.heterogeneity_results = {
@@ -335,7 +342,10 @@ class BayesianDiffInDiff:
         ----------
         lift : str, default="absolute"
             Scale for treatment effects: ``"absolute"``, ``"relative"``,
-            ``"incremental"``, ``"roas"``, or ``"revenue"``.
+            ``"incremental"``, ``"roas"``, or ``"revenue"``. ``"cpa"`` is
+            rejected because differences of CPAs are not well defined; use
+            ``"roas"`` instead. ``"both"`` draws absolute and relative lift
+            side by side, sharing the y-axis, each with its own interval.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -352,7 +362,48 @@ class BayesianDiffInDiff:
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
         """
+        if isinstance(lift, str) and lift.casefold() == "both":
+            figures = [
+                self._plot_figure(
+                    lift=panel_lift,
+                    confidence_level=confidence_level,
+                    n_samples=n_samples,
+                    cred_int_method=cred_int_method,
+                    reverse_plot=reverse_plot,
+                    color=color,
+                )
+                for panel_lift in ("absolute", "relative")
+            ]
+            fig = combine_lift_panels(
+                figures,
+                f"{self.metric_name} — Treatment Effect by Segment (Risk Difference and Relative Lift)",
+                ["Risk Difference", "Relative Lift"],
+            )
+        else:
+            fig = self._plot_figure(
+                lift=lift,
+                confidence_level=confidence_level,
+                n_samples=n_samples,
+                cred_int_method=cred_int_method,
+                reverse_plot=reverse_plot,
+                color=color,
+            )
+        apply_dark_mode(fig, dark_mode)
+        fig.show()  # type: ignore[no-untyped-call]
+
+    def _plot_figure(
+        self,
+        lift: str = "absolute",
+        confidence_level: float = 0.95,
+        n_samples: int = 100_000,
+        cred_int_method: Literal["credible", "hdi"] = "credible",
+        reverse_plot: bool = True,
+        color: str | dict[str, Any] | list[Any] | None = None,
+    ) -> go.Figure:
+        """Build the forest plot for a single lift (see :meth:`plot`)."""
         lift = lift.casefold()
+        if lift == "cpa":
+            raise ValueError(_CPA_ERROR)
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
@@ -410,7 +461,6 @@ class BayesianDiffInDiff:
             "incremental": "Incremental Conversions",
             "roas": "Return on Ad Spend",
             "revenue": "Revenue",
-            "cpa": "Cost Per Acquisition",
         }
         tick_formats = {
             "absolute": ",.1%",
@@ -418,7 +468,6 @@ class BayesianDiffInDiff:
             "incremental": ",",
             "roas": "$,",
             "revenue": "$,",
-            "cpa": "$,",
         }
         lift_label = lift_labels[lift]
         fig.update_layout(
@@ -429,5 +478,4 @@ class BayesianDiffInDiff:
             template="plotly_white",
         )
 
-        apply_dark_mode(fig, dark_mode)
-        fig.show()
+        return fig

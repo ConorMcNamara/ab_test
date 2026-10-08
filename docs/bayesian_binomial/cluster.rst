@@ -3,8 +3,12 @@ Cluster-Randomized Trials (Bayesian)
 
 Bayesian analysis of cluster-randomized experiments using a beta-binomial
 hierarchical model. Randomization occurs at the cluster level (stores,
-markets, time windows) and the resulting intra-cluster correlation is
-captured via method-of-moments estimation of per-arm Beta distributions.
+markets, time windows). Within each arm, cluster rates follow a Beta
+distribution whose mean and intra-cluster correlation (ICC) both get priors
+(uniform on the mean, ``Beta(1/2, 1)`` on the ICC). The posterior of each
+arm's rate integrates over the ICC instead of plugging in an estimate, so it
+stays calibrated with few clusters, unequal cluster sizes, and large ICCs.
+The power functions simulate this same posterior.
 
 Usage
 -----

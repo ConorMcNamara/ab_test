@@ -429,17 +429,17 @@ class CupacExperiment:
             y_adj = y.copy()
             theta = 0.0
 
-        # Treatment effect (adjusted and unadjusted)
-        tau_hat = float(np.mean(y_adj[is_treatment]) - np.mean(y_adj[is_control]))
         tau_unadj = float(np.mean(y[is_treatment]) - np.mean(y[is_control]))
 
-        # Final regression design matrix
+        # Final regression; the treatment coefficient is the adjusted ATE, so
+        # the point estimate and its robust SE describe the same estimator.
         treatment_indicator = is_treatment.astype(float)
         if self.method == "lin":
             X_full = self._build_lin_design_matrix(treatment_indicator, covariates)
         else:
             X_full = np.column_stack([np.ones(len(y_adj)), treatment_indicator, covariates])
         beta_full = _ols_fit(X_full, y_adj)
+        tau_hat = float(beta_full[1])
 
         # Robust SEs
         df: float | None = None

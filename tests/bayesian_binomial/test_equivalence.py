@@ -113,6 +113,12 @@ class TestBayesEquivalenceValidation:
             bayes_equivalence_test([100, 102], [1000, 1000], [1, 1], [1, 1], delta=0.05, lift="roas", seed=42)
 
     @staticmethod
+    def test_cpa_rejected() -> None:
+        # Identical arms used to be "not equivalent" and a doubled conversion rate "equivalent".
+        with pytest.raises(ValueError, match="not supported for lift='cpa'"):
+            bayes_equivalence_test([1000, 2000], [10000, 10000], [1, 1], [1, 1], delta=50, lift="cpa", spend=1000)
+
+    @staticmethod
     def test_revenue_requires_msrp() -> None:
         with pytest.raises(ValueError, match="msrp"):
             bayes_equivalence_test([100, 102], [1000, 1000], [1, 1], [1, 1], delta=0.05, lift="revenue", seed=42)

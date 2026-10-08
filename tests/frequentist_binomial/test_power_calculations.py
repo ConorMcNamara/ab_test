@@ -94,6 +94,22 @@ class TestScorePower:
         assert 0 < mdl < 1 - baseline
 
     @staticmethod
+    def test_minimum_detectable_drop_cannot_exceed_100_percent():
+        # Used to return a 121.6% drop, implying a negative treatment rate.
+        with pytest.raises(ValueError, match="within \\[0, 1\\]"):
+            minimum_detectable_lift([50, 50], 0.1, drop=True)
+
+    @staticmethod
+    def test_minimum_detectable_lift_cannot_push_rate_above_one():
+        with pytest.raises(ValueError, match="within \\[0, 1\\]"):
+            minimum_detectable_lift([20, 20], 0.6)
+
+    @staticmethod
+    def test_minimum_detectable_lift_near_rate_limit():
+        mdl = minimum_detectable_lift([200, 200], 0.6)
+        assert 0 < mdl < (1 - 0.6) / 0.6
+
+    @staticmethod
     def test_required_sample_size_relative_lift():
         baseline = 0.10
         alt_lift = 0.50

@@ -50,11 +50,16 @@ def _test_result(statistic: Any, pval: Any, crit: float | None) -> float | bool:
 def _pvalue_decision(pval: Any, crit: float | None) -> float | bool:
     """Return the p-value, or a significance boolean when an alpha threshold is given.
 
-    Use this for exact tests (Fisher, Boschloo) whose test statistics do not
-    support a critical-value comparison.
+    Use this for exact tests (Fisher, Barnard, Boschloo), whose decision must
+    come from the exact p-value rather than an asymptotic critical value.
     """
     if crit is None:
         return float(pval)
+    if not 0 < crit < 1:
+        raise ValueError(
+            f"crit is the significance level for exact tests and must be in (0, 1), got {crit}. "
+            "A z or chi-squared critical value would make every result significant."
+        )
     return bool(pval <= crit)
 
 
@@ -112,7 +117,9 @@ def ab_test(
         whether the result is statistically significant. Useful primarily for
         simulations where we will be repeatedly assessing significance, since
         calculating the critical value can be done once instead of repeatedly.
-        This makes such simulations about 5x faster.
+        This makes such simulations about 5x faster. For the exact tests
+        (``'fisher'``, ``'barnard'``, ``'boschloo'``), ``crit`` is instead the
+        significance level alpha and is compared with the exact p-value.
      method : str
         How we plan on calculating the p_value or critical value of our
         experiment.  One of ``'score'``, ``'likelihood'``, ``'z'``,
@@ -474,6 +481,10 @@ def barnard_exact_test(
     """Barnard's Exact Test for a 2x2 Contingency Table.
 
     See :func:`score_test` for the shared parameter and return semantics.
+    As with Fisher's and Boschloo's tests, ``crit`` is compared against the
+    exact p-value (i.e. treated as an alpha threshold). Comparing Barnard's
+    Wald statistic with a normal critical value would give an asymptotic
+    decision that can disagree with the exact p-value.
 
     Notes
     -----
@@ -485,7 +496,7 @@ def barnard_exact_test(
     _require_zero_null(null_lift, "barnard_exact_test")
     contingency_table = _contingency_table(trials, successes)
     barnard = ss.barnard_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
-    return _test_result(barnard.statistic, barnard.pvalue, crit)
+    return _pvalue_decision(barnard.pvalue, crit)
 
 
 def boschloo_exact_test(

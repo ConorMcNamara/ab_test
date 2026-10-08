@@ -16,7 +16,13 @@ import scipy.stats as ss
 
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import (
+    apply_dark_mode,
+    combine_lift_panels,
+    convert_to_tabulate_str,
+    resolve_plot_color,
+    tabulate_summary,
+)
 from ab_test._lift import scale_bounds, scale_metric
 
 try:
@@ -120,7 +126,10 @@ def breslow_day_test(
     statistic : float
         Breslow-Day chi-squared statistic.
     pvalue : float
-        P-value from a chi-squared(K - 1) distribution.
+        P-value from a chi-squared(K - 1) distribution, where K counts only
+        strata with both successes and failures (others carry no information
+        about the odds ratio). Both values are NaN when fewer than 2 such
+        strata remain.
 
     Raises
     ------
@@ -134,6 +143,15 @@ def breslow_day_test(
         raise ValueError("Breslow-Day test requires at least 2 strata")
 
     or_mh = _mh_odds_ratio(successes_arr, trials_arr)
+
+    # Strata with no successes (or no failures) carry no information about the odds ratio;
+    # their expected count is fixed, which would give 0/0 below.
+    events = successes_arr.sum(axis=1)
+    informative = (events > 0) & (events < trials_arr.sum(axis=1))
+    successes_arr, trials_arr = successes_arr[informative], trials_arr[informative]
+    K = successes_arr.shape[0]
+    if K < 2:
+        return math.nan, math.nan
 
     a = successes_arr[:, 0]
     c = successes_arr[:, 1]
@@ -272,35 +290,67 @@ def _stratum_effect(
     return d, se, d - z * se, d + z * se
 
 
+def _mh_risk_ratio(successes: np.ndarray[Any, Any], trials_arr: np.ndarray[Any, Any]) -> tuple[float, float]:
+    """Mantel-Haenszel risk ratio (treatment / control) and the Greenland-Robins variance of its log.
+
+    Strata with zero successes contribute without any correction. Returns
+    ``(risk_ratio, var_log_rr)``; the variance is infinite when either arm has
+    no successes in any stratum.
+    """
+    c, a = successes[:, 0], successes[:, 1]
+    n0, n1 = trials_arr[:, 0], trials_arr[:, 1]
+    total = n0 + n1
+    r = float(np.sum(a * n0 / total))
+    s = float(np.sum(c * n1 / total))
+    if r == 0 and s == 0:
+        raise ValueError("No successes in either group in any stratum, so the pooled relative lift is undefined")
+    if r == 0 or s == 0:
+        return (math.inf if s == 0 else 0.0), math.inf
+    var_log = float(np.sum((n1 * n0 * (a + c) - a * c * total) / total**2)) / (r * s)
+    return r / s, var_log
+
+
+def _mh_risk_difference(successes: np.ndarray[Any, Any], trials_arr: np.ndarray[Any, Any]) -> tuple[float, float]:
+    """Mantel-Haenszel risk difference (treatment - control) and Sato's variance.
+
+    Sato's (1989) variance is consistent both for many sparse strata and for
+    a few large ones, and needs no correction for zero cells.
+    """
+    c, a = successes[:, 0], successes[:, 1]
+    n0, n1 = trials_arr[:, 0], trials_arr[:, 1]
+    total = n0 + n1
+    weight = float(np.sum(n1 * n0 / total))
+    rd = float(np.sum((a * n0 - c * n1) / total)) / weight
+    p_term = float(np.sum((n1**2 * c - n0**2 * a + n1 * n0 * (n0 - n1) / 2) / total**2))
+    q_term = float(np.sum((a * (n0 - c) + c * (n1 - a)) / (2 * total)))
+    return rd, max(rd * p_term + q_term, 0.0) / weight**2
+
+
 def _pooled_effect(
-    p1: np.ndarray[Any, Any],
-    p2: np.ndarray[Any, Any],
+    successes: np.ndarray[Any, Any],
     trials_arr: np.ndarray[Any, Any],
     lift: str,
     z: float,
     spend: float | None = None,
     msrp: float | None = None,
 ) -> tuple[float, float, float, float]:
-    """Compute the inverse-variance pooled effect on the requested scale.
+    """Compute the Mantel-Haenszel pooled effect on the requested scale.
 
-    Returns ``(estimate, se, ci_lower, ci_upper)`` on the display scale.
+    Relative lift pools the risk ratio (Greenland-Robins variance); the other
+    lifts pool the risk difference (Sato variance). Both are defined when some
+    strata have zero successes, unlike inverse-variance pooling of plug-in
+    estimates. Returns ``(estimate, se, ci_lower, ci_upper)`` on the display scale.
     """
     if lift == "relative":
-        log_rr = np.log(p2 / p1)
-        var_log_rr = (1 - p1) / (trials_arr[:, 0] * p1) + (1 - p2) / (trials_arr[:, 1] * p2)
-        w = 1 / var_log_rr
-        log_rr_pooled = float(np.sum(w * log_rr) / np.sum(w))
-        se_log = float(1 / np.sqrt(np.sum(w)))
-        estimate = float(np.exp(log_rr_pooled) - 1)
-        lb = float(np.exp(log_rr_pooled - z * se_log) - 1)
-        ub = float(np.exp(log_rr_pooled + z * se_log) - 1)
-        return estimate, se_log, lb, ub
+        rr, var_log = _mh_risk_ratio(successes, trials_arr)
+        if math.isinf(var_log):
+            return rr - 1, math.inf, -1.0, math.inf
+        se_log = math.sqrt(var_log)
+        log_rr = math.log(rr)
+        return rr - 1, se_log, math.exp(log_rr - z * se_log) - 1, math.exp(log_rr + z * se_log) - 1
 
-    rd = p2 - p1
-    var_rd = p1 * (1 - p1) / trials_arr[:, 0] + p2 * (1 - p2) / trials_arr[:, 1]
-    w = 1 / var_rd
-    pooled_d = float(np.sum(w * rd) / np.sum(w))
-    pooled_se = float(1 / np.sqrt(np.sum(w)))
+    pooled_d, var_d = _mh_risk_difference(successes, trials_arr)
+    pooled_se = math.sqrt(var_d)
 
     if lift in ("incremental", "roas", "revenue", "cpa"):
         n_max = float(max(np.sum(trials_arr[:, 0]), np.sum(trials_arr[:, 1])))
@@ -313,9 +363,7 @@ def _pooled_effect(
         lb, ub = scale_bounds(lb, ub, lift, spend, msrp)
         return est, se_scaled, lb, ub
 
-    lb = pooled_d - z * pooled_se
-    ub = pooled_d + z * pooled_se
-    return pooled_d, pooled_se, lb, ub
+    return pooled_d, pooled_se, pooled_d - z * pooled_se, pooled_d + z * pooled_se
 
 
 class StratifiedContingencyTable:
@@ -437,9 +485,11 @@ class StratifiedContingencyTable:
     ) -> str:
         """Analyze the stratified experiment.
 
-        Computes the Cochran-Mantel-Haenszel p-value, a pooled effect
-        estimate via inverse-variance weighting, and a Wald confidence
-        interval. Also reports the Breslow-Day homogeneity p-value when
+        Computes the Cochran-Mantel-Haenszel p-value and a Mantel-Haenszel
+        pooled effect with a Wald confidence interval: the MH risk ratio with
+        the Greenland-Robins variance for relative lift, and the MH risk
+        difference with Sato's variance otherwise. Both handle strata with
+        zero successes without a continuity correction. Also reports the Breslow-Day homogeneity p-value when
         there are at least two strata.
 
         Parameters
@@ -459,13 +509,10 @@ class StratifiedContingencyTable:
 
         successes, trials_arr, strata_names = self._build_arrays()
 
-        _, p_value = cmh_test(successes, trials_arr)
-
-        p1 = successes[:, 0] / trials_arr[:, 0]
-        p2 = successes[:, 1] / trials_arr[:, 1]
         z = float(ss.norm.ppf(1 - alpha / 2))
+        estimate, _, lb, ub = _pooled_effect(successes, trials_arr, lift, z, self.spend, self.msrp)
 
-        estimate, _, lb, ub = _pooled_effect(p1, p2, trials_arr, lift, z, self.spend, self.msrp)
+        _, p_value = cmh_test(successes, trials_arr)
 
         p_control = float(np.sum(successes[:, 0]) / np.sum(trials_arr[:, 0]))
         p_treatment = float(np.sum(successes[:, 1]) / np.sum(trials_arr[:, 1]))
@@ -487,7 +534,8 @@ class StratifiedContingencyTable:
 
         if len(strata_names) >= 2:
             _, bd_pvalue = breslow_day_test(successes, trials_arr)
-            return_string += f"\nBreslow-Day homogeneity p-value: {bd_pvalue:.4f}"
+            if not math.isnan(bd_pvalue):
+                return_string += f"\nBreslow-Day homogeneity p-value: {bd_pvalue:.4f}"
 
         return_string += (
             f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
@@ -555,14 +603,16 @@ class StratifiedContingencyTable:
         """Forest plot of per-stratum and pooled treatment effects.
 
         Each stratum is shown as a circle with a confidence-interval
-        whisker. The pooled inverse-variance weighted estimate is shown
-        as a diamond. A vertical dashed line marks zero (no effect).
+        whisker. The Mantel-Haenszel pooled estimate is shown as a
+        diamond. A vertical dashed line marks zero (no effect).
 
         Parameters
         ----------
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
             ``"roas"``, ``"revenue"``, or ``"cpa"``.
+            ``"both"`` draws absolute and relative lift side by side, sharing
+            the y-axis, each with its own interval.
         alpha : float, default=0.05
             Significance level for confidence intervals.
         reverse_plot : bool, default=True
@@ -579,6 +629,29 @@ class StratifiedContingencyTable:
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
         """
+        if isinstance(lift, str) and lift.casefold() == "both":
+            figures = [
+                self._plot_figure(lift=panel_lift, alpha=alpha, reverse_plot=reverse_plot, color=color)
+                for panel_lift in ("absolute", "relative")
+            ]
+            fig = combine_lift_panels(
+                figures,
+                f"{self.experiment_name} — {self.metric_name} (Risk Difference and Relative Lift)",
+                ["Risk Difference", "Relative Lift"],
+            )
+        else:
+            fig = self._plot_figure(lift=lift, alpha=alpha, reverse_plot=reverse_plot, color=color)
+        apply_dark_mode(fig, dark_mode)
+        fig.show()  # type: ignore[no-untyped-call]
+
+    def _plot_figure(
+        self,
+        lift: str = "relative",
+        alpha: float = 0.05,
+        reverse_plot: bool = True,
+        color: str | dict[str, Any] | list[Any] | None = None,
+    ) -> go.Figure:
+        """Build the forest plot for a single lift (see :meth:`plot`)."""
         lift = self._validate_lift(lift)
         successes, trials_arr, strata_names = self._build_arrays()
 
@@ -597,7 +670,7 @@ class StratifiedContingencyTable:
             ci_lowers.append(lb)
             ci_uppers.append(ub)
 
-        pooled_est, _, pooled_lb, pooled_ub = _pooled_effect(p1, p2, trials_arr, lift, z, self.spend, self.msrp)
+        pooled_est, _, pooled_lb, pooled_ub = _pooled_effect(successes, trials_arr, lift, z, self.spend, self.msrp)
 
         plot_color = resolve_plot_color(color)
         fig = go.Figure()  # type: ignore[attr-defined]
@@ -686,5 +759,4 @@ class StratifiedContingencyTable:
         )
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
-        apply_dark_mode(fig, dark_mode)
-        fig.show()  # type: ignore[no-untyped-call]
+        return fig

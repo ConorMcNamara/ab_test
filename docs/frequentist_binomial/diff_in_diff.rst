@@ -15,6 +15,12 @@ It computes:
 3. **All pairwise DiD comparisons** with multiplicity correction via
    :func:`~ab_test.corrections.adjust_pvalues`
 
+With ``lift="incremental"``, ``"roas"`` or ``"revenue"``, per-segment effects
+are reported in those units, but Cochran's Q and the pairwise comparisons use
+the risk difference: scaling each segment by its own size, spend or price would
+make equal rate effects look different. ``lift="cpa"`` is not supported; use
+``"roas"``.
+
 This is complementary to
 :class:`~ab_test.frequentist_binomial.stratified.StratifiedContingencyTable`,
 which *pools* strata to produce a single treatment effect under the assumption

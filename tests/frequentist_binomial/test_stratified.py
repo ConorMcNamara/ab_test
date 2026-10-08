@@ -6,6 +6,8 @@ import scipy.stats as ss
 
 from ab_test.frequentist_binomial.stratified import (
     StratifiedContingencyTable,
+    _mh_risk_difference,
+    _mh_risk_ratio,
     breslow_day_test,
     cmh_test,
     stratified_power,
@@ -477,3 +479,85 @@ class TestStratifiedPlotNewLifts:
         st = self._make_table()
         with pytest.raises(ValueError, match="lift must be"):
             st.plot(lift="logistic")
+
+
+# ---------------------------------------------------------------------------
+# Mantel-Haenszel pooling and zero cells
+# ---------------------------------------------------------------------------
+
+
+def _zero_cell_table():
+    table = StratifiedContingencyTable("Zero cells", "conversion")
+    table.add("Control", 0, 100, stratum="s1")
+    table.add("Treatment", 3, 100, stratum="s1")
+    table.add("Control", 20, 100, stratum="s2")
+    table.add("Treatment", 30, 100, stratum="s2")
+    return table
+
+
+class TestMantelHaenszelPooling:
+    @staticmethod
+    def test_risk_ratio_matches_reference():
+        # statsmodels StratifiedTable(...).riskratio_pooled for these tables
+        successes = np.array([[30, 45], [12, 20], [50, 61]])
+        trials = np.array([[300, 310], [150, 140], [400, 420]])
+        rr, _ = _mh_risk_ratio(successes, trials)
+        num = np.sum(successes[:, 1] * trials[:, 0] / trials.sum(axis=1))
+        den = np.sum(successes[:, 0] * trials[:, 1] / trials.sum(axis=1))
+        assert rr == pytest.approx(num / den, rel=1e-12)
+
+    @staticmethod
+    def test_single_stratum_reduces_to_two_sample_estimates():
+        successes, trials = np.array([[40, 55]]), np.array([[400, 500]])
+        rd, var_rd = _mh_risk_difference(successes, trials)
+        assert rd == pytest.approx(55 / 500 - 40 / 400)
+        wald = 0.1 * 0.9 / 400 + 0.11 * 0.89 / 500
+        assert var_rd == pytest.approx(wald, rel=0.01)
+
+    @staticmethod
+    @pytest.mark.parametrize("lift", ["relative", "absolute", "incremental"])
+    def test_zero_cell_gives_finite_lift(lift):
+        # Inverse-variance pooling printed "Lift nan%" here next to CMH p = 0.0415.
+        output = _zero_cell_table().analyze(lift=lift)
+        assert "nan" not in output.lower()
+
+    @staticmethod
+    def test_zero_cell_interval_agrees_with_cmh():
+        table = _zero_cell_table()
+        output = table.analyze(lift="relative")
+        assert "0.0415*" in output
+        assert "65.0%" in output
+
+    @staticmethod
+    def test_stratum_with_no_events_in_either_arm():
+        table = StratifiedContingencyTable("Empty stratum", "conversion")
+        table.add("Control", 0, 50, stratum="s1")
+        table.add("Treatment", 0, 50, stratum="s1")
+        table.add("Control", 20, 100, stratum="s2")
+        table.add("Treatment", 30, 100, stratum="s2")
+        assert "nan" not in table.analyze(lift="absolute").lower()
+
+    @staticmethod
+    def test_no_events_anywhere_raises_for_relative():
+        table = StratifiedContingencyTable("Empty", "conversion")
+        for k in ("s1", "s2"):
+            table.add("Control", 0, 50, stratum=k)
+            table.add("Treatment", 0, 50, stratum=k)
+        with pytest.raises(ValueError, match="relative lift is undefined"):
+            table.analyze(lift="relative")
+
+
+class TestBreslowDayZeroCells:
+    @staticmethod
+    def test_uninformative_stratum_is_ignored():
+        # statsmodels test_equal_odds(adjust=False) on the two informative strata: 0.80713, p = 0.36897
+        successes = np.array([[0, 0], [20, 30], [15, 18]])
+        trials = np.array([[50, 50], [100, 100], [80, 90]])
+        stat, pvalue = breslow_day_test(successes, trials)
+        assert stat == pytest.approx(0.8071337, abs=1e-6)
+        assert pvalue == pytest.approx(0.3689690, abs=1e-6)
+
+    @staticmethod
+    def test_fewer_than_two_informative_strata_is_nan():
+        stat, pvalue = breslow_day_test(np.array([[0, 0], [20, 30]]), np.array([[50, 50], [100, 100]]))
+        assert np.isnan(stat) and np.isnan(pvalue)

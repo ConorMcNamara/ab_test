@@ -15,10 +15,16 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 from tabulate import tabulate
 
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
-from ab_test._lift import scale_metric
+from ab_test._display import (
+    apply_dark_mode,
+    combine_lift_panels,
+    convert_to_tabulate_str,
+    resolve_plot_color,
+    tabulate_summary,
+)
+from ab_test._lift import scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
-from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
+from ab_test.bayesian_binomial.utils import _between_group_sd_samples, posterior_mean, sample_beta
 
 __all__ = [
     "BayesianStratifiedContingencyTable",
@@ -211,7 +217,8 @@ class BayesianStratifiedContingencyTable:
     ) -> np.ndarray[Any, Any]:
         """Inverse-variance weighted pooling of per-stratum lift samples.
 
-        Returns pooled samples on the display scale.
+        Returns pooled samples on the display scale, except for ``"cpa"``,
+        which is returned in incremental conversions (see :meth:`_summarize`).
         """
         stacked = np.vstack(stratum_lift_samples)
         variances = np.var(stacked, axis=1)
@@ -225,9 +232,43 @@ class BayesianStratifiedContingencyTable:
 
         if lift in ("incremental", "roas", "revenue", "cpa"):
             n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
-            pooled = scale_metric(pooled * n_max, lift, self.spend, self.msrp)
+            pooled = scale_metric(pooled * n_max, "incremental" if lift == "cpa" else lift, self.spend, self.msrp)
 
         return pooled
+
+    def _stratum_display_samples(self, samples: np.ndarray[Any, Any], n_max: float, lift: str) -> np.ndarray[Any, Any]:
+        """Per-stratum samples on the display scale (incremental conversions for ``"cpa"``)."""
+        if lift == "relative":
+            return np.exp(samples) - 1  # type: ignore[no-any-return]
+        if lift in ("incremental", "roas", "revenue", "cpa"):
+            return scale_metric(samples * n_max, "incremental" if lift == "cpa" else lift, self.spend, self.msrp)
+        return samples
+
+    def _summarize(
+        self,
+        samples: np.ndarray[Any, Any],
+        lift: str,
+        confidence_level: float,
+        method: str,
+    ) -> tuple[float, float, float, float]:
+        """Point estimate, credible interval and P(T > C) on the display scale.
+
+        For ``"cpa"`` the samples are incremental conversions. CPA is
+        ``spend / incremental``, which has no posterior mean and is not
+        monotone through zero, so the summary is computed on the incremental
+        scale and then transformed: the point estimate is ``spend`` over the
+        mean increment, and the interval bounds are the transformed quantiles.
+        A mean increment of zero or less buys no conversions, so its CPA is
+        infinite, matching how the interval bounds treat non-positive increments.
+        """
+        lo, hi = self._credible_interval(samples, confidence_level, method)
+        prob_t_gt_c = float(np.mean(samples > 0))
+        mean = float(np.mean(samples))
+        if lift == "cpa":
+            cpa_lo, cpa_hi = scale_bounds(lo, hi, "cpa", self.spend)
+            cpa = float(scale_metric(mean, "cpa", self.spend)) if mean > 0 else np.inf
+            return cpa, cpa_lo, cpa_hi, prob_t_gt_c
+        return mean, lo, hi, prob_t_gt_c
 
     @staticmethod
     def _credible_interval(
@@ -255,7 +296,11 @@ class BayesianStratifiedContingencyTable:
 
         Computes a pooled treatment effect via inverse-variance weighted
         posterior samples, along with credible intervals, P(T > C),
-        expected loss, ROPE probabilities, and a heterogeneity diagnostic.
+        expected loss, ROPE probabilities, and a heterogeneity diagnostic:
+        the posterior of the between-stratum standard deviation of the true
+        effects (tau) from a normal random-effects model, which does not count
+        within-stratum noise as heterogeneity. For relative lift, tau is on
+        the log risk-ratio scale. It is not reported for ``"cpa"``.
 
         Parameters
         ----------
@@ -285,11 +330,17 @@ class BayesianStratifiedContingencyTable:
         stratum_samples = self._draw_stratum_samples(successes, trials, alphas, betas, lift, n_samples)
         pooled_samples = self._pool_samples(stratum_samples, trials, lift)
 
-        pooled_mean = float(np.mean(pooled_samples))
-        ci_lo, ci_hi = self._credible_interval(pooled_samples, confidence_level, cred_int_method)
-        prob_t_gt_c = float(np.mean(pooled_samples > 0))
-        expected_loss = float(np.mean(np.maximum(-pooled_samples, 0)))
-        prob_in_rope = float(np.mean((pooled_samples >= low_threshold) & (pooled_samples <= high_threshold)))
+        pooled_mean, ci_lo, ci_hi, prob_t_gt_c = self._summarize(
+            pooled_samples, lift, confidence_level, cred_int_method
+        )
+        if lift == "cpa":
+            # Loss and ROPE are not meaningful on the CPA scale; report the loss as a rate difference.
+            n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
+            expected_loss = float(np.mean(np.maximum(-pooled_samples / n_max, 0)))
+            prob_in_rope = float("nan")
+        else:
+            expected_loss = float(np.mean(np.maximum(-pooled_samples, 0)))
+            prob_in_rope = float(np.mean((pooled_samples >= low_threshold) & (pooled_samples <= high_threshold)))
 
         p_control = float(
             np.sum(
@@ -322,20 +373,19 @@ class BayesianStratifiedContingencyTable:
             "prob_rope": prob_in_rope,
         }
 
-        if lift == "relative":
-            display_stratum_samples = [np.exp(s) - 1 for s in stratum_samples]
-        elif lift in ("incremental", "roas", "revenue", "cpa"):
-            display_stratum_samples = [
-                scale_metric(s * max(trials[k, 0], trials[k, 1]), lift, self.spend, self.msrp)
-                for k, s in enumerate(stratum_samples)
-            ]
+        if lift == "cpa":
+            tau_mean = tau_ci_lo = tau_ci_hi = float("nan")
         else:
-            display_stratum_samples = stratum_samples
-
-        stacked_display = np.vstack(display_stratum_samples)
-        tau_samples = np.std(stacked_display, axis=0, ddof=0)
-        tau_mean = float(np.mean(tau_samples))
-        tau_ci_lo, tau_ci_hi = self._credible_interval(tau_samples, confidence_level, cred_int_method)
+            # Heterogeneity on the pooling scale (log risk ratio for relative lift), so stratum size does not
+            # masquerade as a different effect; linear lifts are then rescaled like the pooled estimate.
+            tau_samples = _between_group_sd_samples(
+                [float(np.mean(s)) for s in stratum_samples], [float(np.var(s)) for s in stratum_samples], n_samples
+            )
+            if lift in ("incremental", "roas", "revenue"):
+                n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
+                tau_samples = scale_metric(tau_samples * n_max, lift, self.spend, self.msrp)
+            tau_mean = float(np.mean(tau_samples))
+            tau_ci_lo, tau_ci_hi = self._credible_interval(tau_samples, confidence_level, cred_int_method)
         self.heterogeneity_results = {
             "tau_mean": tau_mean,
             "tau_ci_lower": tau_ci_lo,
@@ -379,14 +429,18 @@ class BayesianStratifiedContingencyTable:
             + [fmt(r["lift"]), fmt(r["ci_lower"]), fmt(r["ci_upper"])]
             + [str_prob]
             + [convert_to_tabulate_str(r["expected_loss"], "relative")]
-            + [convert_to_tabulate_str(r["prob_rope"], "relative")]
+            + ["n/a" if np.isnan(r["prob_rope"]) else convert_to_tabulate_str(r["prob_rope"], "relative")]
         )
         return_string = tabulate_summary(row_labels, values)
 
         het = self.heterogeneity_results
-        return_string += (
-            f"\nBetween-stratum tau: {fmt(het['tau_mean'])} ({fmt(het['tau_ci_lower'])}, {fmt(het['tau_ci_upper'])})"
-        )
+        if np.isnan(het["tau_mean"]):
+            return_string += "\nBetween-stratum tau: n/a"
+        else:
+            return_string += (
+                f"\nBetween-stratum tau: {fmt(het['tau_mean'])} "
+                f"({fmt(het['tau_ci_lower'])}, {fmt(het['tau_ci_upper'])})"
+            )
 
         ci_pct = int(confidence_level * 100)
         return_string += f"\n* next to the prob means it exceeds our confidence level at {ci_pct}% level"
@@ -432,19 +486,10 @@ class BayesianStratifiedContingencyTable:
         self.stratum_results = {}
         table_list = []
         for k, s_name in enumerate(strata_names):
-            samples = stratum_samples[k]
-
-            if lift == "relative":
-                display_samples = np.exp(samples) - 1
-            elif lift in ("incremental", "roas", "revenue", "cpa"):
-                n_max_k = max(trials[k, 0], trials[k, 1])
-                display_samples = scale_metric(samples * n_max_k, lift, self.spend, self.msrp)
-            else:
-                display_samples = samples
-
-            effect = float(np.mean(display_samples))
-            ci_lo, ci_hi = self._credible_interval(display_samples, confidence_level, cred_int_method)
-            prob_t_gt_c = float(np.mean(display_samples > 0))
+            display_samples = self._stratum_display_samples(stratum_samples[k], max(trials[k, 0], trials[k, 1]), lift)
+            effect, ci_lo, ci_hi, prob_t_gt_c = self._summarize(
+                display_samples, lift, confidence_level, cred_int_method
+            )
 
             p_c = posterior_mean(int(successes[k, 0]), int(trials[k, 0]), alphas[k, 0], betas[k, 0])
             p_t = posterior_mean(int(successes[k, 1]), int(trials[k, 1]), alphas[k, 1], betas[k, 1])
@@ -493,6 +538,8 @@ class BayesianStratifiedContingencyTable:
         lift : str, default='relative'
             ``"relative"``, ``"absolute"``, ``"incremental"``,
             ``"roas"``, ``"revenue"``, or ``"cpa"``.
+            ``"both"`` draws absolute and relative lift side by side, sharing
+            the y-axis, each with its own interval.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -508,6 +555,45 @@ class BayesianStratifiedContingencyTable:
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
         """
+        if isinstance(lift, str) and lift.casefold() == "both":
+            figures = [
+                self._plot_figure(
+                    lift=panel_lift,
+                    confidence_level=confidence_level,
+                    n_samples=n_samples,
+                    cred_int_method=cred_int_method,
+                    reverse_plot=reverse_plot,
+                    color=color,
+                )
+                for panel_lift in ("absolute", "relative")
+            ]
+            fig = combine_lift_panels(
+                figures,
+                f"{self.experiment_name} — {self.metric_name} (Risk Difference and Relative Lift)",
+                ["Risk Difference", "Relative Lift"],
+            )
+        else:
+            fig = self._plot_figure(
+                lift=lift,
+                confidence_level=confidence_level,
+                n_samples=n_samples,
+                cred_int_method=cred_int_method,
+                reverse_plot=reverse_plot,
+                color=color,
+            )
+        apply_dark_mode(fig, dark_mode)
+        fig.show()  # type: ignore[no-untyped-call]
+
+    def _plot_figure(
+        self,
+        lift: str = "relative",
+        confidence_level: float = 0.95,
+        n_samples: int = 100_000,
+        cred_int_method: Literal["credible", "hdi"] = "credible",
+        reverse_plot: bool = True,
+        color: str | dict[str, Any] | list[Any] | None = None,
+    ) -> go.Figure:
+        """Build the forest plot for a single lift (see :meth:`plot`)."""
         lift = self._validate_lift(lift)
         successes, trials, alphas, betas, strata_names = self._build_arrays()
 
@@ -518,21 +604,13 @@ class BayesianStratifiedContingencyTable:
         ci_lowers: list[float] = []
         ci_uppers: list[float] = []
         for k, samples in enumerate(stratum_samples):
-            if lift == "relative":
-                display_samples = np.exp(samples) - 1
-            elif lift in ("incremental", "roas", "revenue", "cpa"):
-                n_max_k = max(trials[k, 0], trials[k, 1])
-                display_samples = scale_metric(samples * n_max_k, lift, self.spend, self.msrp)
-            else:
-                display_samples = samples
-
-            effects.append(float(np.mean(display_samples)))
-            lo, hi = self._credible_interval(display_samples, confidence_level, cred_int_method)
+            display_samples = self._stratum_display_samples(samples, max(trials[k, 0], trials[k, 1]), lift)
+            effect, lo, hi, _ = self._summarize(display_samples, lift, confidence_level, cred_int_method)
+            effects.append(effect)
             ci_lowers.append(lo)
             ci_uppers.append(hi)
 
-        pooled_est = float(np.mean(pooled_samples))
-        pooled_lb, pooled_ub = self._credible_interval(pooled_samples, confidence_level, cred_int_method)
+        pooled_est, pooled_lb, pooled_ub, _ = self._summarize(pooled_samples, lift, confidence_level, cred_int_method)
 
         plot_color = resolve_plot_color(color)
         fig = go.Figure()  # type: ignore[attr-defined]
@@ -602,6 +680,7 @@ class BayesianStratifiedContingencyTable:
             "incremental": "Incremental Conversions",
             "roas": "Return on Ad Spend",
             "revenue": "Revenue",
+            "cpa": "Cost Per Acquisition",
         }
         tick_formats = {
             "absolute": ",.1%",
@@ -609,6 +688,7 @@ class BayesianStratifiedContingencyTable:
             "incremental": ",",
             "roas": "$,",
             "revenue": "$,",
+            "cpa": "$,",
         }
 
         fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
@@ -619,5 +699,4 @@ class BayesianStratifiedContingencyTable:
         )
         if reverse_plot:
             fig.update_layout(yaxis={"autorange": "reversed"})
-        apply_dark_mode(fig, dark_mode)
-        fig.show()  # type: ignore[no-untyped-call]
+        return fig

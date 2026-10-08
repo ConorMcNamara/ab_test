@@ -164,9 +164,9 @@ class TestConfidenceIntervalComparison:
         trials = [1000, 1000]
         successes = [100, 110]
         # Compare:     -0.016966857910156258 for score test
-        expected_low = -0.016900154961672072
+        expected_low = -0.016967582473422768
         # Compare:      0.037053527832031245 for score test
-        expected_high = 0.036900154961672066
+        expected_high = 0.037002351833042374
 
         actual_low, actual_high = confidence_interval(
             trials, successes, test=z_test, alpha=0.05, lift="absolute", method="wilson"
@@ -180,9 +180,9 @@ class TestConfidenceIntervalComparison:
         trials = [1000, 1000]
         successes = [100, 110]
         # Compare:     -0.016966857910156258 for score test
-        expected_low = -0.01698464868409597
+        expected_low = -0.0170522577095443
         # Compare:      0.037053527832031245 for score test
-        expected_high = 0.036984648684095955
+        expected_high = 0.03708613514469884
 
         actual_low, actual_high = confidence_interval(
             trials, successes, test=z_test, alpha=0.05, lift="absolute", method="agresti-coull"
@@ -196,9 +196,9 @@ class TestConfidenceIntervalComparison:
         trials = [1000, 1000]
         successes = [100, 110]
         # Compare:     -0.016966857910156258 for score test
-        expected_low = -0.016862989912939882
+        expected_low = -0.016898017645530162
         # Compare:      0.037053527832031245 for score test
-        expected_high = 0.036862989912939875
+        expected_high = 0.036924819184931
 
         actual_low, actual_high = confidence_interval(
             trials, successes, test=z_test, alpha=0.05, lift="absolute", method="jeffrey"
@@ -212,9 +212,9 @@ class TestConfidenceIntervalComparison:
         trials = [1000, 1000]
         successes = [100, 110]
         # Compare:     -0.016966857910156258 for score test
-        expected_low = -0.017567811878868644
+        expected_low = -0.017606558955746716
         # Compare:      0.037053527832031245 for score test
-        expected_high = 0.03756781187886864
+        expected_high = 0.03763015171390359
 
         actual_low, actual_high = confidence_interval(
             trials, successes, test=z_test, alpha=0.05, lift="absolute", method="clopper-pearson"
@@ -259,11 +259,11 @@ class TestConfidenceIntervalComparison:
     @pytest.mark.parametrize(
         "method, expected_low, expected_high",
         [
-            ("wilson", -0.1822119971659585, 0.38221199716595844),
+            ("wilson", -0.14815913519980006, 0.42035959179924487),
             ("wald", -0.18185345201355, 0.3818534520135499),
-            ("agresti-coull", -0.18310407967188583, 0.38310407967188576),
-            ("jeffrey", -0.18181832821913138, 0.3818183282191313),
-            ("clopper-pearson", -0.18922734741996364, 0.38922734741996357),
+            ("agresti-coull", -0.14884414134544421, 0.42156173001588004),
+            ("jeffrey", -0.1482785374296035, 0.4217993737684471),
+            ("clopper-pearson", -0.15399146489968996, 0.4315829781080258),
         ],
     )
     def test_conf_int_relative_individual_methods(method, expected_low, expected_high):
@@ -278,20 +278,44 @@ class TestConfidenceIntervalComparison:
         assert actual_high == pytest.approx(expected_high)
 
     @staticmethod
-    def test_relative_individual_ci_close_to_delta():
-        """Individual CI methods should approximate the delta method for relative lift."""
+    def test_relative_wilson_close_to_score_inversion():
+        """MOVER-Wilson for relative lift should track the inverted score test, not the symmetric delta method."""
         trials = [1000, 1000]
         successes = [100, 150]
 
-        delta_lo, delta_hi = confidence_interval(
-            trials, successes, test=z_test, alpha=0.05, lift="relative", method="delta"
-        )
-        wilson_lo, wilson_hi = confidence_interval(
-            trials, successes, test=z_test, alpha=0.05, lift="relative", method="wilson"
-        )
+        score_lo, score_hi = confidence_interval(trials, successes, test=score_test, alpha=0.05, lift="relative")
+        wilson_lo, wilson_hi = confidence_interval(trials, successes, alpha=0.05, lift="relative", method="wilson")
 
-        assert wilson_lo == pytest.approx(delta_lo, abs=0.02)
-        assert wilson_hi == pytest.approx(delta_hi, abs=0.02)
+        assert wilson_lo == pytest.approx(score_lo, abs=0.01)
+        assert wilson_hi == pytest.approx(score_hi, abs=0.01)
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "trials, successes, expected_low, expected_high",
+        [
+            ([30, 30], [2, 10], 0.06326760, 0.45191052),
+            ([500, 500], [0, 3], -0.00258958, 0.01748979),
+            ([50, 50], [50, 47], -0.16217140, 0.02149648),
+        ],
+    )
+    def test_absolute_wilson_matches_newcombe(trials, successes, expected_low, expected_high):
+        # Reference values: statsmodels confint_proportions_2indep(method="newcomb")
+        lb, ub = confidence_interval(trials, successes, lift="absolute", method="wilson")
+        assert lb == pytest.approx(expected_low, abs=1e-6)
+        assert ub == pytest.approx(expected_high, abs=1e-6)
+
+    @staticmethod
+    @pytest.mark.parametrize("method", ["wilson", "jeffrey", "agresti-coull", "clopper-pearson"])
+    @pytest.mark.parametrize("successes", [[5, 0], [0, 5], [0, 0], [100, 100]])
+    def test_relative_interval_respects_minus_one(method, successes):
+        lb, ub = confidence_interval([100, 100], successes, lift="relative", method=method)
+        assert -1.0 <= lb <= ub
+
+    @staticmethod
+    @pytest.mark.parametrize("successes", [[0, 5], [5, 0], [100, 95], [95, 100]])
+    def test_clopper_pearson_edges_are_finite(successes):
+        lb, ub = confidence_interval([100, 100], successes, lift="absolute", method="clopper-pearson")
+        assert np.isfinite(lb) and np.isfinite(ub)
 
 
 class TestConfidenceInterval:
@@ -350,6 +374,17 @@ class TestConfidenceInterval:
 
         assert actual_low == pytest.approx(expected_low)
         assert actual_high == pytest.approx(expected_high)
+
+    @staticmethod
+    def test_clopper_pearson_interval_at_boundaries():
+        assert clopper_pearson_interval(0, 20)[0] == 0.0
+        assert clopper_pearson_interval(20, 20)[1] == 1.0
+        assert clopper_pearson_interval(0, 20)[1] == pytest.approx(0.16843347, abs=1e-6)
+
+    @staticmethod
+    def test_agresti_coull_interval_clipped_to_unit_interval():
+        lb, ub = agresti_coull_interval(0, 20)
+        assert lb == 0.0 and ub <= 1.0
 
     @staticmethod
     def test_wald_interval():
@@ -464,6 +499,8 @@ class TestSearchNearLimits:
             (likelihood_ratio_test, [50, 50], [1, 1]),
             (likelihood_ratio_test, [100, 100], [1, 4]),
             (msprt_test, [200, 200], [2, 5]),
+            # The default mSPRT tau is at least the null effect, so a ratio near 0 is rejected here.
+            (msprt_test, [100, 100], [1, 4]),
         ],
     )
     def test_relative_lower_bound_found_near_minus_one(self, test, trials, successes):
@@ -471,7 +508,7 @@ class TestSearchNearLimits:
         assert lb > -1.0
         assert _crosses_alpha_at(test, trials, successes, lb, "relative", "lower")
 
-    @pytest.mark.parametrize("trials, successes", [([50, 50], [1, 1]), ([100, 100], [1, 4])])
+    @pytest.mark.parametrize("trials, successes", [([50, 50], [1, 1])])
     def test_msprt_keeps_fallback_when_floor_not_rejected(self, trials, successes):
         # mSPRT is conservative enough here that even a ratio of ~0 is not rejected.
         lb, _ = confidence_interval(trials, successes, test=msprt_test, lift="relative")
@@ -516,6 +553,42 @@ class TestSearchNearLimits:
     def test_genuinely_unbounded_lower_keeps_fallback(self, trials, successes, lift):
         lb, _ = confidence_interval(trials, successes, test=score_test, lift=lift)
         assert lb == -1.0
+
+
+class TestScaledLiftIntervals:
+    @staticmethod
+    @pytest.mark.parametrize("method", ["binary_search", "wilson", "wald", "delta"])
+    def test_incremental_is_absolute_interval_scaled(method):
+        # Used to give (19.97, 20.03): a count-scale estimate with a proportion-scale width.
+        lb, ub = confidence_interval([1000, 1000], [100, 120], lift="incremental", method=method)
+        abs_lb, abs_ub = confidence_interval([1000, 1000], [100, 120], lift="absolute", method=method)
+        assert lb == pytest.approx(1000 * abs_lb)
+        assert ub == pytest.approx(1000 * abs_ub)
+        assert lb < 20 < ub and ub - lb > 50
+
+    @staticmethod
+    def test_incremental_scales_by_larger_group():
+        lb, ub = confidence_interval([500, 2000], [50, 240], lift="incremental", method="wald")
+        abs_lb, abs_ub = confidence_interval([500, 2000], [50, 240], lift="absolute", method="wald")
+        assert (lb, ub) == pytest.approx((2000 * abs_lb, 2000 * abs_ub))
+
+    @staticmethod
+    def test_roas_and_revenue_use_spend_and_msrp():
+        abs_lb, abs_ub = confidence_interval([1000, 1000], [100, 120], lift="absolute", method="wald")
+        roas = confidence_interval([1000, 1000], [100, 120], lift="roas", method="wald", spend=500)
+        revenue = confidence_interval([1000, 1000], [100, 120], lift="revenue", method="wald", msrp=20)
+        assert roas == pytest.approx((1000 * abs_lb / 500, 1000 * abs_ub / 500))
+        assert revenue == pytest.approx((1000 * abs_lb * 20, 1000 * abs_ub * 20))
+
+    @staticmethod
+    def test_cpa_interval_unbounded_when_increment_may_be_zero():
+        lb, ub = confidence_interval([1000, 1000], [100, 120], lift="cpa", method="wald", spend=500)
+        assert lb > 0 and ub == np.inf
+
+    @staticmethod
+    def test_roas_requires_spend():
+        with pytest.raises(ValueError, match="spend"):
+            confidence_interval([1000, 1000], [100, 120], lift="roas", method="wald")
 
 
 if __name__ == "__main__":

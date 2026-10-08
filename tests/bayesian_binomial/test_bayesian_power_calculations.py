@@ -527,3 +527,28 @@ class TestScaledLiftMinSampleSizeRejects:
 
 if __name__ == "__main__":
     pytest.main()
+
+
+class TestMinimumDetectableLiftRateBound:
+    @staticmethod
+    @pytest.mark.parametrize("group_size, baseline", [(5, 0.6), (3, 0.3)])
+    def test_unreachable_power_raises_clear_error(group_size, baseline):
+        # Used to raise numpy's "p < 0, p > 1 or p is NaN" once the lift pushed the rate past 1.
+        np.random.seed(0)
+        with pytest.raises(ValueError, match="keeps the treatment rate below 1"):
+            bayes_minimum_detectable_lift(
+                group_size, [1, 1], [1, 1], baseline, lift="relative", n_samples=300, mc_samples=100
+            )
+
+    @staticmethod
+    def test_reachable_lift_near_rate_limit():
+        # Used to crash: doubling from 0.32 to 0.64 overshot a rate of 1 before power was reached.
+        np.random.seed(0)
+        mdl = bayes_minimum_detectable_lift(10, [1, 1], [1, 1], 0.5, lift="absolute", n_samples=500, mc_samples=200)
+        assert 0 < mdl < 0.5
+
+    @staticmethod
+    def test_loss_search_is_bounded_too():
+        np.random.seed(0)
+        with pytest.raises(ValueError, match="keeps the treatment rate below 1"):
+            bayes_minimum_detectable_lift_loss(3, [1, 1], [1, 1], 0.3, lift="relative", n_samples=300, mc_samples=100)
