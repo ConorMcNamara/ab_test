@@ -1,5 +1,7 @@
 """Testing our confidence intervals"""
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -597,6 +599,22 @@ class TestZeroControlRateRelative:
     def test_delta_methods_return_unbounded_interval(method):
         # Used to raise ZeroDivisionError.
         assert confidence_interval([100, 100], [0, 5], lift="relative", method=method) == (-1.0, np.inf)
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "trials, successes",
+        [
+            (np.array([100, 100]), np.array([0, 5])),
+            ((np.int64(100), np.int64(100)), (np.int64(0), np.int64(5))),
+        ],
+    )
+    def test_numpy_inputs_match_lists(trials, successes):
+        # numpy returned inf instead of raising ZeroDivisionError, so the search ran from inf and hung.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            actual = confidence_interval(trials, successes, lift="relative")
+        assert actual == confidence_interval([100, 100], [0, 5], lift="relative")
+        assert actual[1] == np.inf
 
     @staticmethod
     def test_mover_methods_stay_informative():

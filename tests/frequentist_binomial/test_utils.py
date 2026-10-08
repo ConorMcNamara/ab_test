@@ -54,6 +54,12 @@ class TestMisc:
             observed_lift(trials, successes)
 
     @staticmethod
+    def test_observed_lift_undefined_numpy():
+        # numpy division returns inf with a warning rather than raising.
+        with pytest.raises(ZeroDivisionError, match="no control successes"):
+            observed_lift(np.array([1000, 1000]), np.array([0, 1]))
+
+    @staticmethod
     @pytest.mark.parametrize(
         "group_sizes,baseline,null_lift,alt_lift,lift",
         [
