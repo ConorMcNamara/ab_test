@@ -45,7 +45,8 @@ def tost_test(
         factor of the control rate.  Default is ``"absolute"``.
     method : {"score", "likelihood", "z"}, optional
         Which underlying test to use for each one-sided test.  Only tests
-        that support a non-zero ``null_lift`` are allowed.
+        that support a non-zero ``null_lift`` are allowed, and ``"z"``
+        supports only ``lift="absolute"``.
         Default is ``"score"`` (Rao score / Farrington-Manning).
 
     Returns
@@ -63,8 +64,9 @@ def tost_test(
     Raises
     ------
     ValueError
-        If ``delta <= 0``, ``method`` is unsupported, or any input validation
-        from the underlying test fails.
+        If ``delta <= 0``, ``method`` is unsupported, ``method="z"`` is used
+        with ``lift="relative"``, or any input validation from the underlying
+        test fails.
 
     Notes
     -----
@@ -87,6 +89,10 @@ def tost_test(
     if method_lower not in _SUPPORTED_METHODS:
         raise ValueError(
             f"Method '{method}' does not support non-zero null_lift. Supported methods: {sorted(_SUPPORTED_METHODS)}"
+        )
+    if method_lower == "z" and lift.casefold() == "relative":
+        raise ValueError(
+            "method='z' supports only lift='absolute' for TOST. Use method='score' or 'likelihood' for relative lift."
         )
 
     d_hat = observed_lift(trials, successes, lift=lift)

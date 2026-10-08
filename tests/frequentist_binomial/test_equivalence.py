@@ -116,3 +116,9 @@ class TestTostValidation:
     def test_zero_delta_raises() -> None:
         with pytest.raises(ValueError, match="positive"):
             tost_test([1000, 1000], [100, 102], delta=0.0)
+
+
+def test_z_method_with_relative_lift_raises_clear_error():
+    # The docstring listed "z" without noting it only supports absolute lift; it failed deep inside z_test.
+    with pytest.raises(ValueError, match="supports only lift='absolute'"):
+        tost_test([1000, 1000], [100, 102], delta=0.1, lift="relative", method="z")
