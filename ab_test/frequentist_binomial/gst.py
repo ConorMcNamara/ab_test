@@ -147,6 +147,18 @@ def power_spending(t: float, alpha: float = 0.05, *, rho: float = 1.0) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _transition(
+    grid: np.ndarray[Any, Any],
+    t_prev: float,
+    t_curr: float,
+    drift: float,
+) -> tuple[np.ndarray[Any, Any], float]:
+    """Conditional mean (per grid point) and SD of the next z-statistic."""
+    sigma = math.sqrt((t_curr - t_prev) / t_curr)
+    means = grid * math.sqrt(t_prev / t_curr) + drift * (t_curr - t_prev) / math.sqrt(t_curr)
+    return means, sigma
+
+
 def _propagate_density(
     density: np.ndarray[Any, Any],
     grid: np.ndarray[Any, Any],
@@ -160,54 +172,45 @@ def _propagate_density(
     Uses the transition kernel for the joint distribution of sequential
     z-statistics under drift ``drift``.
     """
-    sigma = math.sqrt((t_curr - t_prev) / t_curr)
-    scale = math.sqrt(t_prev / t_curr)
-    mu_shift = drift * (t_curr - t_prev) / math.sqrt(t_curr)
-    means = grid * scale + mu_shift
+    means, sigma = _transition(grid, t_prev, t_curr, drift)
     diff = grid[:, np.newaxis] - means[np.newaxis, :]
     kernel = np.exp(-0.5 * (diff / sigma) ** 2) / (sigma * _SQRT_2PI)
     return kernel @ (density * dz)
 
 
-def _inside_mass(
-    density: np.ndarray[Any, Any],
-    grid: np.ndarray[Any, Any],
-    boundary: float,
-    sided: str,
-) -> float:
-    """Mass of density inside the continuation region."""
-    if sided == "two":
-        idx = np.abs(grid) < boundary
-    else:
-        idx = grid < boundary
-    return float(np.trapezoid(density[idx], grid[idx]))
-
-
-def _restrict_density(
-    density: np.ndarray[Any, Any],
-    grid: np.ndarray[Any, Any],
+def _exit_mass(
+    means: np.ndarray[Any, Any] | float,
+    sd: float,
     boundary: float,
     sided: str,
 ) -> np.ndarray[Any, Any]:
-    """Zero out density outside the continuation region."""
+    """Probability that ``N(means, sd**2)`` falls outside the continuation region."""
+    upper = ss.norm.sf((boundary - np.asarray(means)) / sd)
+    if sided == "two":
+        return upper + ss.norm.cdf((-boundary - np.asarray(means)) / sd)
+    return upper
+
+
+def _continuation_density(
+    density: np.ndarray[Any, Any],
+    grid: np.ndarray[Any, Any],
+    dz: float,
+    boundary: float,
+    sided: str,
+    mass: float,
+) -> np.ndarray[Any, Any]:
+    """Zero out density outside the continuation region and rescale it to ``mass``.
+
+    The rescaling absorbs the grid's discretisation error at the boundary, so
+    the exit and continuation probabilities always sum to one.
+    """
     result = density.copy()
     if sided == "two":
         result[np.abs(grid) >= boundary] = 0.0
     else:
         result[grid >= boundary] = 0.0
-    return result
-
-
-def _boundary_objective(
-    c: float,
-    new_density: np.ndarray[Any, Any],
-    grid: np.ndarray[Any, Any],
-    total_mass: float,
-    target: float,
-    sided: str,
-) -> float:
-    """Objective for root-finding: exit probability minus target spending."""
-    return total_mass - _inside_mass(new_density, grid, c, sided) - target
+    grid_mass = float(np.sum(result)) * dz
+    return result * (mass / grid_mass) if grid_mass > 0 else result
 
 
 def _compute_boundaries(
@@ -230,21 +233,19 @@ def _compute_boundaries(
     else:
         boundaries[0] = float(ss.norm.isf(delta_spend[0]))
 
-    density = ss.norm.pdf(grid)
-    density = _restrict_density(density, grid, boundaries[0], sided)
+    density = _continuation_density(ss.norm.pdf(grid), grid, dz, boundaries[0], sided, 1.0 - cum_spend[0])
 
     for k in range(1, n_analyses):
+        means, sigma = _transition(grid, info_fractions[k - 1], info_fractions[k], 0.0)
+        weights = density * dz
+
+        def spent(c: float, means: np.ndarray[Any, Any] = means, sigma: float = sigma) -> float:
+            return float(np.sum(weights * _exit_mass(means, sigma, c, sided))) - delta_spend[k]
+
+        boundaries[k] = brentq(spent, 0.1, _Z_MAX - 0.1)
+
         new_density = _propagate_density(density, grid, dz, info_fractions[k - 1], info_fractions[k])
-        total_mass = float(np.trapezoid(new_density, grid))
-
-        boundaries[k] = brentq(
-            _boundary_objective,
-            0.1,
-            _Z_MAX - 0.1,
-            args=(new_density, grid, total_mass, delta_spend[k], sided),
-        )
-
-        density = _restrict_density(new_density, grid, boundaries[k], sided)
+        density = _continuation_density(new_density, grid, dz, boundaries[k], sided, 1.0 - cum_spend[k])
 
     return boundaries
 
@@ -259,6 +260,11 @@ def _compute_exit_probabilities(
 
     The sum of exit probabilities is the overall rejection probability (power
     when drift > 0, type-I error when drift = 0).
+
+    Exit mass is integrated analytically from the continuation density at the
+    previous look, so only the continuation region (which lies inside the
+    boundaries) has to fit on the grid. Integrating the exit tails on the grid
+    loses mass once the drift pushes the density past ``_Z_MAX``.
     """
     grid = np.linspace(-_Z_MAX, _Z_MAX, _N_GRID)
     dz = grid[1] - grid[0]
@@ -266,18 +272,17 @@ def _compute_exit_probabilities(
     n_analyses = len(boundaries)
     exit_probs = np.zeros(n_analyses)
 
-    density = ss.norm.pdf(grid, loc=drift * math.sqrt(info_fractions[0]))
-    total_mass = float(np.trapezoid(density, grid))
-    inside = _inside_mass(density, grid, boundaries[0], sided)
-    exit_probs[0] = total_mass - inside
-    density = _restrict_density(density, grid, boundaries[0], sided)
+    mean_first = drift * math.sqrt(info_fractions[0])
+    exit_probs[0] = float(_exit_mass(mean_first, 1.0, boundaries[0], sided))
+    remaining = 1.0 - exit_probs[0]
+    density = _continuation_density(ss.norm.pdf(grid, loc=mean_first), grid, dz, boundaries[0], sided, remaining)
 
     for k in range(1, n_analyses):
+        means, sigma = _transition(grid, info_fractions[k - 1], info_fractions[k], drift)
+        exit_probs[k] = float(np.sum(density * dz * _exit_mass(means, sigma, boundaries[k], sided)))
+        remaining -= exit_probs[k]
         new_density = _propagate_density(density, grid, dz, info_fractions[k - 1], info_fractions[k], drift)
-        total_mass = float(np.trapezoid(new_density, grid))
-        inside = _inside_mass(new_density, grid, boundaries[k], sided)
-        exit_probs[k] = total_mass - inside
-        density = _restrict_density(new_density, grid, boundaries[k], sided)
+        density = _continuation_density(new_density, grid, dz, boundaries[k], sided, remaining)
 
     return exit_probs
 
