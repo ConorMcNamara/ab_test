@@ -1,6 +1,5 @@
 """Our wrapper for analyzing experiment results."""
 
-import math
 from typing import Any, ClassVar, Literal, cast
 
 import numpy as np
@@ -9,8 +8,14 @@ from scipy.stats import beta
 from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
-from ab_test._lift import scale_bounds, scale_metric
+from ab_test._display import (
+    apply_dark_mode,
+    convert_to_tabulate_str,
+    format_percent,
+    resolve_plot_color,
+    tabulate_summary,
+)
+from ab_test._lift import from_absolute, scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
 from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
@@ -113,8 +118,8 @@ class BayesianContingencyTable(BaseContingencyTable):
         confidence_level: float = 0.95,
         is_sample: bool = False,
         n_samples: int = 100_000,
-        low_threshold: float = -0.1,
-        high_threshold: float = 0.1,
+        low_threshold: float | None = None,
+        high_threshold: float | None = None,
     ) -> str:
         """Analyze the experiment and return a formatted summary table.
 
@@ -138,12 +143,16 @@ class BayesianContingencyTable(BaseContingencyTable):
         n_samples : int, optional
             Number of posterior samples to draw, by default 100_000.
         low_threshold : float, optional
-            Lower bound of the Region of Practical Equivalence (ROPE),
-            by default -0.1. The ROPE is not computed for ``lift="cpa"``
+            Lower bound of the Region of Practical Equivalence (ROPE), in the
+            units of ``lift`` (a fraction for relative, a rate difference for
+            absolute, conversions for incremental, conversions per dollar for
+            roas, currency for revenue). By default the ROPE is +/-10% of the
+            control's posterior rate expressed in those units, so for relative
+            lift it is +/-0.1. The ROPE is not computed for ``lift="cpa"``
             (shown as n/a), since CPA is not monotone in the lift.
         high_threshold : float, optional
-            Upper bound of the Region of Practical Equivalence (ROPE),
-            by default 0.1.
+            Upper bound of the ROPE, in the units of ``lift``. Defaults as
+            described for ``low_threshold``.
 
         Returns
         -------
@@ -172,6 +181,10 @@ class BayesianContingencyTable(BaseContingencyTable):
             "high_threshold": high_threshold,
         }
         lift = lift.casefold()
+        if low_threshold is None or high_threshold is None:
+            default_rope = self._default_rope_half_width(lift)
+            low_threshold = -default_rope if low_threshold is None else low_threshold
+            high_threshold = default_rope if high_threshold is None else high_threshold
         if lift in ["relative", "absolute"]:
             results = calculate_metrics(
                 self.successes, self.trials, self.alphas, self.betas, n_samples, lift, low_threshold, high_threshold
@@ -217,16 +230,9 @@ class BayesianContingencyTable(BaseContingencyTable):
         pb = posterior_mean(self.successes[1], self.trials[1], self.alphas[1], self.betas[1])
         success_rate: list[int | float]
         if lift in ["incremental", "roas", "revenue", "cpa"]:
-            if self.trials[0] > self.trials[1]:
-                pb = math.ceil(pb * self.trials[0])
-                pa = math.ceil(pa * self.trials[0])
-                lb = math.ceil(lb * self.trials[0])
-                ub = math.ceil(ub * self.trials[0])
-            else:
-                pa = math.ceil(pa * self.trials[1])
-                pb = math.ceil(pb * self.trials[1])
-                lb = math.ceil(lb * self.trials[1])
-                ub = math.ceil(ub * self.trials[1])
+            # Scale unrounded values; rounding each bound separately biased the interval.
+            n_scale = max(self.trials)
+            pa, pb, lb, ub = pa * n_scale, pb * n_scale, lb * n_scale, ub * n_scale
             test_lift = scale_metric(pb - pa, lift, self.spend, self.msrp)
             pa = scale_metric(pa, lift, self.spend, self.msrp)
             pb = scale_metric(pb, lift, self.spend, self.msrp)
@@ -284,11 +290,18 @@ class BayesianContingencyTable(BaseContingencyTable):
         )
         return_string = tabulate_summary(row_labels, values)
         return_string += (
-            f"\n* next to the prob means it exceeds our confidence level at {round(confidence_level * 100)}% level"
+            f"\n* next to the prob means it exceeds our confidence level at {format_percent(confidence_level)}% level"
         )
-        return_string += f"\n** {round(confidence_level * 100)}% Credible Interval"
+        return_string += f"\n** {format_percent(confidence_level)}% Credible Interval"
         return_string += "\n*** Region of Practical Equivalence"
         return return_string
+
+    def _default_rope_half_width(self, lift: str) -> float:
+        """Half-width of the default ROPE: 10% of the control's posterior rate, in ``lift`` units."""
+        if lift in ("relative", "cpa"):
+            return 0.1
+        control_rate = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
+        return float(from_absolute(0.1 * control_rate, lift, max(self.trials), self.spend, self.msrp))
 
     def analyze_individually(
         self,
@@ -346,7 +359,7 @@ class BayesianContingencyTable(BaseContingencyTable):
             "Cred. Int. Upper**",
         ]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
-        return_string += f"\n** {round(confidence_level * 100)}% Credible Interval"
+        return_string += f"\n** {format_percent(confidence_level)}% Credible Interval"
         return return_string
 
     def plot_pdf(

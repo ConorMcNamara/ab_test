@@ -22,11 +22,16 @@ from typing import Any, Literal, Self
 
 import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
-import scipy.stats as ss
 from scipy.special import betaln, expit
 from tabulate import tabulate
 
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
+from ab_test._display import (
+    apply_dark_mode,
+    convert_to_tabulate_str,
+    format_percent,
+    resolve_plot_color,
+    tabulate_summary,
+)
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.power_calculations import _max_feasible_lift, _search_min_lift
 
@@ -250,6 +255,7 @@ class BayesianClusterRandomizedTrial:
         self._clusters: dict[str, dict[str, dict[str, int]]] = {}
         self._groups: list[str] = []
         self.pooled_results: dict[str, Any] | None = None
+        self._analyze_kwargs: dict[str, Any] = {}
         self.cluster_results: dict[str, dict[str, Any]] | None = None
         self.model_params: dict[str, Any] | None = None
 
@@ -298,6 +304,10 @@ class BayesianClusterRandomizedTrial:
             "successes": successes,
             "trials": trials,
         }
+        # New data invalidates any cached fit and results.
+        self.pooled_results = None
+        self.cluster_results = None
+        self.model_params = None
         return self
 
     def _build_arm_arrays(self) -> dict[str, tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]]:
@@ -316,8 +326,6 @@ class BayesianClusterRandomizedTrial:
     def _fit_model(self) -> dict[str, Any]:
         arms = self._build_arm_arrays()
         params: dict[str, Any] = {}
-        all_s: list[np.ndarray[Any, Any]] = []
-        all_n: list[np.ndarray[Any, Any]] = []
 
         for g in self._groups:
             s, n = arms[g]
@@ -331,13 +339,11 @@ class BayesianClusterRandomizedTrial:
                 "logit_mu_grid": logit_mu,
                 "mu_weights": mu_weights,
             }
-            all_s.append(s)
-            all_n.append(n)
 
-        pooled_s = np.concatenate(all_s)
-        pooled_n = np.concatenate(all_n)
-        pooled_a, pooled_b = estimate_beta_binomial_params(pooled_s, pooled_n)
-        params["pooled_icc"] = beta_binomial_icc(pooled_a, pooled_b)
+        # Each arm's ICC is measured around its own rate, so averaging them (weighted by cluster
+        # count) does not count the treatment effect as clustering, unlike fitting pooled clusters.
+        n_clusters = {g: len(arms[g][0]) for g in self._groups}
+        params["pooled_icc"] = sum(n_clusters[g] * params[g]["icc"] for g in self._groups) / sum(n_clusters.values())
 
         self.model_params = params
         return params
@@ -352,7 +358,12 @@ class BayesianClusterRandomizedTrial:
 
     @property
     def pooled_icc(self) -> float:
-        """Pooled intra-cluster correlation across both arms."""
+        """Intra-cluster correlation pooled across arms.
+
+        The cluster-count-weighted average of the arms' posterior mean ICCs.
+        Each is measured around its own arm's rate, so a treatment effect is
+        not counted as between-cluster variation.
+        """
         if self.model_params is None:
             self._fit_model()
         assert self.model_params is not None
@@ -410,6 +421,14 @@ class BayesianClusterRandomizedTrial:
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
+        self._analyze_kwargs = {
+            "lift": lift,
+            "confidence_level": confidence_level,
+            "n_samples": n_samples,
+            "cred_int_method": cred_int_method,
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+        }
 
         params = self._fit_model()
         ctrl, treat = self._groups[0], self._groups[1]
@@ -496,7 +515,7 @@ class BayesianClusterRandomizedTrial:
             f" | Clusters: {n_ctrl} {ctrl}, {n_treat} {treat}"
         )
 
-        ci_pct = int(confidence_level * 100)
+        ci_pct = format_percent(confidence_level)
         return_string += f"\n* next to the prob means it exceeds our confidence level at {ci_pct}% level"
         return_string += f"\n** {ci_pct}% Credible Interval"
         return_string += "\n*** Region of Practical Equivalence"
@@ -564,36 +583,39 @@ class BayesianClusterRandomizedTrial:
 
         table_headers = ["Group", "Cluster", "Post. Mean", "CI Lower **", "CI Upper **", "N"]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
-        return_string += f"\n** {int(confidence_level * 100)}% Credible Interval"
+        return_string += f"\n** {format_percent(confidence_level)}% Credible Interval"
         return return_string
 
     def summary(
         self,
-        lift: str = "relative",
-        confidence_level: float = 0.95,
-        n_samples: int = 100_000,
-        cred_int_method: Literal["credible", "hdi"] = "credible",
-        low_threshold: float = -0.1,
-        high_threshold: float = 0.1,
+        lift: str | None = None,
+        confidence_level: float | None = None,
+        n_samples: int | None = None,
+        cred_int_method: Literal["credible", "hdi"] | None = None,
+        low_threshold: float | None = None,
+        high_threshold: float | None = None,
     ) -> dict[str, Any]:
         """Return a dict of analysis results.
 
-        Calls :meth:`analyze` if results have not been computed yet, then
-        returns a dict combining the pooled results and model parameters.
+        Returns the results of the last :meth:`analyze` call combined with the
+        model parameters. If any argument is given and differs from that call
+        (or nothing has been analyzed yet), :meth:`analyze` is re-run with the
+        new values and the previous call's other settings. Omitted arguments
+        default to the last analysis's values, or to :meth:`analyze`'s defaults.
 
         Parameters
         ----------
-        lift : str, default='relative'
+        lift : str, optional
             Lift type.
-        confidence_level : float, default=0.95
+        confidence_level : float, optional
             Credible interval probability mass.
-        n_samples : int, default=100_000
+        n_samples : int, optional
             Number of posterior samples.
-        cred_int_method : {"credible", "hdi"}, default="credible"
+        cred_int_method : {"credible", "hdi"}, optional
             Credible interval method.
-        low_threshold : float, default=-0.1
+        low_threshold : float, optional
             Lower ROPE bound.
-        high_threshold : float, default=0.1
+        high_threshold : float, optional
             Upper ROPE bound.
 
         Returns
@@ -601,15 +623,18 @@ class BayesianClusterRandomizedTrial:
         dict
             Combined pooled results and model parameters.
         """
-        if self.pooled_results is None:
-            self.analyze(
-                lift=lift,
-                confidence_level=confidence_level,
-                n_samples=n_samples,
-                cred_int_method=cred_int_method,
-                low_threshold=low_threshold,
-                high_threshold=high_threshold,
-            )
+        given: dict[str, Any] = {
+            "lift": lift.casefold() if lift is not None else None,
+            "confidence_level": confidence_level,
+            "n_samples": n_samples,
+            "cred_int_method": cred_int_method,
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+        }
+        requested = {k: v for k, v in given.items() if v is not None}
+        if self.pooled_results is None or any(self._analyze_kwargs.get(k) != v for k, v in requested.items()):
+            kwargs: dict[str, Any] = {**self._analyze_kwargs, **requested}
+            self.analyze(**kwargs)
         assert self.pooled_results is not None
         assert self.model_params is not None
         return {**self.pooled_results, "model_params": self.model_params}
@@ -634,7 +659,8 @@ class BayesianClusterRandomizedTrial:
         Parameters
         ----------
         lift : str, default='relative'
-            Lift type for the pooled credible interval.
+            Has no effect: the plot shows arm-level conversion rates, not a
+            lift. Kept for backward compatibility.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -650,13 +676,8 @@ class BayesianClusterRandomizedTrial:
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
         """
-        if self.pooled_results is None or self.model_params is None:
-            self.analyze(
-                lift=lift,
-                confidence_level=confidence_level,
-                n_samples=n_samples,
-                cred_int_method=cred_int_method,
-            )
+        if self.model_params is None:
+            self._fit_model()
         assert self.model_params is not None
 
         plot_color = resolve_plot_color(color)
@@ -717,7 +738,6 @@ class BayesianClusterRandomizedTrial:
                 )
             )
 
-        fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
         fig.update_layout(
             title=f"{self.experiment_name} — {self.metric_name} (Cluster Proportions)",
             xaxis_tickformat=",.1%",
@@ -736,7 +756,11 @@ class BayesianClusterRandomizedTrial:
         *,
         dark_mode: bool = False,
     ) -> go.Figure:
-        """Plot overlapping Beta posterior PDFs for both arms.
+        """Plot the posterior density of each arm's conversion rate.
+
+        The curves are the hierarchical model's posterior for each arm-level
+        rate (the quantity behind P(T > C)), not the fitted spread of
+        cluster-level rates, which is much wider.
 
         Parameters
         ----------
@@ -762,12 +786,12 @@ class BayesianClusterRandomizedTrial:
         plot_color = resolve_plot_color(color)
         fig = go.Figure()  # type: ignore[attr-defined]
 
-        x = np.linspace(0.001, 0.999, 1000)
-
         for gi, g in enumerate(self._groups):
             params = self.model_params[g]
-            a, b = params["a"], params["b"]
-            y = ss.beta.pdf(x, a, b)
+            logit_mu, weights = params["logit_mu_grid"], params["mu_weights"]
+            x = expit(logit_mu)
+            # Grid weights are masses on equal-width logit cells; convert to a density in the rate.
+            y = weights / (logit_mu[1] - logit_mu[0]) / (x * (1 - x))
 
             c = None
             if plot_color is not None:
@@ -786,11 +810,11 @@ class BayesianClusterRandomizedTrial:
                     y=y.tolist(),
                     mode="lines",
                     line=line_kw,
-                    name=f"{g} (a={a:.2f}, b={b:.2f})",
+                    name=f"{g} (posterior mean={params['mean']:.2%})",
                 )
             )
 
-            samples = np.random.beta(a, b, n_samples)
+            samples = _sample_mu(logit_mu, weights, n_samples)
             hdi_lo, hdi_hi = calculate_hdi_from_samples(samples, confidence_level)
             fig.add_shape(
                 type="line",

@@ -21,7 +21,13 @@ import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 from tabulate import tabulate
 
-from ab_test._display import apply_dark_mode, combine_lift_panels, convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import (
+    apply_dark_mode,
+    combine_lift_panels,
+    convert_to_tabulate_str,
+    format_percent,
+    resolve_plot_color,
+)
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.utils import _between_group_sd_samples, posterior_mean, sample_beta
@@ -320,7 +326,7 @@ class BayesianDiffInDiff:
             )
         pw_table = tabulate(pw_rows, headers=pw_headers, tablefmt="grid")
 
-        ci_pct = int(confidence_level * 100)
+        ci_pct = format_percent(confidence_level)
         footer = f"\n** {ci_pct}% Credible Interval"
 
         return f"{seg_table}{het_line}\n\n{pw_table}{footer}"

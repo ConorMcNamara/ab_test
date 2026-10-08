@@ -273,7 +273,7 @@ class TestBayesianContingencyTable:
                     "ci_lower": -0.016966857910156258,
                     "ci_upper": 0.037053527832031245,
                     "expected_loss": 0.0018725,
-                    "prob_rope": 1,
+                    "prob_rope": 0.43,  # default ROPE is +/-10% of the control rate
                 },
             ),
             (
@@ -308,10 +308,10 @@ class TestBayesianContingencyTable:
                     "Holdout": 100,
                     "Test": 110,
                     "prob_b_greater_a": 0.76625,
-                    "ci_lower": -16,
-                    "ci_upper": 38,
+                    "ci_lower": -16.85,  # unrounded (was ceil-rounded to -16)
+                    "ci_upper": 36.85,  # unrounded (was ceil-rounded to 38)
                     "expected_loss": 0.0018725,
-                    "prob_rope": 0.0044,
+                    "prob_rope": 0.43,  # default ROPE is +/-10% of the control rate
                 },
             ),
             (
@@ -346,10 +346,10 @@ class TestBayesianContingencyTable:
                     "Holdout": 200,
                     "Test": 220,
                     "prob_b_greater_a": 0.76625,
-                    "ci_lower": -32,
-                    "ci_upper": 76,
+                    "ci_lower": -33.71,
+                    "ci_upper": 73.71,
                     "expected_loss": 0.0018725,
-                    "prob_rope": 0.0021,
+                    "prob_rope": 0.43,
                 },
             ),
         ],
@@ -484,3 +484,48 @@ class TestBayesianContingencyTablePySpark:
 
 if __name__ == "__main__":
     pytest.main()
+
+
+def _rope_table(**kwargs):
+    table = BayesianContingencyTable(name="ROPE", metric_name="conversions", **kwargs)
+    table.add("Holdout", 100, 1_000, 1, 1)
+    table.add("Test", 104, 1_000, 1, 1)
+    return table
+
+
+class TestScaledLiftRopeAndRounding:
+    @staticmethod
+    def test_default_rope_is_consistent_across_lift_units():
+        # Was 1.000 (absolute), 0.006 (incremental), 0.999 (roas) and 0.000 (revenue) for the same data.
+        probs = {}
+        for lift, kwargs in [
+            ("relative", {}),
+            ("absolute", {}),
+            ("incremental", {}),
+            ("roas", {"spend": 500}),
+            ("revenue", {"msrp": 20}),
+        ]:
+            np.random.seed(0)
+            table = _rope_table(**kwargs)
+            table.analyze(lift=lift)
+            probs[lift] = table.incremental_results["prob_rope"]
+        assert max(probs.values()) - min(probs.values()) < 0.03
+
+    @staticmethod
+    def test_explicit_thresholds_are_in_lift_units():
+        np.random.seed(0)
+        table = _rope_table()
+        table.analyze(lift="incremental", low_threshold=-200, high_threshold=200)
+        assert table.incremental_results["prob_rope"] > 0.999
+
+    @staticmethod
+    def test_incremental_bounds_are_not_rounded():
+        absolute, incremental = _rope_table(), _rope_table()
+        absolute.analyze(lift="absolute")
+        incremental.analyze(lift="incremental")
+        assert incremental.incremental_results["ci_lower"] == pytest.approx(
+            1_000 * absolute.incremental_results["ci_lower"]
+        )
+        assert incremental.incremental_results["ci_upper"] == pytest.approx(
+            1_000 * absolute.incremental_results["ci_upper"]
+        )

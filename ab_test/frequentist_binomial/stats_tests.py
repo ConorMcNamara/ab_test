@@ -85,6 +85,19 @@ def _power_divergence_test(
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     _require_zero_null(null_lift, f"The {lambda_} test")
     contingency_table = _contingency_table(trials, successes)
+    if np.any(np.asarray(contingency_table) == 0):
+        if lambda_ in ("neyman", "mod-log-likelihood"):
+            raise ValueError(
+                f"The {lambda_} statistic is undefined when a cell has zero observed count "
+                "(it divides by, or takes the log of, the observed count). "
+                "Use the score test or Fisher's exact test instead."
+            )
+        if lambda_ == "freeman-tukey":
+            # scipy evaluates 0 * inf here; the statistic's limit is 4 * sum((sqrt(O) - sqrt(E))**2).
+            observed = np.asarray(contingency_table, dtype=float)
+            expected = ss.contingency.expected_freq(observed)
+            statistic = float(4 * np.sum((np.sqrt(observed) - np.sqrt(expected)) ** 2))
+            return _test_result(statistic, ss.chi2.sf(statistic, df=1), crit)
     result = ss.chi2_contingency(contingency_table, correction=False, lambda_=lambda_)  # type: ignore[no-untyped-call, attr-defined, var-annotated]
     return _test_result(result.statistic, result.pvalue, crit)
 

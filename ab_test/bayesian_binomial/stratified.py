@@ -19,6 +19,7 @@ from ab_test._display import (
     apply_dark_mode,
     combine_lift_panels,
     convert_to_tabulate_str,
+    format_percent,
     resolve_plot_color,
     tabulate_summary,
 )
@@ -442,7 +443,7 @@ class BayesianStratifiedContingencyTable:
                 f"({fmt(het['tau_ci_lower'])}, {fmt(het['tau_ci_upper'])})"
             )
 
-        ci_pct = int(confidence_level * 100)
+        ci_pct = format_percent(confidence_level)
         return_string += f"\n* next to the prob means it exceeds our confidence level at {ci_pct}% level"
         return_string += f"\n** {ci_pct}% Credible Interval"
         return_string += "\n*** Region of Practical Equivalence"
@@ -513,7 +514,7 @@ class BayesianStratifiedContingencyTable:
 
         table_headers = ["Stratum"] + self._cell_names + ["Lift", "CI Lower **", "CI Upper **", "P(T > C)", "N"]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f")
-        return_string += f"\n** {int(confidence_level * 100)}% Credible Interval"
+        return_string += f"\n** {format_percent(confidence_level)}% Credible Interval"
         return return_string
 
     def plot(

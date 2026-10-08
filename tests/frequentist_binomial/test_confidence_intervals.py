@@ -591,5 +591,18 @@ class TestScaledLiftIntervals:
             confidence_interval([1000, 1000], [100, 120], lift="roas", method="wald")
 
 
+class TestZeroControlRateRelative:
+    @staticmethod
+    @pytest.mark.parametrize("method", ["wald", "delta"])
+    def test_delta_methods_return_unbounded_interval(method):
+        # Used to raise ZeroDivisionError.
+        assert confidence_interval([100, 100], [0, 5], lift="relative", method=method) == (-1.0, np.inf)
+
+    @staticmethod
+    def test_mover_methods_stay_informative():
+        lb, ub = confidence_interval([100, 100], [0, 5], lift="relative", method="wilson")
+        assert lb > 0 and ub == np.inf
+
+
 if __name__ == "__main__":
     pytest.main()

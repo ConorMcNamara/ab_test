@@ -331,3 +331,13 @@ class TestPlaceboTest:
             placebo_test(int(rng.binomial(n, 0.05)), n, int(rng.binomial(n, 0.05)), n)["failed"] for _ in range(reps)
         )
         assert 0.03 <= failures / reps <= 0.07
+
+
+class TestTimeTrendErrorBars:
+    @staticmethod
+    @pytest.mark.parametrize("alpha", [0.01, 0.05, 0.10])
+    def test_error_bars_follow_alpha(alpha):
+        # Used to be 1.96 * SE regardless of alpha.
+        result = time_trend_test([100, 110, 105, 98], [1000] * 4, [120, 118, 125, 110], [1000] * 4, alpha=alpha)
+        bars = np.asarray(result["figure"].data[0].error_y.array)
+        np.testing.assert_allclose(bars, ss.norm.isf(alpha / 2) * result["period_se"])

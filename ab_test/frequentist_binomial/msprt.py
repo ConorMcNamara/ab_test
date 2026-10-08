@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import plotly.graph_objects as go
 
-from ab_test._display import apply_dark_mode
+from ab_test._display import apply_dark_mode, format_percent
 from ab_test.frequentist_binomial.utils import mle_under_alternative, mle_under_null, observed_lift, validate_two_group
 
 if TYPE_CHECKING:
@@ -237,7 +237,7 @@ def plot_msprt_over_time(
             line={"width": 0},
             fill="tonexty",
             fillcolor="rgba(99, 110, 250, 0.2)",
-            name=f"{round((1 - alpha) * 100)}% CI",
+            name=f"{format_percent(1 - alpha)}% CI",
         )
     )
     fig.add_trace(

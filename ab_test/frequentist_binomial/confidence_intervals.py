@@ -250,6 +250,9 @@ def confidence_interval(
             if lift == "relative":
                 p_A = successes[0] / trials[0]
                 p_B = successes[1] / trials[1]
+                if p_A == 0:
+                    # The delta method has no standard error for a ratio with a zero denominator.
+                    return -1.0, math.inf
                 var_g = var_pB / (p_A**2) + (p_B**2) * var_pA / (p_A**4)
             else:
                 var_g = var_pA + var_pB
@@ -432,10 +435,15 @@ def delta_interval(
     Returns
     -------
     lb, ub : float
-        Lower and upper bounds on a confidence interval.
+        Lower and upper bounds on a confidence interval. For relative lift
+        with a zero control rate this is ``(-1, inf)``; use a MOVER method
+        (e.g. ``"wilson"``) for an informative interval in that case.
     """
     p1_hat = successes[1] / trials[1]
     p2_hat = successes[0] / trials[0]
+    if lift == "relative" and p2_hat == 0:
+        # The delta method has no standard error for a ratio with a zero denominator.
+        return -1.0, math.inf
     if lift == "relative":
         diff = (p1_hat - p2_hat) / p2_hat
 

@@ -507,5 +507,30 @@ class TestZeroNullOnlyTests:
         assert 0.0 < pval < 0.05
 
 
+class TestPowerDivergenceZeroCells:
+    @staticmethod
+    @pytest.mark.parametrize("test", [neyman_test, modified_log_likelihood_test])
+    def test_undefined_statistics_raise(test):
+        # Neyman returned NaN; modified log-likelihood returned p = 0 even for 0 vs 1 successes.
+        with pytest.raises(ValueError, match="zero observed count"):
+            test([100, 100], [0, 1])
+
+    @staticmethod
+    @pytest.mark.parametrize("successes", [[0, 5], [5, 0], [0, 1]])
+    def test_freeman_tukey_uses_limit_of_statistic(successes):
+        # Used to return NaN: scipy evaluates 0 * inf instead of the limit.
+        observed = np.array([successes, [100 - successes[0], 100 - successes[1]]], dtype=float)
+        expected = ss.contingency.expected_freq(observed)
+        statistic = 4 * np.sum((np.sqrt(observed) - np.sqrt(expected)) ** 2)
+        assert freeman_tukey_test([100, 100], successes) == pytest.approx(ss.chi2.sf(statistic, df=1))
+
+    @staticmethod
+    def test_freeman_tukey_formula_matches_scipy_without_zeros():
+        observed = np.array([[30, 45], [70, 55]], dtype=float)
+        expected = ss.contingency.expected_freq(observed)
+        statistic = 4 * np.sum((np.sqrt(observed) - np.sqrt(expected)) ** 2)
+        assert freeman_tukey_test([100, 100], [30, 45]) == pytest.approx(ss.chi2.sf(statistic, df=1))
+
+
 if __name__ == "__main__":
     pytest.main()

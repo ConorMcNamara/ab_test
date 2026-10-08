@@ -45,7 +45,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import scipy.stats as ss
 
-from ab_test._display import apply_dark_mode, resolve_plot_color
+from ab_test._display import apply_dark_mode, format_percent, resolve_plot_color
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
@@ -613,9 +613,9 @@ class CupacExperiment:
         ]
         return_string: str = tabulate(table, headers=["Metric", "Value"], tablefmt="grid")
         return_string += (
-            f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
+            f"\n* next to the p-value means it's statistically significant at the {format_percent(alpha)}% level"
         )
-        return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
+        return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
         return return_string
 
     def plot(self, color: str | dict[str, Any] | list[Any] | None = None, *, dark_mode: bool = False) -> None:

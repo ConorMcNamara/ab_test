@@ -20,7 +20,13 @@ import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 from tabulate import tabulate
 
-from ab_test._display import apply_dark_mode, combine_lift_panels, convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import (
+    apply_dark_mode,
+    combine_lift_panels,
+    convert_to_tabulate_str,
+    format_percent,
+    resolve_plot_color,
+)
 from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_binomial.contingency import ContingencyTable
 
@@ -417,7 +423,7 @@ class DiffInDiff:
             )
         pw_table = tabulate(pw_rows, headers=pw_headers, tablefmt="grid")
 
-        ci_pct = int((1 - alpha) * 100)
+        ci_pct = format_percent(1 - alpha)
         footer = f"\n* significant at alpha={alpha}; ** {ci_pct}% Confidence Interval"
 
         return f"{seg_table}{q_line}\n\n{pw_table}{footer}"

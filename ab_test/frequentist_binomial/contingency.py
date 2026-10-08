@@ -8,7 +8,7 @@ import numpy as np
 from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
-from ab_test._display import convert_to_tabulate_str, tabulate_summary
+from ab_test._display import convert_to_tabulate_str, format_percent, tabulate_summary
 from ab_test._lift import scale_bounds, scale_metric
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
 from ab_test.frequentist_binomial.msprt import msprt_test
@@ -237,9 +237,9 @@ class ContingencyTable(BaseContingencyTable):
         )
         return_string = tabulate_summary(row_labels, values)
         return_string += (
-            f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
+            f"\n* next to the p-value means it's statistically significant at the {format_percent(alpha)}% level"
         )
-        return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
+        return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
         return return_string
 
     def analyze_individually(
@@ -278,5 +278,5 @@ class ContingencyTable(BaseContingencyTable):
         table_list.append(total_list)
         table_headers = ["Cell Name", "Successes", "Trials", "Success Rate", "Conf. Int. Lower**", "Conf. Int. Upper**"]
         return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid")
-        return_string += f"\n** {round((1 - alpha) * 100)}% Confidence Interval"
+        return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
         return return_string
