@@ -27,6 +27,9 @@ __all__ = [
     "plot_msprt_over_time",
 ]
 
+# Default mixing scale, as a fraction of the pooled baseline rate.
+_DEFAULT_RELATIVE_TAU = 0.1
+
 
 def _msprt_log_lambda(d: float, sigma2: float, tau2: float) -> float:
     """Log of the mSPRT likelihood ratio.
@@ -84,9 +87,14 @@ def msprt_test(
     tau : float or None, optional
         Scale of the Gaussian mixing distribution on the effect size. Larger
         values give more power for large effects but less for small ones.
-        When ``None`` (the default), ``tau`` is set to the standard error of
-        the difference under the pooled null — a unit-information prior that
-        scales naturally with the data.
+        It must not shrink with the sample size: a ``tau`` proportional to the
+        standard error makes the rejection threshold constant on the z scale,
+        so the type-I error approaches 1 under continuous monitoring. When
+        ``None`` (the default), ``tau`` is the larger of ``0.1`` times the
+        pooled success rate (the mixture covers roughly +/-10% relative lifts)
+        and the absolute effect implied by ``null_lift``.
+        For best power, pass a scale (in absolute-rate units) that matches
+        effect sizes typical of past experiments.
 
     Returns
     -------
@@ -119,7 +127,10 @@ def msprt_test(
     d = (p1[1] - p1[0]) - (p0[1] - p0[0])
 
     if tau is None:
-        tau = math.sqrt(sigma2)
+        # Floor at the null effect so tests of distant nulls (and hence the
+        # confidence sequence) keep power when the base rate is tiny.
+        pooled = float(np.sum(successes)) / float(np.sum(trials))
+        tau = max(_DEFAULT_RELATIVE_TAU * pooled, abs(p0[1] - p0[0]))
     tau2 = tau * tau
 
     log_lambda = _msprt_log_lambda(d, sigma2, tau2)
@@ -173,8 +184,11 @@ def plot_msprt_over_time(
     null_lift : float
         Lift associated with the null hypothesis.
     tau : float or None, optional
-        Scale of the Gaussian mixing distribution. When ``None``, auto-derived
-        at each checkpoint.
+        Scale of the Gaussian mixing distribution. When ``None``, uses the
+        default from :func:`msprt_test` (the larger of ``0.1`` times the
+        pooled success rate and the absolute null effect, at each checkpoint).
+        Pass a fixed value to hold the scale constant
+        across checkpoints.
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).

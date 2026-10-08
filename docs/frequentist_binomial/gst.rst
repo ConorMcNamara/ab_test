@@ -18,6 +18,11 @@ Turnbull (1999). Three spending function families are provided:
 * **Power family** -- parameterized by ``rho``; ``rho=1`` is linear
   (Pocock-like), larger ``rho`` approaches O'Brien-Fleming behavior.
 
+Two-sided designs spend ``alpha / 2`` on each side, the convention used by
+gsDesign, rpact and ldbounds, so ``sided="two", alpha=0.05`` gives the same
+boundaries as ``sided="one", alpha=0.025`` (for O'Brien-Fleming with five
+equally spaced looks: 4.88, 3.36, 2.68, 2.29, 2.03).
+
 Usage
 -----
 

@@ -139,7 +139,8 @@ class BayesianContingencyTable(BaseContingencyTable):
             Number of posterior samples to draw, by default 100_000.
         low_threshold : float, optional
             Lower bound of the Region of Practical Equivalence (ROPE),
-            by default -0.1.
+            by default -0.1. The ROPE is not computed for ``lift="cpa"``
+            (shown as n/a), since CPA is not monotone in the lift.
         high_threshold : float, optional
             Upper bound of the Region of Practical Equivalence (ROPE),
             by default 0.1.
@@ -275,7 +276,11 @@ class BayesianContingencyTable(BaseContingencyTable):
             + convert_to_tabulate_str([test_lift, lb, ub], lift)
             + [str_pvalue]
             + [convert_to_tabulate_str(results["Expected loss"], "relative")]
-            + [convert_to_tabulate_str(results["Probability of ROPE"], "relative")]
+            + [
+                "n/a"
+                if np.isnan(results["Probability of ROPE"])
+                else convert_to_tabulate_str(results["Probability of ROPE"], "relative")
+            ]
         )
         return_string = tabulate_summary(row_labels, values)
         return_string += (

@@ -1,10 +1,12 @@
 """Bayesian cluster-randomized trial analysis for binomial outcomes.
 
 Uses a beta-binomial hierarchical model to analyze cluster-randomized
-experiments. Per-arm Beta distribution parameters are estimated via
-method of moments from observed cluster proportions, giving a posterior
-for the arm-level conversion rate that accounts for intra-cluster
-correlation. Posterior samples drive P(T > C), expected loss, credible
+experiments. Within each arm, cluster rates follow
+``Beta(mu * kappa, (1 - mu) * kappa)`` with hyperpriors ``mu ~ Uniform(0, 1)``
+and ``ICC = 1 / (1 + kappa) ~ Beta(1/2, 1)``. The posterior of the arm-level
+rate ``mu`` is computed on an adaptive grid, integrating over the ICC rather
+than plugging in a point estimate, so it stays calibrated with few clusters,
+unequal cluster sizes, and large ICCs. Posterior samples drive P(T > C), expected loss, credible
 intervals, and ROPE probabilities — the same decision metrics as
 :class:`~ab_test.bayesian_binomial.contingency.BayesianContingencyTable`.
 
@@ -15,15 +17,18 @@ P(B > A) and expected-loss decision criteria.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal, Self
 
 import numpy as np
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
+from scipy.special import betaln, expit
 from tabulate import tabulate
 
 from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color, tabulate_summary
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
+from ab_test.bayesian_binomial.power_calculations import _max_feasible_lift, _search_min_lift
 
 __all__ = [
     "BayesianClusterRandomizedTrial",
@@ -138,12 +143,83 @@ def beta_binomial_icc(a: float, b: float) -> float:
     return 1.0 / (a + b + 1.0)
 
 
+# Hierarchical model: cluster rates ~ Beta(mu * kappa, (1 - mu) * kappa), with
+# hyperpriors mu ~ Uniform(0, 1) and ICC = 1 / (1 + kappa) ~ Beta(1/2, 1).
+# The posterior is evaluated on a grid in (logit mu, log kappa) that is
+# repeatedly narrowed to where the posterior has mass.
+_LOGIT_MU_BOUNDS = (-12.0, 12.0)
+_LOG_KAPPA_BOUNDS = (math.log(1e-2), math.log(1e7))
+_GRID_TRIM = 25.0  # drop in log density that bounds the refined grid
+_GRID_PASSES = 3
+
+
+def _log_hyperprior(logit_mu: np.ndarray[Any, Any], log_kappa: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+    # Includes the Jacobians of the logit and log transforms, so grid cells have equal width.
+    mu = expit(logit_mu)
+    return np.log(mu) + np.log1p(-mu) + log_kappa - 1.5 * np.log1p(np.exp(log_kappa))  # type: ignore[no-any-return]
+
+
+def _refine_bounds(keep: np.ndarray[Any, Any], grid: np.ndarray[Any, Any], axis: int) -> tuple[float, float]:
+    """Bounds of the grid cells where ``keep`` holds anywhere along ``axis``, padded by one cell."""
+    idx = np.flatnonzero(keep.any(axis=axis))
+    return float(grid[max(idx[0] - 1, 0)]), float(grid[min(idx[-1] + 1, len(grid) - 1)])
+
+
+def _hierarchical_mu_posterior(
+    successes: np.ndarray[Any, Any],
+    trials: np.ndarray[Any, Any],
+    n_mu: int = 200,
+    n_kappa: int = 100,
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    """Posterior of the arm-level mean rate and concentration for one arm.
+
+    Returns
+    -------
+    tuple of ndarray
+        ``(logit_mu_grid, mu_weights, log_kappa_grid, kappa_weights)``,
+        where the weights are the marginal posterior masses on each grid.
+    """
+    s = np.asarray(successes, dtype=float)
+    n = np.asarray(trials, dtype=float)
+    (lm_lo, lm_hi), (lk_lo, lk_hi) = _LOGIT_MU_BOUNDS, _LOG_KAPPA_BOUNDS
+    for _ in range(_GRID_PASSES):
+        lm = np.linspace(lm_lo, lm_hi, n_mu)
+        lk = np.linspace(lk_lo, lk_hi, n_kappa)
+        mu = expit(lm)[None, :, None]
+        kappa = np.exp(lk)[:, None, None]
+        a, b = mu * kappa, (1 - mu) * kappa
+        log_post = np.sum(betaln(a + s, b + n - s), axis=-1) - len(s) * betaln(a, b)[..., 0]
+        log_post += _log_hyperprior(lm[None, :], lk[:, None])
+        keep = log_post >= log_post.max() - _GRID_TRIM
+        (lm_lo, lm_hi), (lk_lo, lk_hi) = _refine_bounds(keep, lm, 0), _refine_bounds(keep, lk, 1)
+    weights = np.exp(log_post - log_post.max())
+    weights /= weights.sum()
+    return lm, weights.sum(axis=0), lk, weights.sum(axis=1)
+
+
+def _sample_mu(logit_mu: np.ndarray[Any, Any], weights: np.ndarray[Any, Any], size: int) -> np.ndarray[Any, Any]:
+    """Draw from a grid posterior on logit(mu), spreading draws uniformly within each cell.
+
+    ``weights`` may be 1-D, or 2-D with one posterior per row (one row of ``size`` draws each).
+    """
+    w = np.atleast_2d(weights)
+    cdf = np.cumsum(w, axis=1)
+    cdf /= cdf[:, -1:]
+    rows = np.arange(len(w))[:, None]
+    u = np.random.uniform(size=(len(w), size))
+    idx = np.searchsorted((cdf + rows).ravel(), (u + rows).ravel()).reshape(u.shape) - rows * w.shape[1]
+    idx = np.minimum(idx, w.shape[1] - 1)
+    step = logit_mu[1] - logit_mu[0]
+    draws = expit(logit_mu[idx] + np.random.uniform(-step / 2, step / 2, idx.shape))
+    return draws if weights.ndim == 2 else draws[0]
+
+
 class BayesianClusterRandomizedTrial:
     """Bayesian analysis of a two-group cluster-randomized trial.
 
     Collects per-cluster binomial observations via :meth:`add`, fits a
-    beta-binomial hierarchical model per arm using method-of-moments
-    estimation, and produces posterior comparisons via :meth:`analyze`.
+    beta-binomial hierarchical model per arm (see the module docstring),
+    and produces posterior comparisons via :meth:`analyze`.
 
     Parameters
     ----------
@@ -246,25 +322,14 @@ class BayesianClusterRandomizedTrial:
         for g in self._groups:
             s, n = arms[g]
             a, b = estimate_beta_binomial_params(s, n)
-            icc = beta_binomial_icc(a, b)
-            mu = float(np.mean(s / n))
-            total_s = float(np.sum(s))
-            total_n = float(np.sum(n))
-            avg_m = float(np.mean(n))
-            deff = 1.0 + (avg_m - 1.0) * icc
-            n_eff = total_n / deff
-            s_eff = total_s / deff
-            post_a = 1.0 + s_eff
-            post_b = 1.0 + n_eff - s_eff
+            logit_mu, mu_weights, log_kappa, kappa_weights = _hierarchical_mu_posterior(s, n)
             params[g] = {
                 "a": a,
                 "b": b,
-                "icc": icc,
-                "mean": mu,
-                "deff": deff,
-                "n_eff": n_eff,
-                "post_a": post_a,
-                "post_b": post_b,
+                "icc": float(np.sum(kappa_weights / (1.0 + np.exp(log_kappa)))),
+                "mean": float(np.sum(mu_weights * expit(logit_mu))),
+                "logit_mu_grid": logit_mu,
+                "mu_weights": mu_weights,
             }
             all_s.append(s)
             all_n.append(n)
@@ -279,7 +344,7 @@ class BayesianClusterRandomizedTrial:
 
     @property
     def icc(self) -> dict[str, float]:
-        """Per-arm intra-cluster correlation coefficients."""
+        """Per-arm posterior mean intra-cluster correlation coefficients."""
         if self.model_params is None:
             self._fit_model()
         assert self.model_params is not None
@@ -349,8 +414,8 @@ class BayesianClusterRandomizedTrial:
         params = self._fit_model()
         ctrl, treat = self._groups[0], self._groups[1]
 
-        samples_c = np.random.beta(params[ctrl]["post_a"], params[ctrl]["post_b"], n_samples)
-        samples_t = np.random.beta(params[treat]["post_a"], params[treat]["post_b"], n_samples)
+        samples_c = _sample_mu(params[ctrl]["logit_mu_grid"], params[ctrl]["mu_weights"], n_samples)
+        samples_t = _sample_mu(params[treat]["logit_mu_grid"], params[treat]["mu_weights"], n_samples)
 
         if lift == "relative":
             safe_c = np.where(samples_c == 0, 1e-9, samples_c)
@@ -624,7 +689,7 @@ class BayesianClusterRandomizedTrial:
                 )
 
             params = self.model_params[g]
-            samples_arm = np.random.beta(params["post_a"], params["post_b"], n_samples)
+            samples_arm = _sample_mu(params["logit_mu_grid"], params["mu_weights"], n_samples)
             arm_mean = float(np.mean(samples_arm))
             ci_lo, ci_hi = self._credible_interval(samples_arm, confidence_level, cred_int_method)
 
@@ -761,11 +826,17 @@ class BayesianClusterRandomizedTrial:
 # ---------------------------------------------------------------------------
 
 
-def _vectorized_icc(
+def _simulated_mu_posteriors(
     successes: np.ndarray[Any, Any],
     cluster_size: int,
-) -> np.ndarray[Any, Any]:
-    """Vectorized ICC estimation for equal-sized clusters.
+    n_mu: int = 80,
+    n_kappa: int = 40,
+) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
+    """Hierarchical posterior of the arm-level rate for many simulated experiments.
+
+    All experiments share one grid, refined to the union of their posterior
+    mass. Equal cluster sizes let the per-cluster likelihood be tabulated
+    once per distinct success count.
 
     Parameters
     ----------
@@ -776,19 +847,45 @@ def _vectorized_icc(
 
     Returns
     -------
-    icc : ndarray, shape (n_samples,)
-        Estimated ICC, clamped to [1e-6, 1-1e-6].
+    tuple of ndarray
+        ``(logit_mu_grid, mu_weights)`` with ``mu_weights`` of shape
+        ``(n_samples, n_mu)``.
     """
-    proportions = successes / cluster_size
-    mu = np.mean(proportions, axis=1)
-    mu = np.clip(mu, 1e-9, 1 - 1e-9)
-    v = np.var(proportions, axis=1, ddof=1)
-    sampling_var = mu * (1 - mu) / cluster_size
-    between_var = np.maximum(v - sampling_var, 1e-12)
-    concentration = mu * (1 - mu) / between_var - 1
-    concentration = np.maximum(concentration, 2.0)
-    icc = 1.0 / (concentration + 1.0)
-    return np.clip(icc, 1e-6, 1 - 1e-6)
+    n_sims, n_clusters = successes.shape
+    values, inverse = np.unique(successes, return_inverse=True)
+    inverse = inverse.reshape(successes.shape)
+    n_values = len(values)
+    chunk = max(1, int(2e7 // max(n_values, n_mu * n_kappa)))
+
+    def chunk_log_post(i: int, table: np.ndarray[Any, Any], offset: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
+        # Sum of per-cluster log likelihoods as (cluster-count histogram) @ (likelihood table)
+        idx = inverse[i : i + chunk]
+        rows = np.repeat(np.arange(len(idx)), n_clusters)
+        counts = np.bincount(rows * n_values + idx.ravel(), minlength=len(idx) * n_values)
+        log_post = (counts.reshape(len(idx), n_values) @ table).reshape(len(idx), n_kappa, n_mu) + offset
+        return log_post - log_post.max(axis=(1, 2), keepdims=True)  # type: ignore[no-any-return]
+
+    (lm_lo, lm_hi), (lk_lo, lk_hi) = _LOGIT_MU_BOUNDS, _LOG_KAPPA_BOUNDS
+    for pass_num in range(_GRID_PASSES):
+        lm = np.linspace(lm_lo, lm_hi, n_mu)
+        lk = np.linspace(lk_lo, lk_hi, n_kappa)
+        mu = expit(lm)[None, :]
+        kappa = np.exp(lk)[:, None]
+        a, b = mu * kappa, (1 - mu) * kappa
+        table = betaln(a + values[:, None, None], b + cluster_size - values[:, None, None]).reshape(n_values, -1)
+        offset = _log_hyperprior(lm[None, :], lk[:, None]) - n_clusters * betaln(a, b)
+        if pass_num == _GRID_PASSES - 1:
+            break
+        keep = np.zeros((n_kappa, n_mu), dtype=bool)
+        for i in range(0, n_sims, chunk):
+            keep |= (chunk_log_post(i, table, offset) >= -_GRID_TRIM).any(axis=0)
+        (lm_lo, lm_hi), (lk_lo, lk_hi) = _refine_bounds(keep, lm, 0), _refine_bounds(keep, lk, 1)
+
+    weights = np.empty((n_sims, n_mu))
+    for i in range(0, n_sims, chunk):
+        weights[i : i + chunk] = np.exp(chunk_log_post(i, table, offset)).sum(axis=1)
+    weights /= weights.sum(axis=1, keepdims=True)
+    return lm, weights
 
 
 def _simulate_crt_experiment(
@@ -801,12 +898,11 @@ def _simulate_crt_experiment(
     n_samples: int,
     mc_samples: int,
 ) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
-    """Simulate CRT experiments with design-effect-adjusted posteriors.
+    """Simulate CRT experiments and draw from the posterior each would produce.
 
     For each simulated experiment, generates cluster data from the
-    beta-binomial model, estimates the ICC, computes the design-effect-
-    adjusted effective sample size, and draws posterior samples from
-    the adjusted Beta posterior.
+    beta-binomial model and draws from the same hierarchical posterior
+    that :meth:`BayesianClusterRandomizedTrial.analyze` uses.
 
     Returns
     -------
@@ -814,33 +910,13 @@ def _simulate_crt_experiment(
         ``(samples_ctrl, samples_treat)``, each of shape
         ``(n_samples, mc_samples)``.
     """
-    total_n = n_clusters * cluster_size
-
-    theta_c = np.random.beta(a_ctrl, b_ctrl, (n_samples, n_clusters))
-    y_c = np.random.binomial(cluster_size, theta_c)
-    icc_c = _vectorized_icc(y_c, cluster_size)
-    deff_c = 1.0 + (cluster_size - 1.0) * icc_c
-    n_eff_c = total_n / deff_c
-    s_total_c = np.sum(y_c, axis=1).astype(float)
-    s_eff_c = s_total_c / deff_c
-    post_a_c = 1.0 + s_eff_c
-    post_b_c = 1.0 + n_eff_c - s_eff_c
-    post_b_c = np.maximum(post_b_c, 0.01)
-    samples_ctrl = np.random.beta(post_a_c[:, np.newaxis], post_b_c[:, np.newaxis], (n_samples, mc_samples))
-
-    theta_t = np.random.beta(a_treat, b_treat, (n_samples, n_clusters))
-    y_t = np.random.binomial(cluster_size, theta_t)
-    icc_t = _vectorized_icc(y_t, cluster_size)
-    deff_t = 1.0 + (cluster_size - 1.0) * icc_t
-    n_eff_t = total_n / deff_t
-    s_total_t = np.sum(y_t, axis=1).astype(float)
-    s_eff_t = s_total_t / deff_t
-    post_a_t = 1.0 + s_eff_t
-    post_b_t = 1.0 + n_eff_t - s_eff_t
-    post_b_t = np.maximum(post_b_t, 0.01)
-    samples_treat = np.random.beta(post_a_t[:, np.newaxis], post_b_t[:, np.newaxis], (n_samples, mc_samples))
-
-    return samples_ctrl, samples_treat
+    samples = []
+    for a, b in ((a_ctrl, b_ctrl), (a_treat, b_treat)):
+        theta = np.random.beta(a, b, (n_samples, n_clusters))
+        y = np.random.binomial(cluster_size, theta)
+        logit_mu, weights = _simulated_mu_posteriors(y, cluster_size)
+        samples.append(_sample_mu(logit_mu, weights, mc_samples))
+    return samples[0], samples[1]
 
 
 def _icc_to_beta_params(mu: float, icc: float) -> tuple[float, float]:
@@ -868,8 +944,9 @@ def cluster_bayes_power_lift(
     """Estimate Bayesian power (assurance) for a cluster-randomized trial.
 
     Simulates ``n_samples`` CRT experiments under the alternative hypothesis.
-    For each, generates cluster data from a beta-binomial model, fits
-    posteriors via method of moments, and counts a "win" when
+    For each, generates cluster data from a beta-binomial model, computes
+    the same hierarchical posterior as
+    :meth:`BayesianClusterRandomizedTrial.analyze`, and counts a "win" when
     P(T > C) >= ``confidence_level``.
 
     Parameters
@@ -984,30 +1061,6 @@ def _search_min_clusters(
 
     while high - low > 1:
         mid = (low + high) // 2
-        if power_fn(mid) >= target_power:
-            high = mid
-        else:
-            low = mid
-    return high
-
-
-def _search_min_lift(
-    power_fn: Any,
-    target_power: float,
-    max_lift: float,
-    tol: float,
-    error_message: str,
-) -> float:
-    low, high = 0.0, 0.01
-    while high <= max_lift:
-        if power_fn(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(error_message)
-
-    while high - low > tol:
-        mid = (low + high) / 2
         if power_fn(mid) >= target_power:
             high = mid
         else:
@@ -1218,15 +1271,15 @@ def cluster_bayes_minimum_detectable_lift(
             confidence_level=confidence_level,
         )
 
+    search_max = min(max_lift, _max_feasible_lift(baseline, lift))
+    bound = f"a lift of {max_lift}" if search_max == max_lift else "any lift that keeps the rate below 1"
     return _search_min_lift(
         _power,
         target_power,
-        max_lift,
+        search_max,
         tol,
         error_message=(
-            f"Could not reach target power of {target_power} within "
-            f"a lift of {max_lift}. "
-            "Consider more clusters or lower ICC."
+            f"Could not reach target power of {target_power} within {bound}. Consider more clusters or lower ICC."
         ),
     )
 
@@ -1290,15 +1343,15 @@ def cluster_bayes_minimum_detectable_lift_loss(
             loss_threshold=loss_threshold,
         )
 
+    search_max = min(max_lift, _max_feasible_lift(baseline, lift))
+    bound = f"a lift of {max_lift}" if search_max == max_lift else "any lift that keeps the rate below 1"
     return _search_min_lift(
         _power,
         target_power,
-        max_lift,
+        search_max,
         tol,
         error_message=(
-            f"Could not reach target power of {target_power} within "
-            f"a lift of {max_lift}. "
-            "Consider more clusters or lower ICC."
+            f"Could not reach target power of {target_power} within {bound}. Consider more clusters or lower ICC."
         ),
     )
 

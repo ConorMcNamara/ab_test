@@ -76,7 +76,13 @@ def cochrans_q(
     return q, pvalue
 
 
-_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue", "cpa"})
+_VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+_SCALED_LIFTS = frozenset({"incremental", "roas", "revenue"})
+_CPA_ERROR = (
+    "lift='cpa' is not supported for difference-in-differences: CPA is spend / incremental conversions, so "
+    "differences of segment CPAs are not monotone in the effects being compared and have no finite variance. "
+    "Use lift='roas' (incremental conversions per dollar) instead."
+)
 
 
 def _compute_segment_stats(
@@ -92,7 +98,7 @@ def _compute_segment_stats(
         One table per segment, each with exactly 2 cells.
     lift : str
         One of ``"absolute"``, ``"relative"``, ``"incremental"``,
-        ``"roas"``, ``"revenue"``, or ``"cpa"``.
+        ``"roas"``, or ``"revenue"``.
     alpha : float
         Significance level for Wald confidence intervals.
 
@@ -144,7 +150,7 @@ def _compute_segment_stats(
             var = p_t * (1 - p_t) / n_t + p_c * (1 - p_c) / n_c
             se = np.sqrt(var)
 
-            if lift in ("incremental", "roas", "revenue", "cpa"):
+            if lift in _SCALED_LIFTS:
                 n_max = max(n_c, n_t)
                 scale = float(n_max)
                 d_scaled = d * scale
@@ -161,16 +167,6 @@ def _compute_segment_stats(
                     var_scaled /= spend * spend
                     ci_lo /= spend
                     ci_hi /= spend
-                elif lift == "cpa":
-                    if table.spend is None:
-                        raise ValueError(f"spend must be set on segment {table.experiment_name!r} for CPA")
-                    spend = table.spend
-                    var_scaled = np.inf
-                    d_scaled = spend / d_scaled if abs(d_scaled) > 1e-12 else np.inf
-                    ci_lo, ci_hi = (
-                        (spend / ci_hi if ci_hi > 0 else np.inf),
-                        (spend / ci_lo if ci_lo > 0 else np.inf),
-                    )
                 elif lift == "revenue":
                     if table.msrp is None:
                         raise ValueError(f"msrp must be set on segment {table.experiment_name!r} for revenue")
@@ -180,9 +176,11 @@ def _compute_segment_stats(
                     ci_lo *= msrp
                     ci_hi *= msrp
 
+                # Heterogeneity is tested on the risk difference: each segment's scale factor
+                # (its size, spend or price) would otherwise make equal rate effects look different.
                 effects.append(d_scaled)
-                internal_effects.append(d_scaled)
-                variances.append(var_scaled)
+                internal_effects.append(d)
+                variances.append(var)
                 ci_lowers.append(ci_lo)
                 ci_uppers.append(ci_hi)
             else:
@@ -276,7 +274,12 @@ class DiffInDiff:
         ----------
         lift : str, default="absolute"
             Scale for treatment effects: ``"absolute"``, ``"relative"``,
-            ``"incremental"``, ``"roas"``, or ``"revenue"``.
+            ``"incremental"``, ``"roas"``, or ``"revenue"``. For the last
+            three, per-segment effects are shown in those units, but
+            Cochran's Q and the pairwise comparisons use the risk difference,
+            since each segment's own size, spend or price would otherwise make
+            equal rate effects look different. ``"cpa"`` is rejected; use
+            ``"roas"`` instead.
         alpha : float, default=0.05
             Significance level for confidence intervals and tests.
         correction : str, default="holm"
@@ -291,6 +294,8 @@ class DiffInDiff:
             omnibus test, and pairwise DiD comparisons.
         """
         lift = lift.casefold()
+        if lift == "cpa":
+            raise ValueError(_CPA_ERROR)
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
@@ -331,7 +336,8 @@ class DiffInDiff:
                 ci_lo = float(np.exp(delta_internal - z_crit * se) - 1)
                 ci_hi = float(np.exp(delta_internal + z_crit * se) - 1)
             else:
-                did_display = stats["effects"][i] - stats["effects"][j]
+                # For scaled lifts this is the difference in risk differences, the quantity tested.
+                did_display = delta_internal
                 ci_lo = delta_internal - z_crit * se
                 ci_hi = delta_internal + z_crit * se
 
@@ -393,16 +399,18 @@ class DiffInDiff:
         )
 
         assert self.pairwise_results is not None
-        pw_headers = ["Comparison", "DiD", "CI Lower **", "CI Upper **", "p-value", f"Adj. p ({correction})"]
+        did_header = "DiD (risk difference)" if lift in _SCALED_LIFTS else "DiD"
+        fmt_did = fmt_rate if lift in _SCALED_LIFTS else fmt
+        pw_headers = ["Comparison", did_header, "CI Lower **", "CI Upper **", "p-value", f"Adj. p ({correction})"]
         pw_rows = []
         for pw in self.pairwise_results:
             star = " *" if pw["adjusted_pvalue"] < alpha else ""
             pw_rows.append(
                 [
                     f"{pw['segment_i']} vs {pw['segment_j']}",
-                    fmt(pw["did_estimate"]),
-                    fmt(pw["ci_lower"]),
-                    fmt(pw["ci_upper"]),
+                    fmt_did(pw["did_estimate"]),
+                    fmt_did(pw["ci_lower"]),
+                    fmt_did(pw["ci_upper"]),
                     f"{pw['raw_pvalue']:.4f}",
                     f"{pw['adjusted_pvalue']:.4f}{star}",
                 ]
@@ -468,6 +476,8 @@ class DiffInDiff:
     ) -> go.Figure:
         """Build the forest plot for a single lift (see :meth:`plot`)."""
         lift = lift.casefold()
+        if lift == "cpa":
+            raise ValueError(_CPA_ERROR)
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
@@ -519,7 +529,6 @@ class DiffInDiff:
             "incremental": "Incremental Conversions",
             "roas": "Return on Ad Spend",
             "revenue": "Revenue",
-            "cpa": "Cost Per Acquisition",
         }
         tick_formats = {
             "absolute": ",.1%",
@@ -527,7 +536,6 @@ class DiffInDiff:
             "incremental": ",",
             "roas": "$,",
             "revenue": "$,",
-            "cpa": "$,",
         }
         lift_label = lift_labels[lift]
         fig.update_layout(

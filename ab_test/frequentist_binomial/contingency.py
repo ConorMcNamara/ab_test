@@ -140,7 +140,9 @@ class ContingencyTable(BaseContingencyTable):
         tau : float or None, optional
             Scale of the Gaussian mixing distribution for the mSPRT test.
             Only used when ``test_method="msprt"``. When ``None``, the scale
-            is derived from the data. See :func:`~ab_test.frequentist_binomial.msprt.msprt_test`.
+            is the larger of ``0.1`` times the pooled success rate and the
+            absolute null effect. See
+            :func:`~ab_test.frequentist_binomial.msprt.msprt_test`.
 
         Returns
         -------

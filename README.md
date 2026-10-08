@@ -25,9 +25,9 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 | **Equivalence testing** | TOST (two one-sided tests) and Bayesian ROPE equivalence | [frequentist](docs/frequentist_binomial/equivalence.rst) · [bayesian](docs/bayesian_binomial/equivalence.rst) |
 | **Randomization inference** | Assumption-free permutation p-values, individual- and cluster-level, with parallel Monte Carlo | [docs](docs/frequentist_binomial/randomization_inference.rst) |
 | **Multiple testing** | Bonferroni, Sidak, Holm (FWER), Benjamini-Hochberg (FDR) | [docs](docs/corrections.rst) |
-| **Cluster-randomized trials** | Frequentist cluster-summary Welch test with ICC and design effect; Bayesian beta-binomial hierarchical model with design-effect-adjusted posteriors and simulation-based assurance | [frequentist](docs/frequentist_binomial/cluster.rst) · [bayesian](docs/bayesian_binomial/cluster.rst) |
+| **Cluster-randomized trials** | Frequentist cluster-summary Welch test with ICC and design effect; Bayesian beta-binomial hierarchical model (posterior integrates over the ICC) and simulation-based assurance | [frequentist](docs/frequentist_binomial/cluster.rst) · [bayesian](docs/bayesian_binomial/cluster.rst) |
 | **Diagnostics** | Sample ratio mismatch (SRM), time-trend (novelty/primacy) detection, and placebo tests | [docs](docs/diagnostics.rst) |
-| **Lift types** | Relative, absolute, incremental, ROAS, CPA, and revenue — all methods | — |
+| **Lift types** | Relative, absolute, incremental, ROAS, CPA, and revenue (CPA is not available for ROPE, equivalence, or difference-in-differences) | — |
 
 ## Installation
 
@@ -115,7 +115,7 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 | `"absolute"` | `p_treatment - p_control` |
 | `"incremental"` | Incremental conversions normalized to equal group sizes |
 | `"roas"` | Return on ad spend (`incremental_conversions / spend`) |
-| `"cpa"` | Cost per acquisition (`spend / incremental_conversions`) |
+| `"cpa"` | Cost per acquisition (`spend / incremental_conversions`). Summarized on the incremental scale and transformed, since CPA has no posterior mean; not supported for ROPE, equivalence, or difference-in-differences, where `"roas"` is the per-dollar alternative |
 | `"revenue"` | Incremental revenue (`incremental_conversions × msrp`) |
 
 ### `test_method`

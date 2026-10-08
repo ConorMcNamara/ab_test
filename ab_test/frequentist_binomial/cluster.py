@@ -58,6 +58,7 @@ _VALID_LIFTS = frozenset({"absolute", "relative"})
 def estimate_icc(
     successes: np.ndarray[Any, Any] | list[int],
     trials: np.ndarray[Any, Any] | list[int],
+    groups: np.ndarray[Any, Any] | list[Any] | None = None,
 ) -> float:
     """Estimate intra-cluster correlation for binary outcomes.
 
@@ -67,6 +68,11 @@ def estimate_icc(
         Number of successes in each cluster.
     trials : array_like
         Number of trials in each cluster.
+    groups : array_like, optional
+        Arm label of each cluster. When given, between-cluster variation is
+        measured around each arm's own rate, so a treatment effect is not
+        mistaken for clustering. Pass this whenever the clusters come from
+        more than one arm.
 
     Returns
     -------
@@ -76,7 +82,7 @@ def estimate_icc(
     Notes
     -----
     Uses the one-way ANOVA estimator for binary data (Ridout, Demetrio
-    & Firth, 1999).
+    & Firth, 1999), with arm as a fixed factor when ``groups`` is given.
     """
     s = np.asarray(successes, dtype=float)
     m = np.asarray(trials, dtype=float)
@@ -87,13 +93,21 @@ def estimate_icc(
         raise ValueError("All cluster sizes (trials) must be >= 1")
     if np.any(s < 0) or np.any(s > m):
         raise ValueError("successes must satisfy 0 <= successes <= trials for each cluster")
+    g = np.zeros(K, dtype=int) if groups is None else np.unique(np.asarray(groups), return_inverse=True)[1]
+    if len(g) != K:
+        raise ValueError(f"groups must have one label per cluster, got {len(g)} for {K} clusters")
+    G = int(g.max()) + 1
+    if K - G < 1:
+        raise ValueError("estimate_icc requires more clusters than groups")
 
     N = float(np.sum(m))
     p_k = s / m
-    p_bar = float(np.sum(s) / N)
-    m0 = (N - float(np.sum(m**2)) / N) / (K - 1)
+    s_g = np.bincount(g, weights=s)
+    N_g = np.bincount(g, weights=m)
+    p_g = (s_g / N_g)[g]
+    m0 = (N - float(np.sum(np.bincount(g, weights=m**2) / N_g))) / (K - G)
 
-    MSB = float(np.sum(m * (p_k - p_bar) ** 2)) / (K - 1)
+    MSB = float(np.sum(m * (p_k - p_g) ** 2)) / (K - G)
     MSW = float(np.sum(m * p_k * (1 - p_k))) / (N - K)
 
     denom = MSB + (m0 - 1) * MSW
@@ -101,6 +115,30 @@ def estimate_icc(
         return 0.0
     rho = (MSB - MSW) / denom
     return float(np.clip(rho, 0.0, 1.0))
+
+
+def _fieller_ratio_interval(
+    mean_num: float,
+    var_num: float,
+    mean_den: float,
+    var_den: float,
+    t_crit: float,
+) -> tuple[float, float]:
+    """Fieller confidence interval for ``mean_num / mean_den`` from independent estimates.
+
+    The interval is the set of ratios ``R`` with
+    ``(mean_num - R * mean_den)**2 <= t_crit**2 * (var_num + R**2 * var_den)``.
+    Unlike dividing a difference interval by ``mean_den``, it accounts for the
+    uncertainty in the denominator. It is unbounded when ``mean_den`` is not
+    clearly separated from zero.
+    """
+    a = mean_den**2 - t_crit**2 * var_den
+    if a <= 0:
+        return -math.inf, math.inf
+    b = mean_num * mean_den
+    c = mean_num**2 - t_crit**2 * var_num
+    root = math.sqrt(max(b**2 - a * c, 0.0))
+    return (b - root) / a, (b + root) / a
 
 
 def design_effect(avg_cluster_size: float, icc: float) -> float:
@@ -452,7 +490,10 @@ class ClusterRandomizedTrial:
         Parameters
         ----------
         lift : str
-            ``"relative"`` or ``"absolute"``.
+            ``"relative"`` or ``"absolute"``. For ``"relative"`` with the Welch
+            method, the confidence interval is Fieller's interval for the ratio
+            of arm means, which accounts for uncertainty in the control mean and
+            is unbounded when the control mean is not clearly above zero.
         alpha : float
             Significance level. Defaults to 0.05.
         method : str
@@ -543,8 +584,11 @@ class ClusterRandomizedTrial:
                 ci_upper = math.inf
             else:
                 test_lift = abs_diff / mean_ctrl
-                ci_lower = ci_lower_abs / mean_ctrl
-                ci_upper = ci_upper_abs / mean_ctrl
+                if method == "randomization":
+                    ci_lower, ci_upper = -math.inf, math.inf
+                else:
+                    ratio_lo, ratio_hi = _fieller_ratio_interval(mean_treat, se_treat, mean_ctrl, se_ctrl, t_crit)
+                    ci_lower, ci_upper = ratio_lo - 1, ratio_hi - 1
         else:
             test_lift = abs_diff
             ci_lower = ci_lower_abs
@@ -552,7 +596,8 @@ class ClusterRandomizedTrial:
 
         all_s = np.concatenate([s_ctrl, s_treat])
         all_m = np.concatenate([m_ctrl, m_treat])
-        icc_val = estimate_icc(all_s, all_m)
+        arms = np.repeat([0, 1], [K_ctrl, K_treat])
+        icc_val = estimate_icc(all_s, all_m, groups=arms)
         avg_m = float(np.mean(all_m))
         deff_val = design_effect(avg_m, icc_val)
 

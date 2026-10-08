@@ -11,9 +11,12 @@ more traffic.
 The :class:`~ab_test.frequentist_binomial.stratified.StratifiedContingencyTable`
 class collects per-stratum 2×2 tables via :meth:`add` and produces a pooled
 analysis using the Cochran-Mantel-Haenszel (CMH) framework. The CMH test
-provides the overall p-value, inverse-variance weighting gives the pooled
-effect estimate and confidence interval, and the Breslow-Day test checks
-whether the treatment effect is consistent across strata.
+provides the overall p-value, Mantel-Haenszel pooling gives the pooled effect
+estimate and confidence interval (the MH risk ratio with the Greenland-Robins
+variance for relative lift, the MH risk difference with Sato's variance
+otherwise, so strata with zero successes need no correction), and the
+Breslow-Day test checks whether the treatment effect is consistent across
+strata.
 
 Stratified analysis is complementary to
 :class:`~ab_test.frequentist_binomial.cupac.CupacExperiment`: CUPAC requires
