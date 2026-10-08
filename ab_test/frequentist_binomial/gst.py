@@ -462,7 +462,8 @@ class GroupSequentialDesign:
 
         theta = float(d / math.sqrt(sigma2))
         exit_probs = _compute_exit_probabilities(self._boundaries, self._info_fractions, theta, self._sided)
-        return float(np.sum(exit_probs))
+        # Clamp floating-point roundoff (e.g. 1 + 1e-15) when power saturates.
+        return min(1.0, float(np.sum(exit_probs)))
 
     def summary(self, alpha: float = 0.05) -> str:
         """Tabulated display of boundaries and alpha spending at each look.
