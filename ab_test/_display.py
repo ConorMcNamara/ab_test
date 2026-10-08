@@ -9,6 +9,7 @@ import math
 from typing import Any, overload
 
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from tabulate import tabulate
 
 __all__ = [
@@ -171,6 +172,27 @@ def tabulate_summary(row_labels: list[str], values: list[Any]) -> str:
     return result
 
 
+_LIFT_LABELS = {
+    "relative": "Relative Lift",
+    "absolute": "Absolute Lift",
+    "incremental": "Incremental Lift",
+    "revenue": "Revenue Lift",
+    "roas": "ROAS Lift",
+    "cpa": "CPA Lift",
+}
+
+
+def _lift_axis_format(lift_type: str) -> dict[str, str]:
+    """Tick format (and prefix) for an x-axis showing ``lift_type``."""
+    if lift_type in ("relative", "absolute"):
+        return {"tickformat": ",.0%"}
+    if lift_type == "revenue":
+        return {"tickprefix": "$", "tickformat": "~s"}
+    if lift_type in ("roas", "cpa"):
+        return {"tickprefix": "$", "tickformat": "0.2"}
+    return {"tickformat": "~s"}
+
+
 def apply_dark_mode(fig: go.Figure, dark_mode: bool) -> go.Figure:
     """Switch a figure to Plotly's dark template when ``dark_mode`` is True.
 
@@ -195,7 +217,7 @@ def apply_dark_mode(fig: go.Figure, dark_mode: bool) -> go.Figure:
 def render_forest_plot(
     names: list[str],
     individual_results: dict[str, dict[str, float]],
-    incremental_results: dict[str, Any] | None,
+    incremental_results: dict[str, Any] | list[dict[str, Any]] | None,
     is_individual: bool = True,
     reverse_plot: bool = True,
     color: str | dict[str, Any] | list[Any] | None = None,
@@ -215,9 +237,11 @@ def render_forest_plot(
         ``is_individual`` is True. This is only populated once
         ``.analyze_individually()`` has been run; nothing will render before
         then.
-    incremental_results : dict or None
+    incremental_results : dict, list of dict, or None
         Comparative results holding ``"lift"``, ``"ci_lower"``, ``"ci_upper"``,
-        and ``"lift_type"``. Used when ``is_individual`` is False. This is
+        and ``"lift_type"``. A list of results (e.g. absolute and relative lift)
+        is drawn as side-by-side panels sharing the y-axis, each with its own
+        interval and axis format. Used when ``is_individual`` is False. This is
         only populated once ``.analyze()`` has been run; nothing will render
         before then.
     is_individual : bool, default=True
@@ -306,40 +330,43 @@ def render_forest_plot(
     else:
         if incremental_results is None:
             raise ValueError("Call .analyze() before plotting incremental results.")
+        panels = incremental_results if isinstance(incremental_results, list) else [incremental_results]
+        if len(panels) > 1:
+            fig = make_subplots(rows=1, cols=len(panels), shared_yaxes=True, horizontal_spacing=0.08)
         c_inc = (
             (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0])
             if plot_color is not None
             else None
         )
-        marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
-        error_x_inc: dict[str, Any] = {
-            "type": "data",
-            "symmetric": False,
-            "array": [incremental_results["ci_upper"] - incremental_results["lift"]],
-            "arrayminus": [incremental_results["lift"] - incremental_results["ci_lower"]],
-            "visible": True,
-        }
-        if c_inc is not None:
-            marker_inc["color"] = c_inc
-            error_x_inc["color"] = c_inc
-        fig.add_trace(
-            go.Scatter(  # type: ignore[attr-defined]
-                x=[incremental_results["lift"]],
+        for col, result in enumerate(panels, start=1):
+            marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+            error_x_inc: dict[str, Any] = {
+                "type": "data",
+                "symmetric": False,
+                "array": [result["ci_upper"] - result["lift"]],
+                "arrayminus": [result["lift"] - result["ci_lower"]],
+                "visible": True,
+            }
+            if c_inc is not None:
+                marker_inc["color"] = c_inc
+                error_x_inc["color"] = c_inc
+            trace = go.Scatter(  # type: ignore[attr-defined]
+                x=[result["lift"]],
                 y=["Total"],
                 marker=marker_inc,
                 error_x=error_x_inc,
                 name="Total",
+                showlegend=col == 1,
             )
-        )
-        if incremental_results["lift_type"] in ["relative", "absolute"]:
-            fig.update_layout(xaxis_tickformat=",.0%")
-        elif incremental_results["lift_type"] in ["revenue", "roas", "cpa"]:
-            if incremental_results["lift_type"] == "revenue":
-                fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="~s")
+            axis_format = _lift_axis_format(result["lift_type"])
+            if len(panels) > 1:
+                fig.add_trace(trace, row=1, col=col)
+                fig.update_xaxes(
+                    title_text=_LIFT_LABELS.get(result["lift_type"], "Lift"), row=1, col=col, **axis_format
+                )
             else:
-                fig.update_layout(xaxis_tickprefix="$", xaxis_tickformat="0.2")
-        else:
-            fig.update_layout(xaxis_tickformat="~s")
+                fig.add_trace(trace)
+                fig.update_xaxes(**axis_format)
 
     subtitle = " - ".join(part for part in (experiment_name, metric_name) if part)
     if is_individual:
@@ -347,23 +374,16 @@ def render_forest_plot(
         xaxis_title = metric_name or "Success Rate"
         yaxis_title = "Cell"
     else:
-        lift_label = (
-            {
-                "relative": "Relative Lift",
-                "absolute": "Absolute Lift",
-                "incremental": "Incremental Lift",
-                "revenue": "Revenue Lift",
-                "roas": "ROAS Lift",
-                "cpa": "CPA Lift",
-            }.get(incremental_results["lift_type"], "Lift")
-            if incremental_results is not None
-            else "Lift"
-        )
-        title = f"{lift_label} of {names[0]} vs. {names[1]}{f': {subtitle}' if subtitle else ''}"
-        xaxis_title = lift_label
+        panels = incremental_results if isinstance(incremental_results, list) else [incremental_results]
+        labels = [_LIFT_LABELS.get(r["lift_type"], "Lift") if r is not None else "Lift" for r in panels]
+        title = f"{' and '.join(labels)} of {names[0]} vs. {names[1]}{f': {subtitle}' if subtitle else ''}"
+        # With several panels each x-axis carries its own title.
+        xaxis_title = labels[0] if len(labels) == 1 else None
         yaxis_title = ""
-    fig.update_layout(title_text=title, xaxis_title=xaxis_title, yaxis_title=yaxis_title)
+    fig.update_layout(title_text=title, yaxis_title=yaxis_title)
+    if xaxis_title is not None:
+        fig.update_layout(xaxis_title=xaxis_title)
     apply_dark_mode(fig, dark_mode)
     if reverse_plot:
-        fig.update_layout(yaxis={"autorange": "reversed"})
+        fig.update_yaxes(autorange="reversed")
     fig.show()  # type: ignore[no-untyped-call]

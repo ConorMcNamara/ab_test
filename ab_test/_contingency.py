@@ -62,6 +62,8 @@ class BaseContingencyTable:
         self.trials: list[int] = []
         self.incremental_results: dict[str, Any] | None = None
         self.individual_results: dict[str, dict[str, float]] = {}
+        # Options of the last analyze() call, so plot(lift="both") can rerun it for the other scale.
+        self._analyze_settings: dict[str, Any] | None = None
 
     def _total_row(self) -> list[Any]:
         """Return the ``"Total"`` row appended to :meth:`to_list`."""
@@ -228,6 +230,7 @@ class BaseContingencyTable:
         reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
+        lift: str | None = None,
         dark_mode: bool = False,
     ) -> None:
         """Plot the point estimates as well as confidence/credible intervals.
@@ -246,13 +249,22 @@ class BaseContingencyTable:
             ``"tol_muted"``, ``"tol_light"``.
             If a list, each item corresponds to a color for the relevant group.
             If a dict, keys are group names and values are colors.
+        lift : {None, "both"}, default=None
+            ``None`` plots the lift from the last .analyze() call. ``"both"``
+            plots absolute and relative lift side by side, each with its own
+            interval, by rerunning .analyze() for both scales with the same
+            settings (only for ``is_individual=False``; the stored results are
+            left unchanged).
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines.
 
         Raises
         ------
         ValueError
-            If ``is_individual`` is False and .analyze() has not been run yet.
+            If ``is_individual`` is False and .analyze() has not been run yet,
+            if ``lift`` is not ``None`` or ``"both"``, if ``lift="both"`` is
+            used with ``is_individual=True``, or if the .analyze() settings
+            cannot produce an interval on both scales.
         KeyError
             If ``is_individual`` is True and .analyze_individually() has not
             been run yet.
@@ -264,10 +276,15 @@ class BaseContingencyTable:
         (for ``is_individual=True``) — those methods populate the results
         this function plots.
         """
+        if lift not in (None, "both"):
+            raise ValueError(f"lift must be None or 'both', got {lift!r}")
+        if lift == "both" and is_individual:
+            raise ValueError("lift='both' compares the variants; use it with is_individual=False")
+        incremental = self._both_lift_results() if lift == "both" else self.incremental_results
         render_forest_plot(
             self.names,
             self.individual_results,
-            self.incremental_results,
+            incremental,
             is_individual=is_individual,
             reverse_plot=reverse_plot,
             color=color,
@@ -275,6 +292,27 @@ class BaseContingencyTable:
             metric_name=self.metric_name,
             dark_mode=dark_mode,
         )
+
+    def _both_lift_results(self) -> list[dict[str, Any]]:
+        """Rerun analyze() for absolute and relative lift with its last settings, restoring the stored results."""
+        if self.incremental_results is None or self._analyze_settings is None:
+            raise ValueError("Call .analyze() before plotting incremental results.")
+        analyze = getattr(self, "analyze")
+        saved_results, saved_settings = self.incremental_results, self._analyze_settings
+        results = []
+        try:
+            for lift in ("absolute", "relative"):
+                try:
+                    analyze(lift=lift, **saved_settings)
+                except (NotImplementedError, ValueError) as err:
+                    raise ValueError(
+                        f"lift='both' needs a {lift}-lift interval, which the last analyze() settings "
+                        f"cannot produce: {err}"
+                    ) from err
+                results.append(dict(self.incremental_results))
+        finally:
+            self.incremental_results, self._analyze_settings = saved_results, saved_settings
+        return results
 
     def __str__(self) -> str:
         """Return a grid-formatted string representation of the contingency table."""
