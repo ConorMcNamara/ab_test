@@ -286,6 +286,37 @@ class TestCupacPowerCalculations:
             cupac_adjusted_power(-0.1)
 
 
+@pytest.mark.slow
+class TestCupacPowerMatchesSimulation:
+    @staticmethod
+    def test_power_matches_simulation():
+        """``cupac_adjusted_power`` at the realised R² matches the test's rejection rate."""
+        rng = np.random.default_rng(11)
+        n_sims = 4000
+        n = 1500
+        baseline = 0.5
+        effect = 0.03
+        group = np.array(["control"] * n + ["treatment"] * n)
+
+        rejections = 0
+        r_squareds = []
+        for _ in range(n_sims):
+            # A strong covariate: it explains about 27% of the outcome variance.
+            covariate = rng.uniform(-1, 1, 2 * n)
+            converted = rng.binomial(1, baseline + 0.45 * covariate + effect * (group == "treatment"))
+            df = pd.DataFrame({"group": group, "converted": converted, "pre_visits": covariate})
+            exp = CupacExperiment(df, "converted", "group", ["pre_visits"], "control", "treatment", method="lin").fit()
+            rejections += exp.p_value < 0.05
+            r_squareds.append(exp.variance_reduction)
+
+        mc_power = rejections / n_sims
+        analytical_power = abtest_power(
+            [n, n], baseline, effect, lift="absolute", power=cupac_adjusted_power(float(np.mean(r_squareds)))
+        )
+        # Monte Carlo SE is about 0.008; unadjusted power would be 0.38.
+        assert analytical_power == pytest.approx(mc_power, abs=0.025)
+
+
 class TestCupacStatisticalProperties:
     @staticmethod
     def test_type_i_error_control():
