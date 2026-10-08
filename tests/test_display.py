@@ -4,9 +4,13 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pytest
 
-from ab_test._display import render_forest_plot
+from ab_test._display import combine_lift_panels, render_forest_plot
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
+from ab_test.bayesian_binomial.diff_in_diff import BayesianDiffInDiff
+from ab_test.bayesian_binomial.stratified import BayesianStratifiedContingencyTable
 from ab_test.frequentist_binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.diff_in_diff import DiffInDiff
+from ab_test.frequentist_binomial.stratified import StratifiedContingencyTable
 
 DARK_BACKGROUND = pio.templates["plotly_dark"].layout.paper_bgcolor
 
@@ -153,3 +157,79 @@ class TestForestPlotBothLifts:
         table.analyze(lift="absolute", test_method="z")
         with pytest.raises(ValueError, match="relative-lift interval"):
             table.plot(is_individual=False, lift="both")
+
+
+def _strata(cls, *prior):
+    table = cls("Checkout", "conversion")
+    for stratum, (control, treatment) in {"desktop": (120, 140), "mobile": (80, 95)}.items():
+        table.add("Control", control, 1000, *prior, stratum=stratum)
+        table.add("Treatment", treatment, 1000, *prior, stratum=stratum)
+    return table
+
+
+def _segments(table_cls, did_cls, *prior):
+    men = table_cls("Men", "converted").add("Control", 100, 1000, *prior).add("Treatment", 130, 1000, *prior)
+    women = table_cls("Women", "converted").add("Control", 120, 1000, *prior).add("Treatment", 125, 1000, *prior)
+    return did_cls(men, women)
+
+
+SEGMENT_PLOTS = {
+    "stratified": (lambda: _strata(StratifiedContingencyTable), {}),
+    "bayes_stratified": (lambda: _strata(BayesianStratifiedContingencyTable, 1, 1), {"n_samples": 5_000}),
+    "diff_in_diff": (lambda: _segments(ContingencyTable, DiffInDiff), {}),
+    "bayes_diff_in_diff": (
+        lambda: _segments(BayesianContingencyTable, BayesianDiffInDiff, 1, 1),
+        {"n_samples": 5_000},
+    ),
+}
+
+
+class TestSegmentPlotsBothLifts:
+    @pytest.mark.parametrize("name", SEGMENT_PLOTS)
+    def test_both_draws_two_panels(self, shown, name):
+        make, kwargs = SEGMENT_PLOTS[name]
+        make().plot(lift="absolute", **kwargs)
+        n_rows = len(shown[-1].data)
+        make().plot(lift="both", **kwargs)
+        fig = shown[-1]
+        assert len(fig.data) == 2 * n_rows
+        assert {trace.xaxis for trace in fig.data} == {"x", "x2"}
+        assert (fig.layout.xaxis.title.text, fig.layout.xaxis2.title.text) == ("Risk Difference", "Relative Lift")
+        assert "Risk Difference and Relative Lift" in fig.layout.title.text
+        assert len(fig.layout.shapes) == 2  # a zero line in each panel
+
+    @pytest.mark.parametrize("name", ["stratified", "diff_in_diff"])
+    def test_panels_match_single_lift_plots(self, shown, name):
+        make, _ = SEGMENT_PLOTS[name]
+        singles = {}
+        for lift in ("absolute", "relative"):
+            make().plot(lift=lift)
+            singles[lift] = shown[-1]
+        make().plot(lift="both")
+        both = shown[-1]
+        n_rows = len(singles["absolute"].data)
+        for panel, lift in ((both.data[:n_rows], "absolute"), (both.data[n_rows:], "relative")):
+            for combined, single in zip(panel, singles[lift].data, strict=True):
+                assert combined.y == single.y
+                assert combined.x == pytest.approx(single.x)
+                assert combined.error_x.array == pytest.approx(single.error_x.array)
+                assert combined.error_x.arrayminus == pytest.approx(single.error_x.arrayminus)
+
+    @staticmethod
+    def test_dark_mode_and_reversed_axis(shown):
+        _strata(StratifiedContingencyTable).plot(lift="both", dark_mode=True)
+        fig = shown[-1]
+        assert fig.layout.template.layout.paper_bgcolor == DARK_BACKGROUND
+        assert fig.layout.yaxis.autorange == "reversed"
+
+
+class TestCombineLiftPanels:
+    @staticmethod
+    def test_legend_only_on_first_panel_and_formats_copied():
+        left = go.Figure(go.Scatter(x=[0.1], y=["a"], name="a")).update_layout(xaxis_tickformat=",.1%", showlegend=True)
+        right = go.Figure(go.Scatter(x=[0.2], y=["a"], name="a")).update_layout(xaxis_tickformat="$,")
+        fig = combine_lift_panels([left, right], "Title", ["Left", "Right"])
+        assert [trace.showlegend for trace in fig.data] == [None, False]
+        assert (fig.layout.xaxis.tickformat, fig.layout.xaxis2.tickformat) == (",.1%", "$,")
+        assert fig.layout.title.text == "Title"
+        assert fig.layout.showlegend is True

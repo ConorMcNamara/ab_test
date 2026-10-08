@@ -20,7 +20,7 @@ import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 from tabulate import tabulate
 
-from ab_test._display import apply_dark_mode, convert_to_tabulate_str, resolve_plot_color
+from ab_test._display import apply_dark_mode, combine_lift_panels, convert_to_tabulate_str, resolve_plot_color
 from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_binomial.contingency import ContingencyTable
 
@@ -430,6 +430,8 @@ class DiffInDiff:
         lift : str, default="absolute"
             Scale for treatment effects: ``"absolute"``, ``"relative"``,
             ``"incremental"``, ``"roas"``, or ``"revenue"``.
+            ``"both"`` draws absolute and relative lift side by side, sharing
+            the y-axis, each with its own interval.
         alpha : float, default=0.05
             Significance level for confidence intervals.
         reverse_plot : bool, default=True
@@ -442,6 +444,29 @@ class DiffInDiff:
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
         """
+        if isinstance(lift, str) and lift.casefold() == "both":
+            figures = [
+                self._plot_figure(lift=panel_lift, alpha=alpha, reverse_plot=reverse_plot, color=color)
+                for panel_lift in ("absolute", "relative")
+            ]
+            fig = combine_lift_panels(
+                figures,
+                f"{self.metric_name} — Treatment Effect by Segment (Risk Difference and Relative Lift)",
+                ["Risk Difference", "Relative Lift"],
+            )
+        else:
+            fig = self._plot_figure(lift=lift, alpha=alpha, reverse_plot=reverse_plot, color=color)
+        apply_dark_mode(fig, dark_mode)
+        fig.show()  # type: ignore[no-untyped-call]
+
+    def _plot_figure(
+        self,
+        lift: str = "absolute",
+        alpha: float = 0.05,
+        reverse_plot: bool = True,
+        color: str | dict[str, Any] | list[Any] | None = None,
+    ) -> go.Figure:
+        """Build the forest plot for a single lift (see :meth:`plot`)."""
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
@@ -513,5 +538,4 @@ class DiffInDiff:
             template="plotly_white",
         )
 
-        apply_dark_mode(fig, dark_mode)
-        fig.show()
+        return fig
