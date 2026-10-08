@@ -31,7 +31,8 @@ class TestScorePower:
         baseline = 0.10
         alt_lift = 0.50
         group_sizes = [1000, 1000]
-        expected = 0.8323679253014326
+        # 10% -> 15%; a 400,000-run simulation of the score test gives 0.9248.
+        expected = 0.922291
 
         actual = abtest_power(group_sizes, baseline, alt_lift, lift="relative")
         assert actual == pytest.approx(expected)
@@ -41,7 +42,8 @@ class TestScorePower:
         baseline = 0.10
         alt_lift = 0.04
         group_sizes = [1000, 1000]
-        expected = 0.8464821088914328
+        # 10% -> 14%; a 400,000-run simulation of the score test gives 0.7891.
+        expected = 0.785951
 
         actual = abtest_power(group_sizes, baseline, alt_lift, lift="absolute")
         assert actual == pytest.approx(expected)
@@ -50,28 +52,32 @@ class TestScorePower:
     def test_minimum_detectable_lift_relative_lift():
         baseline = 0.10
         group_sizes = [1000, 1000]
-        expected = 0.47324371337890625
+        expected = 0.40771027
 
         actual = minimum_detectable_lift(group_sizes, baseline, lift="relative")
         assert actual == pytest.approx(expected)
+        assert abtest_power(group_sizes, baseline, actual, lift="relative") == pytest.approx(0.8, abs=1e-4)
 
     @staticmethod
     def test_minimum_detectable_lift_absolute_lift():
         baseline = 0.10
         group_sizes = [1000, 1000]
-        expected = 0.03758753299713134
+        # The same effect as the relative MDL above: 0.04077 = 0.4077 * 10%.
+        expected = 0.04077145
 
         actual = minimum_detectable_lift(group_sizes, baseline, lift="absolute")
         assert actual == pytest.approx(expected)
+        assert abtest_power(group_sizes, baseline, actual, lift="absolute") == pytest.approx(0.8, abs=1e-4)
 
     @staticmethod
     def test_minimum_detectable_drop():
         baseline = 0.10
         group_sizes = [1000, 1000]
-        expected = 0.32122573852539066
+        expected = 0.34516525
 
         actual = minimum_detectable_lift(group_sizes, baseline, drop=True)
         assert actual == pytest.approx(expected)
+        assert abtest_power(group_sizes, baseline, -actual, lift="relative") == pytest.approx(0.8, abs=1e-4)
 
     @staticmethod
     def test_minimum_detectable_drop_absolute():
@@ -108,7 +114,8 @@ class TestScorePower:
     def test_required_sample_size_relative_lift():
         baseline = 0.10
         alt_lift = 0.50
-        expected = 1843
+        # 10% -> 15%: Fleiss' textbook formula gives 1,371 in total.
+        expected = 1375
 
         actual = required_sample_size(baseline, alt_lift, lift="relative")
         assert actual == pytest.approx(expected)
@@ -117,7 +124,8 @@ class TestScorePower:
     def test_required_sample_size_absolute_lift():
         baseline = 0.10
         alt_lift = 0.05
-        expected = 1132
+        # The same 10% -> 15% effect as the relative test above, so the same answer.
+        expected = 1375
 
         actual = required_sample_size(baseline, alt_lift, lift="absolute")
         assert actual == pytest.approx(expected)
@@ -151,9 +159,27 @@ class TestScorePower:
             print(f"Predicted power: {expected:.03%}")
             print(f"Rejected null {b}/{B} times => {b / B:0.3%} in ({lb:.03%}, {ub:.03%})")
 
-        tol = 0.0026
+        # The noncentral chi-squared power is an asymptotic approximation to a discrete
+        # test; against the true alternative it is within ~0.003 here.
+        tol = 0.005
         assert lb - tol <= expected
         assert expected <= ub + tol
+
+
+class TestPowerConsistency:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "group_sizes, baseline, rel", [([1000, 1000], 0.1, 0.5), ([50, 50], 0.1, 3.0), ([500, 1500], 0.2, -0.3)]
+    )
+    def test_relative_and_absolute_agree_for_the_same_alternative(group_sizes, baseline, rel):
+        relative = abtest_power(group_sizes, baseline, rel, lift="relative")
+        absolute = abtest_power(group_sizes, baseline, baseline * rel, lift="absolute")
+        assert relative == pytest.approx(absolute)
+
+    @staticmethod
+    def test_large_relative_lift_is_well_powered():
+        # 10% -> 40% with 50 per arm: the score test rejects ~95% of the time; this used to report 0.40.
+        assert abtest_power([50, 50], 0.1, 3.0, lift="relative") > 0.9
 
 
 class TestScaledLiftPower:

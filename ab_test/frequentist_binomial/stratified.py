@@ -193,9 +193,12 @@ def stratified_power(
 ) -> float:
     """Power of the stratified test under a common treatment effect.
 
-    Computes the probability of rejecting the null hypothesis when the
-    true treatment effect is *alt_lift*, using the inverse-variance
-    weighted estimator across strata.
+    Computes the probability that the Cochran-Mantel-Haenszel test (the test
+    :meth:`StratifiedContingencyTable.analyze` reports) rejects the null
+    hypothesis when the true treatment effect is *alt_lift* in every stratum.
+    The CMH statistic's numerator is approximately normal, with its variance
+    taken under the null (as the test does) for the critical value and under
+    the alternative for its spread.
 
     Parameters
     ----------
@@ -231,16 +234,18 @@ def stratified_power(
 
     n1 = strata_arr[:, 0]
     n2 = strata_arr[:, 1]
+    t = n1 + n2
+    p_pooled = (n1 * p1 + n2 * p2) / t
 
-    if lift == "absolute":
-        var_k = p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2
-        ncp = alt_lift**2 * float(np.sum(1 / var_k))
-    else:
-        var_log_rr_k = (1 - p1) / (n1 * p1) + (1 - p2) / (n2 * p2)
-        ncp = np.log(1 + alt_lift) ** 2 * float(np.sum(1 / var_log_rr_k))
+    # Numerator of the CMH statistic: sum over strata of a_k - E0[a_k].
+    mean = float(np.sum(n1 * n2 * (p1 - p2) / t))
+    sd_null = math.sqrt(float(np.sum(n1 * n2 * p_pooled * (1 - p_pooled) / (t - 1))))
+    sd_alt = math.sqrt(float(np.sum((n2**2 * n1 * p1 * (1 - p1) + n1**2 * n2 * p2 * (1 - p2)) / t**2)))
 
-    crit = float(ss.chi2.isf(alpha, df=1))
-    return float(ss.ncx2.sf(crit, df=1, nc=ncp))
+    z_crit = float(ss.norm.isf(alpha / 2))
+    return float(
+        ss.norm.sf((z_crit * sd_null - abs(mean)) / sd_alt) + ss.norm.cdf((-z_crit * sd_null - abs(mean)) / sd_alt)
+    )
 
 
 _VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue", "cpa"})

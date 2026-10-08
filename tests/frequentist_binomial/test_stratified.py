@@ -317,6 +317,46 @@ class TestCmhTypeIError:
         assert error_rate < alpha + 0.02
 
 
+@pytest.mark.slow
+class TestStratifiedPowerMatchesSimulation:
+    """``stratified_power`` should match the CMH test's simulated rejection rate."""
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "strata_sizes,baseline_rates,alt_lift,lift",
+        [
+            ([(1000, 1000), (1000, 1000)], [0.10, 0.10], 0.20, "relative"),
+            ([(800, 800), (300, 300)], [0.10, 0.15], 0.15, "relative"),
+            ([(400, 400), (400, 400)], [0.02, 0.30], 0.25, "relative"),
+            # Different baselines with a common absolute lift: CMH weights the
+            # strata differently from inverse-variance pooling, which used to
+            # overstate power here by about 0.10.
+            ([(500, 500), (500, 500)], [0.05, 0.20], 0.03, "absolute"),
+        ],
+    )
+    def test_power_matches_simulation(strata_sizes, baseline_rates, alt_lift, lift):
+        rng = np.random.default_rng(3)
+        n_sims = 10_000
+        alpha = 0.05
+        trials = np.array(strata_sizes)
+        p_control = np.array(baseline_rates)
+        p_treatment = p_control * (1 + alt_lift) if lift == "relative" else p_control + alt_lift
+
+        rejections = 0
+        for _ in range(n_sims):
+            successes = np.column_stack(
+                [rng.binomial(trials[:, 0], p_control), rng.binomial(trials[:, 1], p_treatment)]
+            )
+            _, pval = cmh_test(successes, trials)
+            if pval < alpha:
+                rejections += 1
+
+        mc_power = rejections / n_sims
+        analytical_power = stratified_power(strata_sizes, baseline_rates, alt_lift, alpha=alpha, lift=lift)
+        # Monte Carlo SE is at most 0.005.
+        assert analytical_power == pytest.approx(mc_power, abs=0.015)
+
+
 class TestStratifiedIncremental:
     @staticmethod
     def _make_table():

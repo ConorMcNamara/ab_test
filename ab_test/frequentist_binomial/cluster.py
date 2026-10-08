@@ -9,8 +9,9 @@ The analysis uses a cluster-summary Welch t-test on per-cluster
 proportions, which is the standard approach for cluster-randomized
 trials with binary outcomes (Donner & Klar, 2000).  Power and
 sample-size calculations use the design-effect adjustment to deflate
-effective sample sizes, integrating with the existing pluggable power
-framework via :func:`cluster_adjusted_power`.
+effective sample sizes, with a t critical value for the number of clusters,
+integrating with the existing pluggable power framework via
+:func:`cluster_adjusted_power`.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import plotly.graph_objects as go
 import scipy.stats as ss
+from scipy.optimize import brentq
 
 from ab_test._display import (
     apply_dark_mode,
@@ -195,7 +197,10 @@ def cluster_adjusted_power(
     -------
     callable
         A power function with the same signature as ``power_func`` but with
-        effective sample sizes deflated by the design effect.
+        effective sample sizes deflated by the design effect, and with the
+        two-sided critical value taken from a t distribution with
+        ``n_clusters - 2`` degrees of freedom to match the cluster-summary
+        t-test used by :class:`ClusterRandomizedTrial`.
     """
     deff = design_effect(avg_cluster_size, icc)
 
@@ -206,9 +211,34 @@ def cluster_adjusted_power(
         alpha: float = 0.05,
     ) -> float:
         n_eff = [ni / deff for ni in n]
-        return power_func(n_eff, p_null, p_alt, alpha=alpha)
+        z_power = power_func(n_eff, p_null, p_alt, alpha=alpha)
+        df = sum(n) / avg_cluster_size - 2
+        if df <= 0:
+            return 0.0
+        return _t_test_power(z_power, alpha, df)
 
     return adjusted
+
+
+def _t_test_power(z_power: float, alpha: float, df: float) -> float:
+    """Convert the power of a two-sided z-test to that of a t-test with ``df``.
+
+    The z-test power is inverted to its noncentrality, which is then used as
+    the noncentrality of a t statistic. With few clusters the t-test's larger
+    critical value and heavier tails cost noticeable power.
+    """
+    z_crit = float(ss.norm.isf(alpha / 2))
+    if z_power <= alpha:
+        return z_power
+    if z_power >= 1.0:
+        return 1.0
+
+    def z_test_power(ncp: float) -> float:
+        return float(ss.norm.sf(z_crit - ncp) + ss.norm.cdf(-z_crit - ncp)) - z_power
+
+    ncp = brentq(z_test_power, 0.0, z_crit + 40.0)
+    t_crit = float(ss.t.isf(alpha / 2, df))
+    return float(ss.nct.sf(t_crit, df, ncp) + ss.nct.cdf(-t_crit, df, ncp))
 
 
 def cluster_required_sample_size(

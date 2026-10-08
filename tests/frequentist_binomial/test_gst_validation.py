@@ -7,7 +7,8 @@ produces accurate power estimates via simulation.
 import numpy as np
 import pytest
 
-from ab_test.frequentist_binomial.gst import GroupSequentialDesign, pocock_spending
+from ab_test.frequentist_binomial.gst import GroupSequentialDesign, gst_adjusted_power, pocock_spending
+from ab_test.frequentist_binomial.power_calculations import abtest_power
 
 
 @pytest.mark.slow
@@ -84,37 +85,40 @@ class TestGstPowerValidation:
 
     @staticmethod
     def test_power_matches_simulation():
-        np.random.seed(7)
+        # Goes through abtest_power with a relative lift, as users do, at a
+        # moderate power where an error in the power formula would show.
+        rng = np.random.default_rng(7)
         alpha = 0.05
-        n_sims = 2000
-        n_per_group = 5000
+        n_sims = 20_000
+        n_per_group = 3000
         true_p_a = 0.10
-        true_p_b = 0.13
+        true_p_b = 0.12
         K = 3
 
         design = GroupSequentialDesign(K, alpha=alpha)
+        per_look = n_per_group // K
         rejections = 0
 
         for _ in range(n_sims):
-            all_a = np.random.binomial(1, true_p_a, n_per_group)
-            all_b = np.random.binomial(1, true_p_b, n_per_group)
-            rejected = False
-            for look in range(1, K + 1):
-                n_at_look = int(n_per_group * look / K)
-                s_a = int(all_a[:n_at_look].sum())
-                s_b = int(all_b[:n_at_look].sum())
-                if design.test([n_at_look, n_at_look], [s_a, s_b], look):
-                    rejected = True
-                    break
-            if rejected:
+            s_a = np.cumsum(rng.binomial(per_look, true_p_a, K))
+            s_b = np.cumsum(rng.binomial(per_look, true_p_b, K))
+            if any(
+                design.test([per_look * look] * 2, [int(s_a[look - 1]), int(s_b[look - 1])], look)
+                for look in range(1, K + 1)
+            ):
                 rejections += 1
 
         mc_power = rejections / n_sims
 
-        p_null = [true_p_a, true_p_a]
-        p_alt = [true_p_a, true_p_b]
-        analytical_power = design.power([n_per_group, n_per_group], p_null, p_alt)
+        analytical_power = abtest_power(
+            [n_per_group, n_per_group],
+            true_p_a,
+            (true_p_b - true_p_a) / true_p_a,
+            alpha=alpha,
+            power=gst_adjusted_power(K, sided="two"),
+        )
 
-        assert abs(mc_power - analytical_power) < 0.05, (
+        # Monte Carlo SE is about 0.0033 at this power.
+        assert abs(mc_power - analytical_power) < 0.015, (
             f"MC power {mc_power:.4f} differs from analytical {analytical_power:.4f}"
         )

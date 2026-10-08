@@ -296,6 +296,23 @@ class TestGroupSequentialDesignPower:
         pwr = d.power([100, 100], [0.10, 0.10], [0.10, 0.1001])
         assert pwr < 0.10
 
+    @staticmethod
+    @pytest.mark.parametrize("sided", ["two", "one"])
+    def test_power_is_a_probability_and_saturates(sided):
+        # Large effects used to push the density off the integration grid:
+        # power overshot 1 and then collapsed towards 0.
+        d = GroupSequentialDesign(3, alpha=0.05, sided=sided)
+        powers = [d.power([n, n], [0.11, 0.11], [0.10, 0.12]) for n in (1_000, 5_000, 20_000, 100_000, 1_000_000)]
+        assert all(0.0 <= p <= 1.0 for p in powers)
+        assert powers == sorted(powers)
+        assert powers[-1] == pytest.approx(1.0)
+
+    @staticmethod
+    @pytest.mark.parametrize("sided", ["two", "one"])
+    def test_zero_drift_power_is_alpha(sided):
+        d = GroupSequentialDesign(4, alpha=0.05, sided=sided)
+        assert d.power([5000, 5000], [0.10, 0.10], [0.10, 0.10]) == pytest.approx(0.05, abs=1e-6)
+
 
 # ---------------------------------------------------------------------------
 # Power / sample-size wrappers

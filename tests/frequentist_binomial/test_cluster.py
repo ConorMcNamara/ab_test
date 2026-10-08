@@ -170,13 +170,26 @@ class TestClusterAdjustedPower:
 
     @staticmethod
     def test_icc_zero_matches_unadjusted():
-        adjusted = cluster_adjusted_power(0.0, 50)
+        # With ICC 0 and one unit per cluster there are thousands of degrees
+        # of freedom, so the t correction is negligible too.
+        adjusted = cluster_adjusted_power(0.0, 1)
         n = [5000, 5000]
         p_null = [0.10, 0.10]
         p_alt = [0.10, 0.12]
         pwr_adj = adjusted(n, p_null, p_alt, alpha=0.05)
         pwr_unadj = score_power(n, p_null, p_alt, alpha=0.05)
-        assert pwr_adj == pytest.approx(pwr_unadj)
+        assert pwr_adj == pytest.approx(pwr_unadj, abs=1e-4)
+
+    @staticmethod
+    def test_few_clusters_lower_power():
+        # Same individuals and ICC, but 5 clusters per arm instead of 50:
+        # the t-test's 8 degrees of freedom cost power.
+        n = [1000, 1000]
+        p_null = [0.10, 0.10]
+        p_alt = [0.10, 0.12]
+        many = cluster_adjusted_power(0.0, 20)(n, p_null, p_alt)
+        few = cluster_adjusted_power(0.0, 200)(n, p_null, p_alt)
+        assert few < many - 0.05
 
     @staticmethod
     def test_higher_icc_lower_power():
@@ -208,7 +221,7 @@ class TestClusterRequiredSampleSize:
     @staticmethod
     def test_icc_zero_matches_unadjusted():
         fixed = required_sample_size(0.10, 0.20, alpha=0.05, beta=0.2)
-        clustered = cluster_required_sample_size(0.10, 0.20, 0.0, 50)
+        clustered = cluster_required_sample_size(0.10, 0.20, 0.0, 1)
         assert clustered == fixed
 
 

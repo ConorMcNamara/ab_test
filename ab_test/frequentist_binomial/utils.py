@@ -82,67 +82,44 @@ def simple_hypothesis_from_composite(
     The power formula relies on simple null and alternative hypotheses of the
     form: "under the null hypothesis, the success rate in the first group is x,
     and the success rate in the second group is y". We care more about
-    specifying composite hypotheses like, "under the null hypothesis, the
-    success rates in the two groups are equal", or "under the alternative
-    hypothesis, the success rate in the second group is 10% higher than in the
-    first group".
+    composite hypotheses like "under the alternative hypothesis, the success
+    rate in the second group is 10% higher than in the first group".
 
-    This function translates such composite null and alternative hypotheses to
-    simple hypotheses. We need the baseline success rate as well. Consider this
-    translation mechanism::
-
-       H0: pa = baseline, pb = baseline * (1 + null_lift)
-       H1: pa = baseline, pb = baseline * (1 + alt_lift)
-
-    The success rate in the first group is the same either way, but the success
-    rate in the second group depends on the null/alt lift. This seems innocent
-    enough, but consider the noncentrality parameter of the chi-2 distribution
-    under the alternative hypothesis::
+    The alternative is taken at face value: the first group has the baseline
+    rate and the second has ``baseline * (1 + alt_lift)`` (relative) or
+    ``baseline + alt_lift`` (absolute). The null rates are the MLE under H0
+    for the counts expected under that alternative -- the pooled rate when
+    ``null_lift`` is 0 -- which is where the score test's restricted estimate
+    settles when the alternative is true. The noncentrality of the score
+    statistic is then
 
                  na * (pa - pi_a)^2     nb * (pb - pi_b)^2
       lambda =   ------------------  +  ------------------ ,
                   pi_a * (1 - pi_a)      pi_b * (1 - pi_b)
 
-    where pi_a, pi_b are the success rates in the first and second groups under
-    H0, pa and pb are for H1, and na and nb are the group sizes. In our naive
-    approach, pa is always equal to pi_a (is equal to the baseline), so the
-    first term is always zero. No matter how big or small na is, the
-    noncentrality parameter is always the same, so the power is always the
-    same. That's not right.
+    with (pa, pb) the alternative and (pi_a, pi_b) the null rates. Choosing
+    the alternative to minimise lambda instead (as this function used to)
+    shrinks a relative lift towards zero rates and understates power badly:
+    10% -> 40% with 50 per arm gave 0.40 for a test whose power is 0.95.
 
-    The power of the test increases with lambda, so we might reasonably ask,
-    what is the lowest lambda could be while still being aligned with the
-    information given? If we leave the success rates under H0 alone (pi_a =
-    baseline and pi_b = pi_a * (1 + null_lift)), which seems reasonable enough,
-    we can minimize lambda subject to the constraint pb = pa * (1 + alt_lift).
-    Treating na, nb, pi_a, and pi_b as data, this is a convex optimization
-    problem. The solution (pa, pb) is the simple alternative hypothesis.
+    Raises
+    ------
+    ValueError
+        If the alternative implies a success rate outside (0, 1).
     """
     na = group_sizes[0]
     nb = group_sizes[1]
 
-    p_null_a = baseline
-    if lift == "relative":
-        p_null_b = (1 + null_lift) * baseline
-    else:
-        p_null_b = baseline + null_lift
+    p_alt_a = baseline
+    p_alt_b = baseline * (1 + alt_lift) if lift == "relative" else baseline + alt_lift
+    if not (0 < p_alt_a < 1 and 0 < p_alt_b < 1):
+        raise ValueError(
+            f"The alternative implies success rates of {p_alt_a:.4g} and {p_alt_b:.4g}; both must be in (0, 1)"
+        )
 
-    if lift == "relative":
-        p_alt_a = (2 * na / (1 - p_null_a)) + (2 * nb * (1 + alt_lift) / (1 - p_null_b))
-        p_alt_a /= (2 * na) / (p_null_a * (1 - p_null_a)) + (2 * nb * (1 + alt_lift) ** 2) / (p_null_b * (1 - p_null_b))
-    else:
-        p_alt_a = 2 * na / (1 - p_null_a)
-        p_alt_a += 2 * nb * (p_null_b - alt_lift) / (p_null_b * (1 - p_null_b))
-        p_alt_a /= 2 * na / (p_null_a * (1 - p_null_a)) + 2 * nb / (p_null_b * (1 - p_null_b))
-
-    if lift == "relative":
-        p_alt_b = (1 + alt_lift) * p_alt_a
-    else:
-        p_alt_b = p_alt_a + alt_lift
-
-    p_null = [p_null_a, p_null_b]
+    p_null = mle_under_null(group_sizes, [na * p_alt_a, nb * p_alt_b], null_lift=null_lift, lift=lift)
     p_alt = [p_alt_a, p_alt_b]
-    return p_null, p_alt
+    return [float(p_null[0]), float(p_null[1])], p_alt
 
 
 def observed_lift(
