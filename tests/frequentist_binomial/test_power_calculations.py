@@ -130,6 +130,21 @@ class TestScorePower:
         actual = required_sample_size(baseline, alt_lift, lift="absolute")
         assert actual == pytest.approx(expected)
 
+    @staticmethod
+    @pytest.mark.parametrize(
+        "baseline,alt_lift,lift,expected",
+        [(0.3, 1.0, "relative", 88), (0.2, 0.3, "absolute", 80)],
+    )
+    def test_required_sample_size_small_answer(baseline, alt_lift, lift, expected):
+        # Answers under 100 used to hang: the integer midpoint got stuck at ss_lower.
+        actual = required_sample_size(baseline, alt_lift, lift=lift)
+        assert actual == expected
+
+        def pwr(ss):
+            return abtest_power([ss // 2, ss // 2], baseline, alt_lift, lift=lift)
+
+        assert pwr(actual) >= 0.8 > pwr(actual - 1)
+
     @pytest.mark.slow
     @staticmethod
     def test_coverage(capsys):

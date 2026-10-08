@@ -345,7 +345,9 @@ def required_sample_size(
             lift=lift,
         )
 
-    while ss_upper - ss_lower > tol * ss_lower:
+    # Stop at a gap of one: below 100 the relative tolerance is under 1, and the
+    # integer midpoint would then equal ss_lower forever.
+    while ss_upper - ss_lower > max(1, tol * ss_lower):
         ss = int(0.5 * (ss_lower + ss_upper))
         pwr = abtest_power(
             sample_size_to_group_sizes(ss),
