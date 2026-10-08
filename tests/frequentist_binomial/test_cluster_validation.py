@@ -70,7 +70,7 @@ class TestClusterPowerCalibration:
     def test_power_matches_simulation():
         rng = np.random.RandomState(7)
         alpha = 0.05
-        n_sims = 2000
+        n_sims = 4000
         K = 10
         m = 200
         p_ctrl = 0.10
@@ -104,6 +104,9 @@ class TestClusterPowerCalibration:
             power=adj_power,
         )
 
-        assert abs(mc_power - analytical_power) < 0.10, (
+        # Monte Carlo SE is about 0.0076 at this power. With 10 clusters per
+        # arm, ignoring the t-test's 18 degrees of freedom overstates power by
+        # about 0.04, so this tolerance catches it.
+        assert abs(mc_power - analytical_power) < 0.025, (
             f"MC power {mc_power:.4f} differs from analytical {analytical_power:.4f}"
         )
