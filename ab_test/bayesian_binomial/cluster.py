@@ -256,6 +256,7 @@ class BayesianClusterRandomizedTrial:
         self._clusters: dict[str, dict[str, dict[str, int]]] = {}
         self._groups: list[str] = []
         self.pooled_results: dict[str, Any] | None = None
+        self._analyze_kwargs: dict[str, Any] = {}
         self.cluster_results: dict[str, dict[str, Any]] | None = None
         self.model_params: dict[str, Any] | None = None
 
@@ -304,6 +305,10 @@ class BayesianClusterRandomizedTrial:
             "successes": successes,
             "trials": trials,
         }
+        # New data invalidates any cached fit and results.
+        self.pooled_results = None
+        self.cluster_results = None
+        self.model_params = None
         return self
 
     def _build_arm_arrays(self) -> dict[str, tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]]:
@@ -416,6 +421,14 @@ class BayesianClusterRandomizedTrial:
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
+        self._analyze_kwargs = {
+            "lift": lift,
+            "confidence_level": confidence_level,
+            "n_samples": n_samples,
+            "cred_int_method": cred_int_method,
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+        }
 
         params = self._fit_model()
         ctrl, treat = self._groups[0], self._groups[1]
@@ -575,31 +588,34 @@ class BayesianClusterRandomizedTrial:
 
     def summary(
         self,
-        lift: str = "relative",
-        confidence_level: float = 0.95,
-        n_samples: int = 100_000,
-        cred_int_method: Literal["credible", "hdi"] = "credible",
-        low_threshold: float = -0.1,
-        high_threshold: float = 0.1,
+        lift: str | None = None,
+        confidence_level: float | None = None,
+        n_samples: int | None = None,
+        cred_int_method: Literal["credible", "hdi"] | None = None,
+        low_threshold: float | None = None,
+        high_threshold: float | None = None,
     ) -> dict[str, Any]:
         """Return a dict of analysis results.
 
-        Calls :meth:`analyze` if results have not been computed yet, then
-        returns a dict combining the pooled results and model parameters.
+        Returns the results of the last :meth:`analyze` call combined with the
+        model parameters. If any argument is given and differs from that call
+        (or nothing has been analyzed yet), :meth:`analyze` is re-run with the
+        new values and the previous call's other settings. Omitted arguments
+        default to the last analysis's values, or to :meth:`analyze`'s defaults.
 
         Parameters
         ----------
-        lift : str, default='relative'
+        lift : str, optional
             Lift type.
-        confidence_level : float, default=0.95
+        confidence_level : float, optional
             Credible interval probability mass.
-        n_samples : int, default=100_000
+        n_samples : int, optional
             Number of posterior samples.
-        cred_int_method : {"credible", "hdi"}, default="credible"
+        cred_int_method : {"credible", "hdi"}, optional
             Credible interval method.
-        low_threshold : float, default=-0.1
+        low_threshold : float, optional
             Lower ROPE bound.
-        high_threshold : float, default=0.1
+        high_threshold : float, optional
             Upper ROPE bound.
 
         Returns
@@ -607,15 +623,18 @@ class BayesianClusterRandomizedTrial:
         dict
             Combined pooled results and model parameters.
         """
-        if self.pooled_results is None:
-            self.analyze(
-                lift=lift,
-                confidence_level=confidence_level,
-                n_samples=n_samples,
-                cred_int_method=cred_int_method,
-                low_threshold=low_threshold,
-                high_threshold=high_threshold,
-            )
+        given: dict[str, Any] = {
+            "lift": lift.casefold() if lift is not None else None,
+            "confidence_level": confidence_level,
+            "n_samples": n_samples,
+            "cred_int_method": cred_int_method,
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+        }
+        requested = {k: v for k, v in given.items() if v is not None}
+        if self.pooled_results is None or any(self._analyze_kwargs.get(k) != v for k, v in requested.items()):
+            kwargs: dict[str, Any] = {**self._analyze_kwargs, **requested}
+            self.analyze(**kwargs)
         assert self.pooled_results is not None
         assert self.model_params is not None
         return {**self.pooled_results, "model_params": self.model_params}
@@ -640,7 +659,8 @@ class BayesianClusterRandomizedTrial:
         Parameters
         ----------
         lift : str, default='relative'
-            Lift type for the pooled credible interval.
+            Has no effect: the plot shows arm-level conversion rates, not a
+            lift. Kept for backward compatibility.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -656,13 +676,8 @@ class BayesianClusterRandomizedTrial:
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
         """
-        if self.pooled_results is None or self.model_params is None:
-            self.analyze(
-                lift=lift,
-                confidence_level=confidence_level,
-                n_samples=n_samples,
-                cred_int_method=cred_int_method,
-            )
+        if self.model_params is None:
+            self._fit_model()
         assert self.model_params is not None
 
         plot_color = resolve_plot_color(color)
@@ -723,7 +738,6 @@ class BayesianClusterRandomizedTrial:
                 )
             )
 
-        fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
         fig.update_layout(
             title=f"{self.experiment_name} — {self.metric_name} (Cluster Proportions)",
             xaxis_tickformat=",.1%",

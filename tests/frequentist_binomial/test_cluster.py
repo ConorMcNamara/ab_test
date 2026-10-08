@@ -512,3 +512,26 @@ class TestFiellerRelativeInterval:
             crt.analyze(lift="relative")
             covered += crt._analyzed["ci_lower"] <= 0.5 <= crt._analyzed["ci_upper"]
         assert covered / reps >= 0.935
+
+
+class TestSummaryArguments:
+    @staticmethod
+    def test_summary_reanalyzes_when_alpha_changes():
+        # Used to return the cached alpha=0.10 results for summary(alpha=0.05).
+        crt = _make_crt()
+        crt.analyze(lift="absolute", alpha=0.10)
+        result = crt.summary(alpha=0.05)
+        assert result["alpha"] == 0.05
+        assert result["lift_type"] == "absolute"
+
+    @staticmethod
+    def test_summary_without_arguments_returns_last_analysis():
+        crt = _make_crt()
+        crt.analyze(lift="absolute", alpha=0.10)
+        assert crt.summary()["alpha"] == 0.10
+
+    @staticmethod
+    def test_summary_lift_argument():
+        crt = _make_crt()
+        crt.analyze(lift="absolute")
+        assert crt.summary(lift="relative")["lift_type"] == "relative"

@@ -398,6 +398,7 @@ class ClusterRandomizedTrial:
         self._clusters: dict[str, dict[str, Any]] = {}
         self._group_names: list[str] = []
         self._analyzed: dict[str, Any] | None = None
+        self._analyze_kwargs: dict[str, Any] = {}
 
     def add(
         self,
@@ -530,6 +531,15 @@ class ClusterRandomizedTrial:
         _valid_methods = {"welch", "randomization"}
         if method not in _valid_methods:
             raise ValueError(f"method must be one of {sorted(_valid_methods)}, got {method!r}")
+        self._analyze_kwargs = {
+            "lift": lift,
+            "alpha": alpha,
+            "method": method,
+            "n_permutations": n_permutations,
+            "seed": seed,
+            "exact": exact,
+            "n_jobs": n_jobs,
+        }
 
         s_ctrl, m_ctrl, s_treat, m_treat = self._build_arm_data()
 
@@ -669,22 +679,34 @@ class ClusterRandomizedTrial:
             raise RuntimeError("Call analyze() before accessing deff")
         return self._analyzed["deff"]
 
-    def summary(self, alpha: float = 0.05) -> dict[str, Any]:
+    def summary(self, alpha: float | None = None, lift: str | None = None) -> dict[str, Any]:
         """Return the full results as a dictionary.
+
+        Returns the results of the last :meth:`analyze` call. If ``alpha`` or
+        ``lift`` is given and differs from that call (or nothing has been
+        analyzed yet), :meth:`analyze` is re-run with the new value and the
+        previous call's other settings.
 
         Parameters
         ----------
-        alpha : float
-            Significance level. Defaults to 0.05.
+        alpha : float, optional
+            Significance level. Defaults to the last analysis's, or 0.05.
+        lift : str, optional
+            ``"relative"`` or ``"absolute"``. Defaults to the last analysis's,
+            or ``"relative"``.
 
         Returns
         -------
         dict
             Analysis results including lift, CI, p-value, ICC, and DEFF.
         """
-        if self._analyzed is None:
-            self.analyze(alpha=alpha)
-        return dict(self._analyzed)  # type: ignore[arg-type]
+        given: dict[str, Any] = {"alpha": alpha, "lift": lift.casefold() if lift is not None else None}
+        requested = {k: v for k, v in given.items() if v is not None}
+        if self._analyzed is None or any(self._analyze_kwargs.get(k) != v for k, v in requested.items()):
+            kwargs: dict[str, Any] = {**self._analyze_kwargs, **requested}
+            self.analyze(**kwargs)
+        assert self._analyzed is not None
+        return dict(self._analyzed)
 
     def plot(
         self,

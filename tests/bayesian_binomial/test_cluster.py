@@ -658,3 +658,24 @@ class TestHierarchicalPosterior:
             crt.analyze(lift="absolute", n_samples=20_000)
             hits += crt.pooled_results["prob_t_gt_c"] >= 0.95
         assert hits / 200 <= 0.08
+
+
+class TestCachedResults:
+    @staticmethod
+    def test_summary_reanalyzes_when_arguments_change():
+        np.random.seed(0)
+        crt = _make_crt()
+        crt.analyze(lift="absolute", confidence_level=0.95)
+        wide = crt.summary()
+        narrow = crt.summary(confidence_level=0.5)
+        assert narrow["lift_type"] == "absolute"
+        assert narrow["ci_upper"] - narrow["ci_lower"] < wide["ci_upper"] - wide["ci_lower"]
+
+    @staticmethod
+    def test_adding_a_cluster_refits():
+        # Used to keep the old fit: summary(), icc and plot() ignored new clusters.
+        np.random.seed(0)
+        crt = _make_crt()
+        before = crt.summary()["p_treatment"]
+        crt.add("new_treatment_cluster", 400, 500, group="Treatment")
+        assert crt.summary()["p_treatment"] > before
