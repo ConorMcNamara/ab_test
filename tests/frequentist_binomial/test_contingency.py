@@ -312,6 +312,22 @@ class TestContingencyTableWald:
             TestContingencyTableWald._table().analyze(lift="relative", test_method="wald")
 
 
+class TestAnalyzeZeroControl:
+    @staticmethod
+    def _table():
+        return ContingencyTable("Zero", "conversion").add("Control", 0, 100).add("Treatment", 5, 100)
+
+    def test_relative_lift_raises_clear_error(self):
+        # Used to surface a bare ZeroDivisionError from observed_lift.
+        with pytest.raises(ValueError, match='use lift="absolute"'):
+            self._table().analyze(lift="relative")
+
+    def test_absolute_lift_still_works(self):
+        table = self._table()
+        table.analyze(lift="absolute")
+        assert table.incremental_results["ci_lower"] < 0.05 < table.incremental_results["ci_upper"]
+
+
 class TestAnalyzeTestMapping:
     @staticmethod
     def _table():
