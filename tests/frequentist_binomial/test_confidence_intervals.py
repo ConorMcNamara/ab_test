@@ -595,6 +595,33 @@ class TestScaledLiftIntervals:
 
 class TestZeroControlRateRelative:
     @staticmethod
+    @pytest.mark.parametrize(
+        "test, successes, expected",
+        [
+            # The test rejects a lift of 1.0, which the search used as its starting point,
+            # so the lower bound came out as 1.0 (reviewer: Wilson gives 12.26 for the first).
+            (score_test, [0, 50], 12.4967),
+            (likelihood_ratio_test, [0, 50], 25.0253),
+            (likelihood_ratio_test, [0, 5], 1.1696),
+            # The test accepts 1.0, so the search was already right.
+            (score_test, [0, 5], 0.3302),
+        ],
+    )
+    def test_binary_search_lower_bound_inverts_the_test(test, successes, expected):
+        lb, ub = confidence_interval([100, 100], successes, test=test, lift="relative")
+        assert lb == pytest.approx(expected, abs=1e-3)
+        assert ub == np.inf
+        assert test([100, 100], successes, null_lift=lb + 1e-3, lift="relative") >= 0.05
+        assert test([100, 100], successes, null_lift=lb - 1e-3, lift="relative") < 0.05
+
+    @staticmethod
+    def test_lower_bound_capped_at_100x():
+        # Even a 100x lift is rejected: the true bound is higher, so 100 is conservative.
+        lb, ub = confidence_interval([1000, 1000], [0, 900], test=score_test, lift="relative")
+        assert score_test([1000, 1000], [0, 900], null_lift=100, lift="relative") < 0.05
+        assert (lb, ub) == (pytest.approx(100.0), np.inf)
+
+    @staticmethod
     @pytest.mark.parametrize("method", ["wald", "delta"])
     def test_delta_methods_return_unbounded_interval(method):
         # Used to raise ZeroDivisionError.
