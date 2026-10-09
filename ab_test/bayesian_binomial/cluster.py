@@ -1075,13 +1075,20 @@ def _search_min_clusters(
     max_clusters: int,
     error_message: str,
 ) -> int:
-    low, high = 2, 4
-    while high <= max_clusters:
-        if power_fn(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(error_message)
+    """Smallest clusters per arm in ``[2, max_clusters]`` whose power reaches ``target_power``.
+
+    Doubles from 2 (the fewest clusters the model can fit), clamping the last
+    step to ``max_clusters``, then bisects. Assumes power increases with the
+    number of clusters.
+    """
+    if max_clusters < 2:
+        raise ValueError(f"max_clusters must be at least 2, got {max_clusters}")
+    # ``low`` is always inadequate; 1 cluster per arm can't be fitted, so it's the floor.
+    low, high = 1, 2
+    while power_fn(high) < target_power:
+        if high >= max_clusters:
+            raise ValueError(error_message)
+        low, high = high, min(high * 2, max_clusters)
 
     while high - low > 1:
         mid = (low + high) // 2
