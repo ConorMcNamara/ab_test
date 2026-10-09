@@ -776,3 +776,37 @@ class TestPlotPdfAndPooledIcc:
             crt.add(f"t{i}", 100, 500, group="Treatment")
         assert crt.pooled_icc < 0.005
         assert crt.pooled_icc == pytest.approx(np.mean(list(crt.icc.values())))
+
+
+class TestMomentEstimateBias:
+    @staticmethod
+    @pytest.mark.parametrize("true_icc", [0.1, 0.5, 0.8])
+    @pytest.mark.parametrize("cluster_size", [5, 20])
+    def test_recovers_the_icc(true_icc, cluster_size):
+        # The estimate used to come out as icc * (1 - 1 / cluster_size), capped at 1/3.
+        rng = np.random.default_rng(1)
+        kappa = 1 / true_icc - 1
+        estimates = []
+        for _ in range(300):
+            rates = rng.beta(0.2 * kappa, 0.8 * kappa, 200)
+            trials = np.full(200, cluster_size)
+            a, b = estimate_beta_binomial_params(rng.binomial(trials, rates), trials)
+            estimates.append(beta_binomial_icc(a, b))
+        # The old estimate for 0.1 with clusters of 5 was about 0.080, outside this tolerance.
+        assert np.median(estimates) == pytest.approx(true_icc, rel=0.1)
+
+    @staticmethod
+    def test_single_trial_clusters_are_undefined():
+        a, b = estimate_beta_binomial_params([0, 1, 1, 0], [1, 1, 1, 1])
+        assert np.isnan(a) and np.isnan(b)
+
+    @staticmethod
+    def test_analyze_still_runs_with_single_trial_clusters():
+        crt = BayesianClusterRandomizedTrial()
+        for i, s in enumerate([0, 1, 1, 0, 1]):
+            crt.add(f"c{i}", s, 1, group="Control")
+        for i, s in enumerate([1, 1, 0, 1, 1]):
+            crt.add(f"t{i}", s, 1, group="Treatment")
+        np.random.seed(0)
+        crt.analyze(n_samples=2000)
+        assert 0 <= crt.pooled_results["prob_t_gt_c"] <= 1
