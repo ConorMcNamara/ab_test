@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import polars as pl
 import pytest
+import scipy.stats as ss
 from polars.testing import assert_frame_equal
 
 from ab_test.frequentist_binomial.contingency import ContingencyTable
@@ -397,6 +398,110 @@ class TestAnalyzeTestMapping:
     def test_unknown_test_method_raises():
         with pytest.raises(ValueError):
             TestAnalyzeTestMapping._table().analyze(lift="absolute", test_method="not-a-test", conf_int_method="wilson")
+
+
+def _three_arms():
+    return ContingencyTable("Checkout", "conversion").add("A", 100, 1000).add("B", 120, 1000).add("C", 140, 1000)
+
+
+class TestMultiArm:
+    def test_control_comparisons_match_two_arm_analyses(self):
+        table = _three_arms()
+        table.analyze()
+        results = table.incremental_results
+        assert list(results["comparisons"]) == ["B vs A", "C vs A"]
+        raw = []
+        for label, successes in [("B vs A", [100, 120]), ("C vs A", [100, 140])]:
+            comparison = results["comparisons"][label]
+            raw_p = ab_test([1000, 1000], successes, method="score")
+            # Bonferroni intervals: alpha / 2 each for two comparisons.
+            lb, ub = confidence_interval([1000, 1000], successes, test=score_test, alpha=0.025, lift="relative")
+            assert comparison["raw_p_value"] == pytest.approx(raw_p)
+            assert comparison["ci_lower"] == pytest.approx(lb)
+            assert comparison["ci_upper"] == pytest.approx(ub)
+            assert comparison["lift"] == pytest.approx(successes[1] / successes[0] - 1)
+            raw.append(raw_p)
+        # Holm: the smaller p-value is doubled, the larger kept (and never below the first).
+        small, large = sorted(raw)
+        adjusted = sorted(c["p_value"] for c in results["comparisons"].values())
+        assert adjusted == pytest.approx([2 * small, max(large, 2 * small)])
+        assert results["correction"] == "holm" and results["comparison_type"] == "control"
+
+    def test_all_pairs(self):
+        table = _three_arms()
+        table.analyze(lift="absolute", comparisons="all")
+        comparisons = table.incremental_results["comparisons"]
+        assert list(comparisons) == ["B vs A", "C vs A", "C vs B"]
+        assert comparisons["C vs B"]["lift"] == pytest.approx(0.02)
+        lb, ub = confidence_interval([1000, 1000], [120, 140], test=score_test, alpha=0.05 / 3, lift="absolute")
+        assert (comparisons["C vs B"]["ci_lower"], comparisons["C vs B"]["ci_upper"]) == pytest.approx((lb, ub))
+
+    def test_correction_parameter(self):
+        table = _three_arms()
+        table.analyze(comparisons="all", correction="bonferroni")
+        for comparison in table.incremental_results["comparisons"].values():
+            assert comparison["p_value"] == pytest.approx(min(1.0, 3 * comparison["raw_p_value"]))
+
+    @pytest.mark.parametrize(
+        "test_method, lambda_, name",
+        [("score", "pearson", "Pearson chi-squared"), ("likelihood", "log-likelihood", "Likelihood-ratio (G)")],
+    )
+    def test_omnibus(self, test_method, lambda_, name):
+        table = _three_arms()
+        output = table.analyze(test_method=test_method)
+        observed = np.array([[100, 900], [120, 880], [140, 860]])
+        expected = ss.chi2_contingency(observed, correction=False, lambda_=lambda_)
+        omnibus = table.incremental_results["omnibus"]
+        assert omnibus["statistic"] == pytest.approx(expected.statistic)
+        assert omnibus["p_value"] == pytest.approx(expected.pvalue)
+        assert omnibus["df"] == 2 and omnibus["test"] == name
+        assert f"{name} test that all 3 variants share one rate, df=2" in output
+
+    def test_omnibus_with_no_successes_anywhere(self):
+        table = ContingencyTable("x", "c").add("A", 0, 100).add("B", 0, 100).add("C", 0, 100)
+        table.analyze(lift="absolute")
+        assert table.incremental_results["omnibus"]["p_value"] == 1.0
+
+    def test_scaled_lift_comparisons_match_two_arm_analyses(self):
+        table = ContingencyTable("x", "c", spend=5000).add("A", 100, 1000).add("B", 120, 1000).add("C", 140, 1000)
+        table.analyze(lift="incremental")
+        pair = ContingencyTable("x", "c", spend=5000).add("A", 100, 1000).add("C", 140, 1000)
+        pair.analyze(lift="incremental", alpha=0.025)
+        comparison = table.incremental_results["comparisons"]["C vs A"]
+        for key in ("lift", "ci_lower", "ci_upper"):
+            assert comparison[key] == pytest.approx(pair.incremental_results[key])
+
+    def test_output_labels(self):
+        output = _three_arms().analyze()
+        assert "Adj. p (holm)" in output
+        assert "holm-adjusted for 2 comparisons" in output
+        assert "95% simultaneous Confidence Intervals (Bonferroni: each at 97.5%)" in output
+        assert "Bonferroni: each at 98.33%" in _three_arms().analyze(comparisons="all")
+
+    def test_two_variants_ignore_the_new_options(self):
+        table = ContingencyTable("x", "c").add("A", 100, 1000).add("B", 130, 1000)
+        default = table.analyze()
+        assert table.analyze(comparisons="all", correction="bonferroni") == default
+        assert "comparisons" not in table.incremental_results
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [({"comparisons": "pairs"}, "comparisons must be"), ({"correction": "nope"}, "Unknown method")],
+    )
+    def test_invalid_options(self, kwargs, match):
+        with pytest.raises(ValueError, match=match):
+            _three_arms().analyze(**kwargs)
+
+    def test_single_variant_raises(self):
+        with pytest.raises(ValueError, match="at least 2 variants"):
+            ContingencyTable("x", "c").add("A", 10, 100).analyze()
+
+    def test_zero_successes_in_reference_arm(self):
+        table = ContingencyTable("x", "c").add("A", 0, 1000).add("B", 5, 1000).add("C", 7, 1000)
+        with pytest.raises(ValueError, match="B vs A is undefined: A has no successes"):
+            table.analyze()
+        table.analyze(lift="absolute")
+        assert table.incremental_results["comparisons"]["C vs A"]["lift"] == pytest.approx(0.007)
 
 
 if __name__ == "__main__":

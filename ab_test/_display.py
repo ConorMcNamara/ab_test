@@ -396,33 +396,45 @@ def render_forest_plot(
             else None
         )
         for col, result in enumerate(panels, start=1):
-            marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
-            error_x_inc: dict[str, Any] = {
-                "type": "data",
-                "symmetric": False,
-                "array": [result["ci_upper"] - result["lift"]],
-                "arrayminus": [result["lift"] - result["ci_lower"]],
-                "visible": True,
-            }
-            if c_inc is not None:
-                marker_inc["color"] = c_inc
-                error_x_inc["color"] = c_inc
-            trace = go.Scatter(  # type: ignore[attr-defined]
-                x=[result["lift"]],
-                y=["Total"],
-                marker=marker_inc,
-                error_x=error_x_inc,
-                name="Total",
-                showlegend=col == 1,
-            )
+            # Three or more variants give one row per comparison; two give a single "Total" row.
+            rows = list(result["comparisons"].items()) if "comparisons" in result else [("Total", result)]
+            for row_index, (row_name, row) in enumerate(rows):
+                c_row = c_inc
+                if plot_color is not None and len(rows) > 1:
+                    c_row = (
+                        plot_color[row_index % len(plot_color)]
+                        if isinstance(plot_color, list)
+                        else plot_color.get(row_name, c_inc)
+                    )
+                marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+                error_x_inc: dict[str, Any] = {
+                    "type": "data",
+                    "symmetric": False,
+                    "array": [row["ci_upper"] - row["lift"]],
+                    "arrayminus": [row["lift"] - row["ci_lower"]],
+                    "visible": True,
+                }
+                if c_row is not None:
+                    marker_inc["color"] = c_row
+                    error_x_inc["color"] = c_row
+                trace = go.Scatter(  # type: ignore[attr-defined]
+                    x=[row["lift"]],
+                    y=[row_name],
+                    marker=marker_inc,
+                    error_x=error_x_inc,
+                    name=row_name,
+                    showlegend=col == 1,
+                )
+                if len(panels) > 1:
+                    fig.add_trace(trace, row=1, col=col)
+                else:
+                    fig.add_trace(trace)
             axis_format = _lift_axis_format(result["lift_type"])
             if len(panels) > 1:
-                fig.add_trace(trace, row=1, col=col)
                 fig.update_xaxes(
                     title_text=_LIFT_LABELS.get(result["lift_type"], "Lift"), row=1, col=col, **axis_format
                 )
             else:
-                fig.add_trace(trace)
                 fig.update_xaxes(**axis_format)
 
     subtitle = " - ".join(part for part in (experiment_name, metric_name) if part)
@@ -433,7 +445,8 @@ def render_forest_plot(
     else:
         panels = incremental_results if isinstance(incremental_results, list) else [incremental_results]
         labels = [_LIFT_LABELS.get(r["lift_type"], "Lift") if r is not None else "Lift" for r in panels]
-        title = f"{' and '.join(labels)} of {names[0]} vs. {names[1]}{f': {subtitle}' if subtitle else ''}"
+        compared = f"{names[0]} vs. {names[1]}" if len(names) == 2 else "Each Comparison"
+        title = f"{' and '.join(labels)} of {compared}{f': {subtitle}' if subtitle else ''}"
         # With several panels each x-axis carries its own title.
         xaxis_title = labels[0] if len(labels) == 1 else None
         yaxis_title = ""

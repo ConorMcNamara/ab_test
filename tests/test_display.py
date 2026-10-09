@@ -272,3 +272,36 @@ class TestConfidenceLabels:
             table.add("Treatment", 120, 1000)
             tables.append(table)
         assert "97.5% Confidence Interval" in DiffInDiff(*tables).analyze(alpha=0.025)
+
+
+class TestMultiArmForestPlot:
+    @staticmethod
+    def _table():
+        return ContingencyTable("Checkout", "conversion").add("A", 100, 1000).add("B", 120, 1000).add("C", 140, 1000)
+
+    def test_one_row_per_comparison(self, shown):
+        table = self._table()
+        table.analyze(comparisons="all")
+        table.plot(is_individual=False)
+        fig = shown[-1]
+        assert [trace.y[0] for trace in fig.data] == ["B vs A", "C vs A", "C vs B"]
+        for trace, comparison in zip(fig.data, table.incremental_results["comparisons"].values()):
+            assert trace.x[0] == pytest.approx(comparison["lift"])
+            assert trace.x[0] + trace.error_x.array[0] == pytest.approx(comparison["ci_upper"])
+        assert fig.layout.title.text.startswith("Relative Lift of Each Comparison")
+
+    def test_both_lifts_keep_the_comparisons(self, shown):
+        table = self._table()
+        table.analyze(comparisons="all")
+        table.plot(is_individual=False, lift="both")
+        fig = shown[-1]
+        assert len(fig.data) == 6
+        assert sum(trace.showlegend for trace in fig.data) == 3
+        assert table.incremental_results["comparison_type"] == "all"
+
+    def test_palette_colours_each_comparison(self, shown):
+        table = self._table()
+        table.analyze()
+        table.plot(is_individual=False, color="ibm")
+        colors = [trace.marker.color for trace in shown[-1].data]
+        assert len(set(colors)) == 2
