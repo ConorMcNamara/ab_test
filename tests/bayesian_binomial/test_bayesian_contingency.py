@@ -291,7 +291,7 @@ class TestBayesianContingencyTable:
                     "prob_b_greater_a": 0.76625,
                     "ci_lower": -0.14798553466796882,
                     "ci_upper": 0.4204476928710939,
-                    "expected_loss": 0.0018725,
+                    "expected_loss": 0.0166,  # E[max(-relative lift, 0)]
                     "prob_rope": 0.4369,
                 },
             ),
@@ -310,7 +310,7 @@ class TestBayesianContingencyTable:
                     "prob_b_greater_a": 0.76625,
                     "ci_lower": -16.85,  # unrounded (was ceil-rounded to -16)
                     "ci_upper": 36.85,  # unrounded (was ceil-rounded to 38)
-                    "expected_loss": 0.0018725,
+                    "expected_loss": 1.86,  # conversions
                     "prob_rope": 0.43,  # default ROPE is +/-10% of the control rate
                 },
             ),
@@ -329,7 +329,7 @@ class TestBayesianContingencyTable:
                     "prob_b_greater_a": 0.76625,
                     "ci_lower": -0.16,
                     "ci_upper": 0.38,
-                    "expected_loss": 0.0018725,
+                    "expected_loss": 0.0186,  # conversions per dollar
                     "prob_rope": 0.43,
                 },
             ),
@@ -348,7 +348,7 @@ class TestBayesianContingencyTable:
                     "prob_b_greater_a": 0.76625,
                     "ci_lower": -33.71,
                     "ci_upper": 73.71,
-                    "expected_loss": 0.0018725,
+                    "expected_loss": 3.72,  # dollars
                     "prob_rope": 0.43,
                 },
             ),
@@ -376,7 +376,8 @@ class TestBayesianContingencyTable:
         else:
             assert expected["ci_lower"] == pytest.approx(bct.incremental_results["ci_lower"], abs=1e-02)
             assert expected["ci_upper"] == pytest.approx(bct.incremental_results["ci_upper"], abs=1e-02)
-        assert expected["expected_loss"] == pytest.approx(bct.incremental_results["expected_loss"], abs=1e-03)
+        # In the units of the lift, so the tolerance is relative.
+        assert expected["expected_loss"] == pytest.approx(bct.incremental_results["expected_loss"], rel=0.1)
         assert expected["prob_rope"] == pytest.approx(bct.incremental_results["prob_rope"], abs=1e-02)
 
     @staticmethod
@@ -399,6 +400,30 @@ class TestBayesianContingencyTable:
         bct.add("Test", 110, 1_000, 1, 1)
         rope_row = next(line for line in bct.analyze(lift="cpa").splitlines() if "ROPE" in line)
         assert "n/a" in rope_row
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "lift, expected",
+        [("absolute", "| 0.1"), ("relative", "| 1."), ("incremental", "| 1."), ("revenue", "| $3.")],
+    )
+    def test_expected_loss_shown_in_lift_units(lift, expected):
+        # The loss was a rate difference shown as a percent whatever the lift: "0.19%" next to
+        # a relative lift, or next to an incremental lift in conversions.
+        np.random.seed(0)
+        bct = BayesianContingencyTable(name="Loss", msrp=2, metric_name="sales")
+        bct.add("Holdout", 100, 1_000, 1, 1)
+        bct.add("Test", 110, 1_000, 1, 1)
+        loss_row = next(line for line in bct.analyze(lift=lift).splitlines() if "Expected Loss" in line)
+        assert expected in loss_row
+        assert ("%" in loss_row) == (lift in ("absolute", "relative"))
+
+    @staticmethod
+    def test_contingency_cpa_loss_labelled_rate_difference():
+        bct = BayesianContingencyTable(name="CPA Test", spend=100, metric_name="conversions")
+        bct.add("Holdout", 100, 1_000, 1, 1)
+        bct.add("Test", 110, 1_000, 1, 1)
+        loss_row = next(line for line in bct.analyze(lift="cpa").splitlines() if "Expected Loss" in line)
+        assert "(rate difference)" in loss_row and "%" in loss_row
 
     @staticmethod
     def test_contingency_cpa_requires_spend():

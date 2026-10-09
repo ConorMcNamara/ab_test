@@ -159,7 +159,9 @@ class BayesianContingencyTable(BaseContingencyTable):
         str
             A grid-formatted table summarising the lift, credible interval,
             probability B is best, expected loss, and ROPE probability, with
-            footnotes explaining annotated values.
+            footnotes explaining annotated values. The expected loss,
+            E[max(-lift, 0)], is in the units of ``lift``; for ``"cpa"`` it is
+            a difference in rates.
 
         Raises
         ------
@@ -187,7 +189,15 @@ class BayesianContingencyTable(BaseContingencyTable):
             high_threshold = default_rope if high_threshold is None else high_threshold
         if lift in ["relative", "absolute"]:
             results = calculate_metrics(
-                self.successes, self.trials, self.alphas, self.betas, n_samples, lift, low_threshold, high_threshold
+                self.successes,
+                self.trials,
+                self.alphas,
+                self.betas,
+                n_samples,
+                lift,
+                low_threshold,
+                high_threshold,
+                loss_in_lift_units=True,
             )
             lb, ub = credible_interval(
                 self.successes,
@@ -212,6 +222,7 @@ class BayesianContingencyTable(BaseContingencyTable):
                 high_threshold,
                 spend=self.spend,
                 msrp=self.msrp,
+                loss_in_lift_units=True,
             )
             lb, ub = credible_interval(
                 self.successes,
@@ -271,7 +282,8 @@ class BayesianContingencyTable(BaseContingencyTable):
                 "Cred. Int. Lower **",
                 "Cred. Int. Upper **",
                 f"Prob {self.names[1]} Is Best",
-                f"Expected Loss of {self.names[1]}",
+                # The loss is in the lift's units, except for CPA (see calculate_metrics).
+                f"Expected Loss of {self.names[1]}" + (" (rate difference)" if lift == "cpa" else ""),
                 "Probability Lift is in ROPE ***",
             ]
         )
@@ -281,7 +293,7 @@ class BayesianContingencyTable(BaseContingencyTable):
             + convert_to_tabulate_str(success_rate, lift)
             + convert_to_tabulate_str([test_lift, lb, ub], lift)
             + [str_pvalue]
-            + [convert_to_tabulate_str(results["Expected loss"], "relative")]
+            + [convert_to_tabulate_str(results["Expected loss"], "absolute" if lift == "cpa" else lift)]
             + [
                 "n/a"
                 if np.isnan(results["Probability of ROPE"])

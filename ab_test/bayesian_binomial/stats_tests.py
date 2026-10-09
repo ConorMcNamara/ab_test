@@ -180,6 +180,8 @@ def calculate_metrics(
     high_threshold: float = 0.01,
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    loss_in_lift_units: bool = False,
 ) -> dict[str, float]:
     """Compute a suite of Bayesian metrics comparing variant B against variant A.
 
@@ -211,6 +213,12 @@ def calculate_metrics(
         Total ad spend — required when ``lift="roas"``.
     msrp : float, optional
         Average product price — required when ``lift="revenue"``.
+    loss_in_lift_units : bool, optional
+        If ``True``, the expected loss is E[max(-lift, 0)] in the units of
+        ``lift`` (e.g. a fraction of A's rate for relative lift, conversions
+        for incremental). If ``False`` (the default), it is E[max(A - B, 0)]
+        as a difference in rates, whatever ``lift`` is. CPA is not monotone
+        in the lift, so for ``"cpa"`` the loss is always a rate difference.
 
     Returns
     -------
@@ -226,7 +234,13 @@ def calculate_metrics(
     sample_a = sample_beta(successes[0], trials[0], alphas[0], betas[0], n_samples)
     sample_b = sample_beta(successes[1], trials[1], alphas[1], betas[1], n_samples)
     prob_b_greater_a = float(np.mean(sample_b > sample_a))
-    expected_loss = expected_loss_b(sample_a, sample_b)
+    if loss_in_lift_units and lift != "cpa":
+        lift_samples = compute_sample_lift(
+            sample_a, sample_b, lift=lift, trials=(int(trials[0]), int(trials[1])), spend=spend, msrp=msrp
+        )
+        expected_loss = float(np.maximum(-lift_samples, 0).mean())
+    else:
+        expected_loss = expected_loss_b(sample_a, sample_b)
     if lift == "cpa":
         if spend is None:
             raise ValueError("spend must be provided for lift='cpa'")

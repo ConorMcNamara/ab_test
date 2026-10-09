@@ -306,7 +306,9 @@ class BayesianStratifiedContingencyTable:
         the posterior of the between-stratum standard deviation of the true
         effects (tau) from a normal random-effects model, which does not count
         within-stratum noise as heterogeneity. For relative lift, tau is on
-        the log risk-ratio scale. It is not reported for ``"cpa"``.
+        the log risk-ratio scale. It is not reported for ``"cpa"``. The
+        expected loss, E[max(-lift, 0)], is in the units of ``lift``; for
+        ``"cpa"`` it is a difference in rates.
 
         Parameters
         ----------
@@ -435,7 +437,7 @@ class BayesianStratifiedContingencyTable:
                 "Cred. Int. Lower **",
                 "Cred. Int. Upper **",
                 f"Prob {self._cell_names[1]} Is Best",
-                f"Expected Loss of {self._cell_names[1]}",
+                f"Expected Loss of {self._cell_names[1]}" + (" (rate difference)" if lift == "cpa" else ""),
                 "Probability Lift is in ROPE ***",
             ]
         )
@@ -444,7 +446,8 @@ class BayesianStratifiedContingencyTable:
             + [fmt_rate(r["p_control"]), fmt_rate(r["p_treatment"])]
             + [fmt(r["lift"]), fmt(r["ci_lower"]), fmt(r["ci_upper"])]
             + [str_prob]
-            + [convert_to_tabulate_str(r["expected_loss"], "relative")]
+            # The loss is on the lift's scale, except for CPA, where it is a rate difference.
+            + [fmt_rate(r["expected_loss"]) if lift == "cpa" else fmt(r["expected_loss"])]
             + ["n/a" if np.isnan(r["prob_rope"]) else convert_to_tabulate_str(r["prob_rope"], "relative")]
         )
         return_string = tabulate_summary(row_labels, values)
