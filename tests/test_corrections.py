@@ -11,6 +11,7 @@ from ab_test.corrections import (
     benjamini_hochberg,
     bonferroni,
     holm,
+    holm_sidak,
     sidak,
 )
 
@@ -99,6 +100,41 @@ class TestHolm:
         np.testing.assert_allclose(result, [0.03])
 
 
+class TestHolmSidak:
+    @staticmethod
+    def test_known_values():
+        # statsmodels: multipletests([0.01, 0.04, 0.03, 0.005], method="holm-sidak")
+        # Sorted: 1-(1-0.005)^4, 1-(1-0.01)^3, 1-(1-0.03)^2, 1-(1-0.04)^1, then a running maximum.
+        result = holm_sidak(PVALUES)
+        expected = [0.029701, 0.0591, 0.0591, 0.0198504994]
+        np.testing.assert_allclose(result, expected)
+
+    @staticmethod
+    def test_matches_statsmodels_on_pairwise_proportions():
+        # statsmodels' proportions_chisquare_allpairs default (multitest_method="hs") for
+        # 100, 120 and 140 successes out of 1000 each.
+        result = holm_sidak([0.152918, 0.005916, 0.183587])
+        np.testing.assert_allclose(result, [0.2824520853, 0.0176432099, 0.2824520853], rtol=1e-8)
+
+    @staticmethod
+    def test_between_holm_and_sidak_steps():
+        adj_holm = holm(PVALUES)
+        adj_hs = holm_sidak(PVALUES)
+        for h, hs, s in zip(adj_holm, adj_hs, sidak(PVALUES)):
+            assert hs <= h
+            assert hs <= s
+
+    @staticmethod
+    def test_single_pvalue():
+        np.testing.assert_allclose(holm_sidak([0.03]), [0.03])
+
+    @staticmethod
+    def test_capped_at_one():
+        result = holm_sidak([0.9, 0.95, 1.0])
+        np.testing.assert_allclose(result, [0.999, 0.999, 1.0])
+        assert all(p <= 1.0 for p in result)
+
+
 class TestBenjaminiHochberg:
     @staticmethod
     def test_known_values():
@@ -158,6 +194,11 @@ class TestAdjustPvalues:
     def test_dispatcher_sidak():
         result = adjust_pvalues(PVALUES, method="sidak")
         assert result == sidak(PVALUES)
+
+    @staticmethod
+    @pytest.mark.parametrize("method", ["holm_sidak", "holm-sidak", "Holm-Sidak", "hs"])
+    def test_dispatcher_holm_sidak(method):
+        assert adjust_pvalues(PVALUES, method=method) == holm_sidak(PVALUES)
 
     @staticmethod
     def test_default_is_holm():

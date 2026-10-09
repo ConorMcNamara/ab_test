@@ -18,6 +18,10 @@ Available methods:
   independent.
 - **Holm** (default) — step-down procedure; uniformly more powerful than
   Bonferroni while still controlling FWER.
+- **Holm-Sidak** (``"holm_sidak"`` or ``"hs"``) — Holm's step-down procedure
+  with Sidak's adjustment at each step; slightly more powerful than Holm when
+  tests are independent or positively dependent. It is the default of
+  statsmodels' pairwise proportion tests.
 - **Benjamini-Hochberg** — controls FDR instead of FWER, giving substantially
   more power when many tests are performed.
 
