@@ -79,6 +79,9 @@ different trade-offs:
 * **mSPRT** (:mod:`~ab_test.frequentist_binomial.msprt`) allows peeking at
   any time without a pre-specified schedule. It is more flexible but cannot
   provide the same formal power guarantees.
+* **The exact e-test** (:mod:`~ab_test.frequentist_binomial.e_test`) also
+  allows peeking at any time, with no normal approximation and no tuning
+  parameter, but tests only equal rates.
 
 API Reference
 -------------
