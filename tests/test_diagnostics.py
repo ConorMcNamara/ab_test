@@ -207,6 +207,25 @@ class TestTimeTrendTest:
             time_trend_test([100] * 5, [1000] * 5, [110] * 4, [1000] * 5)
 
     @staticmethod
+    @pytest.mark.parametrize("position", ["first", "last"])
+    def test_zero_success_period_does_not_dominate(position: str) -> None:
+        # A 0/100 vs 0/100 period had a standard error of 0 and weight 1e30, so it
+        # pinned the fit: p = 0.007 "primacy" when first, p = 0.010 "novelty" when last.
+        s_a, s_b, n = [100, 98, 105, 101, 99, 103], [112, 110, 118, 113, 111, 115], [1000] * 6
+        if position == "first":
+            result = time_trend_test([0, *s_a], [100, *n], [0, *s_b], [100, *n])
+        else:
+            result = time_trend_test([*s_a, 0], [*n, 100], [*s_b, 0], [*n, 100])
+        assert result["diagnosis"] == "stable"
+        assert result["p_value"] > 0.3
+        assert np.all(result["period_se"] > 0)
+
+    @staticmethod
+    def test_arm_without_successes_raises() -> None:
+        with pytest.raises(ValueError, match="both successes and failures"):
+            time_trend_test([0, 0, 0], [100] * 3, [5, 6, 7], [100] * 3)
+
+    @staticmethod
     def test_custom_alpha() -> None:
         """A very strict alpha should make borderline trends stable."""
         rng = np.random.default_rng(99)

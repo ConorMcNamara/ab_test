@@ -86,11 +86,18 @@ def _period_lift_and_se(
     successes_b: np.ndarray[Any, Any],
     trials_b: np.ndarray[Any, Any],
 ) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
-    """Compute per-period absolute lift and its standard error."""
-    p_a = successes_a / trials_a
-    p_b = successes_b / trials_b
-    lift = p_b - p_a
-    se = np.sqrt(p_a * (1 - p_a) / trials_a + p_b * (1 - p_b) / trials_b)
+    """Compute per-period absolute lift and its standard error.
+
+    The variance uses each arm's overall rate across all periods rather than the
+    period's own rate. A period with no successes (or no failures) in both arms
+    would otherwise get a standard error of 0 and an effectively infinite weight.
+    """
+    lift = successes_b / trials_b - successes_a / trials_a
+    rate_a = successes_a.sum() / trials_a.sum()
+    rate_b = successes_b.sum() / trials_b.sum()
+    if rate_a in (0.0, 1.0) or rate_b in (0.0, 1.0):
+        raise ValueError("Each arm needs both successes and failures across all periods to estimate the variance")
+    se = np.sqrt(rate_a * (1 - rate_a) / trials_a + rate_b * (1 - rate_b) / trials_b)
     return lift, se
 
 
@@ -145,7 +152,10 @@ def time_trend_test(
         - ``"diagnosis"`` : str — one of ``"stable"``, ``"novelty"``
           (decaying), or ``"primacy"`` (growing).
         - ``"period_lifts"`` : np.ndarray — per-period absolute lifts.
-        - ``"period_se"`` : np.ndarray — per-period standard errors.
+        - ``"period_se"`` : np.ndarray — per-period standard errors of the
+          lift, using each arm's overall rate across all periods (so a period
+          with no successes still gets a usable error). These weight the
+          regression and size the error bars.
         - ``"cumulative_lift"`` : np.ndarray — running cumulative lift
           up to each period.
         - ``"figure"`` : plotly.graph_objects.Figure — diagnostic plot.
@@ -153,7 +163,8 @@ def time_trend_test(
     Raises
     ------
     ValueError
-        If the arrays have mismatched lengths or fewer than 3 periods.
+        If the arrays have mismatched lengths, there are fewer than 3 periods,
+        or an arm has no successes (or no failures) in any period.
     """
     s_a = np.asarray(successes_a, dtype=float)
     t_a = np.asarray(trials_a, dtype=float)
@@ -175,7 +186,7 @@ def time_trend_test(
     cumulative_lift = cum_s_b / cum_t_b - cum_s_a / cum_t_a
 
     x = np.arange(n_periods, dtype=float)
-    weights = 1.0 / np.maximum(period_se**2, 1e-30)
+    weights = 1.0 / period_se**2
     w_sum = weights.sum()
     x_bar = np.sum(weights * x) / w_sum
     y_bar = np.sum(weights * period_lift) / w_sum
