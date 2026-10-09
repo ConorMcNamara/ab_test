@@ -17,8 +17,22 @@ these functions -- for example,
 :func:`~ab_test.frequentist_binomial.cupac.cupac_adjusted_power` to account
 for CUPAC variance reduction.
 
-Both relative and absolute lift are supported. When more than two groups are
-provided, the two smallest groups are used, as they govern overall power.
+Both relative and absolute lift are supported.
+
+With three or more groups, the functions plan for the comparisons
+:meth:`~ab_test.frequentist_binomial.contingency.ContingencyTable.analyze`
+will make. ``comparisons="control"`` (the default) compares each variant with
+the first group; ``comparisons="all"`` compares every pair. For ``m``
+comparisons, power is computed for the least-powered one (the control against
+the smallest variant, or the two smallest groups) at the Bonferroni level
+``alpha / m``. ``analyze()`` adjusts with Holm by default, which rejects at
+least as often, so the power is a slight underestimate and the sample size a
+slight overestimate.
+
+.. code-block:: python
+
+   # Total sample size for an A/B/C test, split evenly, comparing B and C to A
+   required_sample_size(0.10, 0.30, group_proportions=[1 / 3] * 3)
 
 Usage
 -----
