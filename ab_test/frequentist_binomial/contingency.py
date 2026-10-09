@@ -58,6 +58,19 @@ def _omnibus_test(trials: list[Any], successes: list[Any], test_method: str) -> 
         # Every cell has the same (degenerate) rate, so there is nothing to test.
         return 0.0, df, 1.0, name
     table = np.array([[s, t - s] for s, t in zip(successes, trials)], dtype=float)
+    if np.any(table == 0):
+        # As in the two-group tests (_power_divergence_test).
+        if lambda_ in ("neyman", "mod-log-likelihood"):
+            raise ValueError(
+                f"The {name} statistic is undefined when a cell has zero observed count "
+                "(it divides by, or takes the log of, the observed count). "
+                "Use the score test or Fisher's exact test instead."
+            )
+        if lambda_ == "freeman-tukey":
+            # scipy evaluates 0 * inf here; the statistic's limit is 4 * sum((sqrt(O) - sqrt(E))**2).
+            expected = ss.contingency.expected_freq(table)
+            statistic = float(4 * np.sum((np.sqrt(table) - np.sqrt(expected)) ** 2))
+            return statistic, df, float(ss.chi2.sf(statistic, df=df)), name
     result = ss.chi2_contingency(table, correction=False, lambda_=lambda_)
     return float(result.statistic), df, float(result.pvalue), name
 
@@ -391,7 +404,8 @@ class ContingencyTable(BaseContingencyTable):
         }
 
         rates = [si / ti for ti, si in zip(self.trials, self.successes)]
-        str_omnibus = f"{omnibus_p:.4f}" if omnibus_p >= alpha else f"{omnibus_p:.4f}*"
+        # NaN fails every comparison, so test for significance explicitly rather than with >= alpha.
+        str_omnibus = f"{omnibus_p:.4f}*" if omnibus_p < alpha else f"{omnibus_p:.4f}"
         return_string = tabulate_summary(
             ["Metric", "Metric Name"] + self.names + ["Omnibus p-value ***"],
             [lift, self.metric_name] + convert_to_tabulate_str(rates, "absolute") + [str_omnibus],

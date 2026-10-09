@@ -7,7 +7,7 @@ import pytest
 import scipy.stats as ss
 from polars.testing import assert_frame_equal
 
-from ab_test.frequentist_binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.contingency import ContingencyTable, _omnibus_test
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
 from ab_test.frequentist_binomial.stats_tests import ab_test, likelihood_ratio_test, score_test, wald_test, z_test
 
@@ -456,6 +456,26 @@ class TestMultiArm:
         assert omnibus["p_value"] == pytest.approx(expected.pvalue)
         assert omnibus["df"] == 2 and omnibus["test"] == name
         assert f"{name} test that all 3 variants share one rate, df=2" in output
+
+    def test_omnibus_freeman_tukey_with_a_zero_cell(self):
+        # scipy returns NaN here, which the table printed as "nan*".
+        table = ContingencyTable("x", "c").add("A", 0, 1000).add("B", 10, 1000).add("C", 12, 1000)
+        output = table.analyze(lift="absolute", test_method="freeman-tukey", conf_int_method="wilson")
+        observed = np.array([[0, 1000], [10, 990], [12, 988]], dtype=float)
+        expected = ss.contingency.expected_freq(observed)
+        statistic = 4 * np.sum((np.sqrt(observed) - np.sqrt(expected)) ** 2)
+        omnibus = table.incremental_results["omnibus"]
+        assert omnibus["statistic"] == pytest.approx(statistic)
+        assert omnibus["statistic"] == pytest.approx(32.5286, abs=1e-4)
+        assert omnibus["p_value"] == pytest.approx(ss.chi2.sf(statistic, 2))
+        assert "nan" not in output
+
+    @pytest.mark.parametrize("test_method", ["neyman", "modified_likelihood"])
+    def test_omnibus_undefined_with_a_zero_cell(self, test_method):
+        # analyze() would raise first from the pairwise test on the zero cell, so call the omnibus directly.
+        # scipy gives NaN (Neyman) or inf (modified log-likelihood) here.
+        with pytest.raises(ValueError, match="undefined when a cell has zero observed count"):
+            _omnibus_test([1000, 1000, 1000], [0, 10, 12], test_method)
 
     def test_omnibus_with_no_successes_anywhere(self):
         table = ContingencyTable("x", "c").add("A", 0, 100).add("B", 0, 100).add("C", 0, 100)
