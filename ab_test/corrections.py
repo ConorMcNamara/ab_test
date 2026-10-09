@@ -19,6 +19,7 @@ __all__ = [
     "bonferroni",
     "sidak",
     "holm",
+    "holm_sidak",
     "benjamini_hochberg",
 ]
 
@@ -89,6 +90,36 @@ def holm(pvalues: list[float]) -> list[float]:
     return adjusted
 
 
+def holm_sidak(pvalues: list[float]) -> list[float]:
+    """Holm-Sidak step-down correction (FWER control).
+
+    Holm's procedure with Sidak's adjustment at each step, so the p-value
+    ranked ``k``-th smallest becomes ``1 - (1 - p)^(m - k + 1)``. Slightly
+    more powerful than Holm, and it controls the familywise error rate when
+    the tests are independent or positively dependent. It is the default of
+    statsmodels' pairwise proportion tests.
+
+    Parameters
+    ----------
+    pvalues : list of float
+        Raw p-values.
+
+    Returns
+    -------
+    list of float
+        Adjusted p-values, capped at 1.0.
+    """
+    m = len(pvalues)
+    order = sorted(range(m), key=lambda i: pvalues[i])
+    adjusted = [0.0] * m
+    cummax = 0.0
+    for rank, idx in enumerate(order):
+        adj = 1.0 - (1.0 - pvalues[idx]) ** (m - rank)
+        cummax = max(cummax, adj)
+        adjusted[idx] = min(cummax, 1.0)
+    return adjusted
+
+
 def benjamini_hochberg(pvalues: list[float]) -> list[float]:
     """Benjamini-Hochberg correction (FDR control).
 
@@ -128,7 +159,8 @@ def adjust_pvalues(pvalues: list[float], method: str = "holm") -> list[float]:
         Raw p-values.
     method : str, default='holm'
         Correction method.  One of ``'bonferroni'``, ``'sidak'``,
-        ``'holm'``, or ``'benjamini_hochberg'`` (alias ``'bh'``/``'fdr'``).
+        ``'holm'``, ``'holm_sidak'`` (alias ``'holm-sidak'``/``'hs'``), or
+        ``'benjamini_hochberg'`` (alias ``'bh'``/``'fdr'``).
 
     Returns
     -------
@@ -145,6 +177,8 @@ def adjust_pvalues(pvalues: list[float], method: str = "holm") -> list[float]:
         "bonferroni": bonferroni,
         "sidak": sidak,
         "holm": holm,
+        "holm_sidak": holm_sidak,
+        "hs": holm_sidak,
         "benjamini_hochberg": benjamini_hochberg,
         "bh": benjamini_hochberg,
         "fdr": benjamini_hochberg,
