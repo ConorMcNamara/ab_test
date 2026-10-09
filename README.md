@@ -13,7 +13,7 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 
 | Category | Highlights | Docs |
 |---|---|---|
-| **Contingency tables** | Chainable builder; frequentist A/B/n tests with an omnibus test and Holm-adjusted comparisons; DataFrame export, serialization, plotting | [frequentist](docs/frequentist_binomial/contingency.rst) · [bayesian](docs/bayesian_binomial/contingency.rst) |
+| **Contingency tables** | Chainable builder; A/B/n tests (frequentist omnibus test with Holm-adjusted comparisons; Bayesian probability each variant is best); DataFrame export, serialization, plotting | [frequentist](docs/frequentist_binomial/contingency.rst) · [bayesian](docs/bayesian_binomial/contingency.rst) |
 | **Statistical tests** | Score, LRT, Z, Fisher, Barnard, Boschloo, power-divergence variants | [docs](docs/frequentist_binomial/stats_tests.rst) |
 | **Confidence / credible intervals** | Wilson, Agresti-Coull, Jeffreys, Clopper-Pearson, HDI, binary-search inversion | [frequentist](docs/frequentist_binomial/confidence_intervals.rst) · [bayesian](docs/bayesian_binomial/credible_intervals.rst) |
 | **Power & sample size** | Power, MDL, required n — frequentist and Bayesian (P(B>A) or expected loss) | [frequentist](docs/frequentist_binomial/power_calculations.rst) · [bayesian](docs/bayesian_binomial/power_calculations.rst) |

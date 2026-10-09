@@ -554,3 +554,83 @@ class TestScaledLiftRopeAndRounding:
         assert incremental.incremental_results["ci_upper"] == pytest.approx(
             1_000 * absolute.incremental_results["ci_upper"]
         )
+
+
+def _three_arms():
+    table = BayesianContingencyTable("Checkout", "conversion")
+    return table.add("A", 100, 1000, 1, 1).add("B", 120, 1000, 1, 1).add("C", 140, 1000, 1, 1)
+
+
+class TestBayesianMultiArm:
+    @staticmethod
+    def test_prob_best_and_expected_loss():
+        table = _three_arms()
+        np.random.seed(0)
+        table.analyze(n_samples=200_000)
+        results = table.incremental_results
+        rng = np.random.default_rng(1)
+        draws = np.column_stack([rng.beta(1 + s, 1 + 1000 - s, 400_000) for s in (100, 120, 140)])
+        best = np.argmax(draws, axis=1)
+        regret = draws.max(axis=1, keepdims=True) - draws
+        assert sum(results["prob_best"].values()) == pytest.approx(1.0)
+        for index, name in enumerate("ABC"):
+            assert results["prob_best"][name] == pytest.approx(np.mean(best == index), abs=0.005)
+            assert results["expected_loss"][name] == pytest.approx(regret[:, index].mean(), abs=5e-4)
+
+    @staticmethod
+    def test_comparisons_match_two_arm_analyses():
+        table = _three_arms()
+        np.random.seed(0)
+        table.analyze(comparisons="all", lift="absolute", n_samples=200_000)
+        comparisons = table.incremental_results["comparisons"]
+        assert list(comparisons) == ["B vs A", "C vs A", "C vs B"]
+        pair = BayesianContingencyTable("x", "c").add("B", 120, 1000, 1, 1).add("C", 140, 1000, 1, 1)
+        np.random.seed(1)
+        pair.analyze(lift="absolute", n_samples=200_000)
+        comparison = comparisons["C vs B"]
+        # The normal-approximation interval and posterior means are deterministic.
+        for key in ("lift", "ci_lower", "ci_upper"):
+            assert comparison[key] == pytest.approx(pair.incremental_results[key])
+        # Probabilities come from separate draws; the default ROPE is scaled to B, not A.
+        assert comparison["prob_greater"] == pytest.approx(pair.incremental_results["prob_b_greater_a"], abs=0.005)
+        assert comparison["prob_rope"] == pytest.approx(pair.incremental_results["prob_rope"], abs=0.005)
+
+    @staticmethod
+    def test_output():
+        table = _three_arms()
+        np.random.seed(0)
+        output = table.analyze()
+        assert "Prob Is Best *" in output and "Expected Loss (rate difference) ****" in output
+        assert "| C vs A" in output and "C vs B" not in output
+        assert table.incremental_results["comparison_type"] == "control"
+
+    @staticmethod
+    def test_two_variants_ignore_comparisons():
+        table = BayesianContingencyTable("x", "c").add("A", 100, 1000, 1, 1).add("B", 130, 1000, 1, 1)
+        np.random.seed(0)
+        default = table.analyze()
+        np.random.seed(0)
+        assert table.analyze(comparisons="all") == default
+        assert "comparisons" not in table.incremental_results
+
+    @staticmethod
+    def test_invalid_comparisons():
+        with pytest.raises(ValueError, match="comparisons must be"):
+            _three_arms().analyze(comparisons="pairs")
+
+    @staticmethod
+    def test_single_variant_raises():
+        with pytest.raises(ValueError, match="at least 2 variants"):
+            BayesianContingencyTable("x", "c").add("A", 10, 100, 1, 1).analyze()
+
+    @staticmethod
+    def test_plot_has_one_row_per_comparison(monkeypatch):
+        import plotly.graph_objects as go
+
+        figures = []
+        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+        table = _three_arms()
+        np.random.seed(0)
+        table.analyze(comparisons="all")
+        table.plot(is_individual=False)
+        assert [trace.y[0] for trace in figures[-1].data] == ["B vs A", "C vs A", "C vs B"]
