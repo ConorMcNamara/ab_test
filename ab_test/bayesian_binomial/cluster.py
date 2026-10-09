@@ -33,7 +33,14 @@ from ab_test._display import (
     tabulate_summary,
 )
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
-from ab_test.bayesian_binomial.power_calculations import _max_feasible_lift, _search_min_lift
+from ab_test.bayesian_binomial.power_calculations import (
+    Seed,
+    _block_rng,
+    _block_sizes,
+    _entropy,
+    _max_feasible_lift,
+    _search_min_lift,
+)
 from ab_test.bayesian_binomial.utils import _default_rope_half_width
 
 __all__ = [
@@ -203,20 +210,27 @@ def _hierarchical_mu_posterior(
     return lm, weights.sum(axis=0), lk, weights.sum(axis=1)
 
 
-def _sample_mu(logit_mu: np.ndarray[Any, Any], weights: np.ndarray[Any, Any], size: int) -> np.ndarray[Any, Any]:
+def _sample_mu(
+    logit_mu: np.ndarray[Any, Any],
+    weights: np.ndarray[Any, Any],
+    size: int,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray[Any, Any]:
     """Draw from a grid posterior on logit(mu), spreading draws uniformly within each cell.
 
     ``weights`` may be 1-D, or 2-D with one posterior per row (one row of ``size`` draws each).
+    Draws come from ``rng`` when given, and from NumPy's global random state otherwise.
     """
+    gen: Any = np.random if rng is None else rng
     w = np.atleast_2d(weights)
     cdf = np.cumsum(w, axis=1)
     cdf /= cdf[:, -1:]
     rows = np.arange(len(w))[:, None]
-    u = np.random.uniform(size=(len(w), size))
+    u = gen.uniform(size=(len(w), size))
     idx = np.searchsorted((cdf + rows).ravel(), (u + rows).ravel()).reshape(u.shape) - rows * w.shape[1]
     idx = np.minimum(idx, w.shape[1] - 1)
     step = logit_mu[1] - logit_mu[0]
-    draws = expit(logit_mu[idx] + np.random.uniform(-step / 2, step / 2, idx.shape))
+    draws = expit(logit_mu[idx] + gen.uniform(-step / 2, step / 2, idx.shape))
     return draws if weights.ndim == 2 else draws[0]
 
 
@@ -920,7 +934,42 @@ def _simulated_mu_posteriors(
     return lm, weights
 
 
-def _simulate_crt_experiment(
+def _crt_block_statistics(
+    n_clusters: int,
+    cluster_size: int,
+    a_ctrl: float,
+    b_ctrl: float,
+    a_treat: float,
+    b_treat: float,
+    size: int,
+    mc_samples: int,
+    entropy: int,
+    block: int,
+    statistic: Literal["prob", "loss"],
+) -> np.ndarray[Any, Any]:
+    """Simulate one block of CRT experiments and return each one's decision statistic.
+
+    For each simulated experiment, generates cluster data from the
+    beta-binomial model and draws from the same hierarchical posterior that
+    :meth:`BayesianClusterRandomizedTrial.analyze` uses. Every cluster has
+    its own random stream, so adding clusters leaves the existing ones
+    unchanged: a search over the number of clusters compares nested designs.
+    """
+    samples = []
+    for arm, (a, b) in enumerate(((a_ctrl, b_ctrl), (a_treat, b_treat))):
+        y = np.empty((size, n_clusters), dtype=np.int64)
+        for j in range(n_clusters):
+            rng = _block_rng(entropy, block, arm, 0, j)
+            y[:, j] = rng.binomial(cluster_size, rng.beta(a, b, size))
+        logit_mu, weights = _simulated_mu_posteriors(y, cluster_size)
+        samples.append(_sample_mu(logit_mu, weights, mc_samples, _block_rng(entropy, block, arm, 1)))
+    samples_ctrl, samples_treat = samples
+    if statistic == "prob":
+        return np.mean(samples_treat > samples_ctrl, axis=1)  # type: ignore[no-any-return]
+    return np.mean(np.maximum(samples_ctrl - samples_treat, 0), axis=1)  # type: ignore[no-any-return]
+
+
+def _crt_statistics(
     n_clusters: int,
     cluster_size: int,
     a_ctrl: float,
@@ -929,26 +978,18 @@ def _simulate_crt_experiment(
     b_treat: float,
     n_samples: int,
     mc_samples: int,
-) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
-    """Simulate CRT experiments and draw from the posterior each would produce.
-
-    For each simulated experiment, generates cluster data from the
-    beta-binomial model and draws from the same hierarchical posterior
-    that :meth:`BayesianClusterRandomizedTrial.analyze` uses.
-
-    Returns
-    -------
-    tuple of ndarray
-        ``(samples_ctrl, samples_treat)``, each of shape
-        ``(n_samples, mc_samples)``.
-    """
-    samples = []
-    for a, b in ((a_ctrl, b_ctrl), (a_treat, b_treat)):
-        theta = np.random.beta(a, b, (n_samples, n_clusters))
-        y = np.random.binomial(cluster_size, theta)
-        logit_mu, weights = _simulated_mu_posteriors(y, cluster_size)
-        samples.append(_sample_mu(logit_mu, weights, mc_samples))
-    return samples[0], samples[1]
+    statistic: Literal["prob", "loss"],
+    seed: Seed = None,
+) -> np.ndarray[Any, Any]:
+    """Decision statistic for each of ``n_samples`` simulated CRT experiments, simulated in blocks."""
+    entropy = _entropy(seed)
+    args = (n_clusters, cluster_size, a_ctrl, b_ctrl, a_treat, b_treat)
+    return np.concatenate(
+        [
+            _crt_block_statistics(*args, size, mc_samples, entropy, i, statistic)
+            for i, size in enumerate(_block_sizes(n_samples, mc_samples))
+        ]
+    )
 
 
 def _icc_to_beta_params(mu: float, icc: float) -> tuple[float, float]:
@@ -972,6 +1013,8 @@ def cluster_bayes_power_lift(
     n_samples: int = 10_000,
     mc_samples: int = 1_000,
     confidence_level: float = 0.95,
+    *,
+    seed: Seed = None,
 ) -> float:
     """Estimate Bayesian power (assurance) for a cluster-randomized trial.
 
@@ -1003,6 +1046,8 @@ def cluster_bayes_power_lift(
         Posterior draws per simulated experiment.
     confidence_level : float, default=0.95
         P(T > C) threshold defining a "win".
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulation. ``None`` (default) is unseeded.
 
     Returns
     -------
@@ -1013,11 +1058,9 @@ def cluster_bayes_power_lift(
     a_ctrl, b_ctrl = _icc_to_beta_params(baseline, icc)
     a_treat, b_treat = _icc_to_beta_params(alt_rate_val, icc)
 
-    samples_ctrl, samples_treat = _simulate_crt_experiment(
-        n_clusters, cluster_size, a_ctrl, b_ctrl, a_treat, b_treat, n_samples, mc_samples
+    prob_b_better = _crt_statistics(
+        n_clusters, cluster_size, a_ctrl, b_ctrl, a_treat, b_treat, n_samples, mc_samples, "prob", seed=seed
     )
-
-    prob_b_better = np.mean(samples_treat > samples_ctrl, axis=1)
     return float(np.mean(prob_b_better >= confidence_level))
 
 
@@ -1032,6 +1075,8 @@ def cluster_bayes_power_loss(
     n_samples: int = 10_000,
     mc_samples: int = 1_000,
     loss_threshold: float = 0.001,
+    *,
+    seed: Seed = None,
 ) -> float:
     """Estimate Bayesian power via expected loss for a cluster-randomized trial.
 
@@ -1059,6 +1104,8 @@ def cluster_bayes_power_loss(
         Posterior draws per simulated experiment.
     loss_threshold : float, default=0.001
         Maximum acceptable expected loss.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulation. ``None`` (default) is unseeded.
 
     Returns
     -------
@@ -1069,11 +1116,9 @@ def cluster_bayes_power_loss(
     a_ctrl, b_ctrl = _icc_to_beta_params(baseline, icc)
     a_treat, b_treat = _icc_to_beta_params(alt_rate_val, icc)
 
-    samples_ctrl, samples_treat = _simulate_crt_experiment(
-        n_clusters, cluster_size, a_ctrl, b_ctrl, a_treat, b_treat, n_samples, mc_samples
+    expected_loss = _crt_statistics(
+        n_clusters, cluster_size, a_ctrl, b_ctrl, a_treat, b_treat, n_samples, mc_samples, "loss", seed=seed
     )
-
-    expected_loss = np.mean(np.maximum(samples_ctrl - samples_treat, 0), axis=1)
     return float(np.mean(expected_loss <= loss_threshold))
 
 
@@ -1119,6 +1164,8 @@ def cluster_bayes_minimum_clusters(
     n_samples: int = 10_000,
     mc_samples: int = 500,
     max_clusters: int = 500,
+    *,
+    seed: Seed = None,
 ) -> int:
     """Find the minimum clusters per arm for target Bayesian power via P(T > C).
 
@@ -1146,12 +1193,19 @@ def cluster_bayes_minimum_clusters(
         Posterior draws per experiment.
     max_clusters : int, default=500
         Upper bound on cluster search.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every power evaluation in the search reuses
+        the same random numbers (clusters added by a larger design keep the
+        existing ones), so the search is reproducible for a given seed.
+        ``None`` (default) draws one fresh seed for the whole search.
 
     Returns
     -------
     int
         Minimum clusters per arm.
     """
+    # One seed for the whole search: every probe replays the same random numbers.
+    entropy = _entropy(seed)
 
     def _power(k: int) -> float:
         return cluster_bayes_power_lift(
@@ -1164,6 +1218,7 @@ def cluster_bayes_minimum_clusters(
             lift=lift,
             n_samples=n_samples,
             mc_samples=mc_samples,
+            seed=entropy,
             confidence_level=confidence_level,
         )
 
@@ -1191,6 +1246,8 @@ def cluster_bayes_minimum_clusters_loss(
     n_samples: int = 10_000,
     mc_samples: int = 500,
     max_clusters: int = 500,
+    *,
+    seed: Seed = None,
 ) -> int:
     """Find the minimum clusters per arm for target Bayesian power via expected loss.
 
@@ -1218,12 +1275,19 @@ def cluster_bayes_minimum_clusters_loss(
         Posterior draws per experiment.
     max_clusters : int, default=500
         Upper bound on cluster search.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every power evaluation in the search reuses
+        the same random numbers (clusters added by a larger design keep the
+        existing ones), so the search is reproducible for a given seed.
+        ``None`` (default) draws one fresh seed for the whole search.
 
     Returns
     -------
     int
         Minimum clusters per arm.
     """
+    # One seed for the whole search: every probe replays the same random numbers.
+    entropy = _entropy(seed)
 
     def _power(k: int) -> float:
         return cluster_bayes_power_loss(
@@ -1236,6 +1300,7 @@ def cluster_bayes_minimum_clusters_loss(
             lift=lift,
             n_samples=n_samples,
             mc_samples=mc_samples,
+            seed=entropy,
             loss_threshold=loss_threshold,
         )
 
@@ -1263,6 +1328,8 @@ def cluster_bayes_minimum_detectable_lift(
     mc_samples: int = 500,
     max_lift: float = 10.0,
     tol: float = 0.0001,
+    *,
+    seed: Seed = None,
 ) -> float:
     """Find the minimum detectable lift for a Bayesian CRT via P(T > C).
 
@@ -1290,12 +1357,19 @@ def cluster_bayes_minimum_detectable_lift(
         Upper bound on lift search.
     tol : float, default=0.0001
         Convergence tolerance.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every power evaluation in the search reuses
+        the same random numbers (clusters added by a larger design keep the
+        existing ones), so the search is reproducible for a given seed.
+        ``None`` (default) draws one fresh seed for the whole search.
 
     Returns
     -------
     float
         Minimum detectable lift.
     """
+    # One seed for the whole search: every probe replays the same random numbers.
+    entropy = _entropy(seed)
 
     def _power(alt_lift_val: float) -> float:
         return cluster_bayes_power_lift(
@@ -1307,6 +1381,7 @@ def cluster_bayes_minimum_detectable_lift(
             lift=lift,
             n_samples=n_samples,
             mc_samples=mc_samples,
+            seed=entropy,
             confidence_level=confidence_level,
         )
 
@@ -1335,6 +1410,8 @@ def cluster_bayes_minimum_detectable_lift_loss(
     mc_samples: int = 500,
     max_lift: float = 10.0,
     tol: float = 0.0001,
+    *,
+    seed: Seed = None,
 ) -> float:
     """Find the minimum detectable lift for a Bayesian CRT via expected loss.
 
@@ -1362,12 +1439,19 @@ def cluster_bayes_minimum_detectable_lift_loss(
         Upper bound on lift search.
     tol : float, default=0.0001
         Convergence tolerance.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every power evaluation in the search reuses
+        the same random numbers (clusters added by a larger design keep the
+        existing ones), so the search is reproducible for a given seed.
+        ``None`` (default) draws one fresh seed for the whole search.
 
     Returns
     -------
     float
         Minimum detectable lift.
     """
+    # One seed for the whole search: every probe replays the same random numbers.
+    entropy = _entropy(seed)
 
     def _power(alt_lift_val: float) -> float:
         return cluster_bayes_power_loss(
@@ -1379,6 +1463,7 @@ def cluster_bayes_minimum_detectable_lift_loss(
             lift=lift,
             n_samples=n_samples,
             mc_samples=mc_samples,
+            seed=entropy,
             loss_threshold=loss_threshold,
         )
 
@@ -1415,6 +1500,7 @@ def plot_cluster_bayes_power_curve(
     cluster_counts: np.ndarray[Any, Any] | list[int] | None = None,
     n_points: int = 20,
     *,
+    seed: Seed = None,
     dark_mode: bool = False,
 ) -> go.Figure:
     """Plot Bayesian CRT power as a function of clusters per arm.
@@ -1447,6 +1533,10 @@ def plot_cluster_bayes_power_curve(
         Explicit cluster counts to evaluate. When ``None``, auto-ranges.
     n_points : int, default=20
         Number of points when ``cluster_counts`` is ``None``.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every point on the curve reuses the same
+        random numbers, so the curve is smooth and reproducible. ``None``
+        (default) draws one fresh seed for the whole curve.
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
@@ -1455,6 +1545,8 @@ def plot_cluster_bayes_power_curve(
     -------
     go.Figure
     """
+    # One seed for the whole curve: every point reuses the same random numbers.
+    entropy = _entropy(seed)
     power_fn = cluster_bayes_power_lift if decision == "lift" else cluster_bayes_power_loss
 
     if cluster_counts is None:
@@ -1473,6 +1565,7 @@ def plot_cluster_bayes_power_curve(
             "lift": lift,
             "n_samples": n_samples,
             "mc_samples": mc_samples,
+            "seed": entropy,
         }
         if decision == "lift":
             kwargs["confidence_level"] = confidence_level
@@ -1527,6 +1620,7 @@ def plot_cluster_bayes_sensitivity_curve(
     cluster_counts: np.ndarray[Any, Any] | list[int] | None = None,
     n_points: int = 20,
     *,
+    seed: Seed = None,
     dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of clusters per arm.
@@ -1557,6 +1651,10 @@ def plot_cluster_bayes_sensitivity_curve(
         Explicit cluster counts to evaluate. When ``None``, auto-ranges.
     n_points : int, default=20
         Number of points when ``cluster_counts`` is ``None``.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every point on the curve reuses the same
+        random numbers, so the curve is smooth and reproducible. ``None``
+        (default) draws one fresh seed for the whole curve.
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
@@ -1565,6 +1663,8 @@ def plot_cluster_bayes_sensitivity_curve(
     -------
     go.Figure
     """
+    # One seed for the whole curve: every point reuses the same random numbers.
+    entropy = _entropy(seed)
     mdl_fn = cluster_bayes_minimum_detectable_lift if decision == "lift" else cluster_bayes_minimum_detectable_lift_loss
 
     if cluster_counts is None:
@@ -1582,6 +1682,7 @@ def plot_cluster_bayes_sensitivity_curve(
             "target_power": target_power,
             "n_samples": n_samples,
             "mc_samples": mc_samples,
+            "seed": entropy,
         }
         if decision == "lift":
             kwargs["confidence_level"] = confidence_level

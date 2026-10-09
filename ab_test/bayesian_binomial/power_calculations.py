@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 import numpy as np
 import plotly.graph_objects as go
+import scipy.stats as ss
 from joblib import Parallel, delayed
 
 from ab_test._display import apply_dark_mode
@@ -72,72 +73,110 @@ def _two_smallest_group_sizes(group_sizes: np.ndarray[Any, Any] | list[Any]) -> 
     return group_sizes
 
 
-def _simulate_chunk(
-    group_sizes: np.ndarray[Any, Any] | list[Any],
-    alphas: np.ndarray[Any, Any] | list[Any],
-    betas: np.ndarray[Any, Any] | list[Any],
-    baseline: float,
-    alt_rate: float,
-    n_samples: int,
-    mc_samples: int,
-    seed: int,
-) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
-    """Simulate one chunk of posterior draws with an explicit seed."""
-    rng = np.random.default_rng(seed)
-    successes_null = rng.binomial(group_sizes[0], baseline, size=n_samples)
-    successes_alt = rng.binomial(group_sizes[1], alt_rate, size=n_samples)
-    null_alpha, null_beta = alphas[0] + successes_null, betas[0] + group_sizes[0] - successes_null
-    alt_alpha, alt_beta = alphas[1] + successes_alt, betas[1] + group_sizes[1] - successes_alt
+# Posterior draws per arm held in memory at once. Simulations run in blocks of
+# about this many draws, so memory stays near 10 MB per arm whatever n_samples is.
+_DRAWS_PER_BLOCK = 1_000_000
 
-    samples_null = rng.beta(null_alpha[:, np.newaxis], null_beta[:, np.newaxis], size=(n_samples, mc_samples))
-    samples_alt = rng.beta(alt_alpha[:, np.newaxis], alt_beta[:, np.newaxis], size=(n_samples, mc_samples))
-    return samples_null, samples_alt
+Seed = int | np.random.Generator | np.random.SeedSequence | None
 
 
-def _simulate_posterior_draws(
-    group_sizes: np.ndarray[Any, Any] | list[Any],
-    alphas: np.ndarray[Any, Any] | list[Any],
-    betas: np.ndarray[Any, Any] | list[Any],
-    baseline: float,
-    alt_rate: float,
-    n_samples: int,
-    mc_samples: int,
-    seed: int | None = None,
-    n_jobs: int = 1,
-) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
-    """Simulate posterior draws for the control and treatment across ``n_samples`` experiments.
+def _entropy(seed: Seed) -> int:
+    """Resolve ``seed`` to the integer every simulation block is derived from.
 
-    Draws ``n_samples`` simulated experiments (one binomial outcome per arm) then,
-    for each, ``mc_samples`` posterior draws from the resulting Beta posterior.
-
-    Parameters
-    ----------
-    seed : int or None
-        Random seed for reproducibility.
-    n_jobs : int
-        Number of parallel jobs. ``1`` (default) runs sequentially; ``-1``
-        uses all available cores.
-
-    Returns
-    -------
-    tuple of np.ndarray
-        ``(samples_null, samples_alt)``, each of shape ``(n_samples, mc_samples)``.
+    ``None`` draws fresh entropy (unseeded), an int is used as is, and a
+    ``Generator`` is advanced once to produce one.
     """
-    rng = np.random.default_rng(seed)
-    if n_jobs == 1:
-        child_seed = int(rng.integers(2**31))
-        return _simulate_chunk(group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples, child_seed)
+    if seed is None:
+        return int(np.random.SeedSequence().generate_state(1, np.uint64)[0])
+    if isinstance(seed, np.random.Generator):
+        return int(seed.integers(2**63))
+    if isinstance(seed, np.random.SeedSequence):
+        return int(seed.generate_state(1, np.uint64)[0])
+    return int(seed)
 
-    chunk_sizes = np.diff(np.linspace(0, n_samples, abs(n_jobs) + 1, dtype=int))
-    child_seeds = rng.integers(2**31, size=len(chunk_sizes)).tolist()
-    results: list[tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]] = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
-        delayed(_simulate_chunk)(group_sizes, alphas, betas, baseline, alt_rate, int(cs), mc_samples, s)
-        for cs, s in zip(chunk_sizes, child_seeds)
+
+def _block_rng(entropy: int, *key: int) -> np.random.Generator:
+    """Return the generator for one block, determined by ``entropy`` and the block's key alone."""
+    return np.random.default_rng(np.random.SeedSequence(entropy, spawn_key=key))
+
+
+def _simulate_block(
+    group_sizes: np.ndarray[Any, Any] | list[Any],
+    alphas: np.ndarray[Any, Any] | list[Any],
+    betas: np.ndarray[Any, Any] | list[Any],
+    baseline: float,
+    alt_rate: float,
+    size: int,
+    mc_samples: int,
+    entropy: int,
+    block: int,
+    statistic: Literal["prob", "loss"],
+) -> np.ndarray[Any, Any]:
+    """Simulate one block of experiments and return each one's decision statistic.
+
+    The experiment outcomes come from the binomial inverse CDF of uniforms drawn
+    first, a fixed number per block, so they depend smoothly on the group sizes
+    and rates, and the posterior draws that follow start from the same point of
+    the stream. Every probe of a search therefore replays common random numbers.
+    """
+    rng = _block_rng(entropy, block)
+    u = rng.random((2, size))
+    n_null, n_alt = int(group_sizes[0]), int(group_sizes[1])
+    successes_null = ss.binom.ppf(u[0], n_null, baseline)
+    successes_alt = ss.binom.ppf(u[1], n_alt, alt_rate)
+    samples_null = rng.beta(
+        (alphas[0] + successes_null)[:, np.newaxis],
+        (betas[0] + n_null - successes_null)[:, np.newaxis],
+        (size, mc_samples),
     )
-    return (
-        np.concatenate([r[0] for r in results]),
-        np.concatenate([r[1] for r in results]),
+    samples_alt = rng.beta(
+        (alphas[1] + successes_alt)[:, np.newaxis],
+        (betas[1] + n_alt - successes_alt)[:, np.newaxis],
+        (size, mc_samples),
     )
+    if statistic == "prob":
+        return np.mean(samples_alt > samples_null, axis=1)  # type: ignore[no-any-return]
+    return np.mean(np.maximum(samples_null - samples_alt, 0), axis=1)  # type: ignore[no-any-return]
+
+
+def _block_sizes(n_samples: int, mc_samples: int) -> list[int]:
+    """Split ``n_samples`` simulations into blocks of at most ``_DRAWS_PER_BLOCK`` draws per arm."""
+    block = max(1, _DRAWS_PER_BLOCK // mc_samples)
+    sizes = [block] * (n_samples // block)
+    if n_samples % block:
+        sizes.append(n_samples % block)
+    return sizes
+
+
+def _simulated_statistics(
+    group_sizes: np.ndarray[Any, Any] | list[Any],
+    alphas: np.ndarray[Any, Any] | list[Any],
+    betas: np.ndarray[Any, Any] | list[Any],
+    baseline: float,
+    alt_rate: float,
+    n_samples: int,
+    mc_samples: int,
+    statistic: Literal["prob", "loss"],
+    seed: Seed = None,
+    n_jobs: int = 1,
+) -> np.ndarray[Any, Any]:
+    """Decision statistic for each of ``n_samples`` simulated experiments.
+
+    ``"prob"`` is P(B > A) and ``"loss"`` is E[max(A - B, 0)], each estimated
+    from ``mc_samples`` posterior draws. Blocks are seeded from ``seed`` and
+    their index only, so results do not depend on ``n_jobs``.
+    """
+    entropy = _entropy(seed)
+    sizes = _block_sizes(n_samples, mc_samples)
+    args = (group_sizes, alphas, betas, baseline, alt_rate)
+    results: list[np.ndarray[Any, Any]]
+    if n_jobs == 1:
+        results = [_simulate_block(*args, size, mc_samples, entropy, i, statistic) for i, size in enumerate(sizes)]
+    else:
+        results = Parallel(n_jobs=n_jobs)(  # type: ignore[assignment]
+            delayed(_simulate_block)(*args, size, mc_samples, entropy, i, statistic) for i, size in enumerate(sizes)
+        )
+    return np.concatenate(results)
 
 
 def _search_min_sample_size(
@@ -245,7 +284,7 @@ def bayes_power_lift(
     spend: float | None = None,
     msrp: float | None = None,
     *,
-    seed: int | None = None,
+    seed: Seed = None,
     n_jobs: int = 1,
 ) -> float:
     """Estimate the Bayesian power of a two-variant binomial experiment via simulation.
@@ -290,8 +329,9 @@ def bayes_power_lift(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
-    seed : int or None, optional
-        Random seed for reproducibility.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulation. ``None`` (default) is unseeded. The result
+        does not depend on ``n_jobs``.
     n_jobs : int, optional
         Number of parallel jobs for the simulation. ``1`` (default) runs
         sequentially; ``-1`` uses all available cores.
@@ -314,11 +354,9 @@ def bayes_power_lift(
         alt_lift = to_absolute(alt_lift, lift, scale, spend, msrp)
         lift = "absolute"
     alt_rate = _resolve_alt_rate(baseline, alt_lift, alt_rate, lift)
-    samples_null, samples_alt = _simulate_posterior_draws(
-        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples, seed=seed, n_jobs=n_jobs
+    prob_b_better = _simulated_statistics(
+        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples, "prob", seed=seed, n_jobs=n_jobs
     )
-
-    prob_b_better = np.mean(samples_alt > samples_null, axis=1)
     return float(np.mean(prob_b_better >= confidence_level))
 
 
@@ -336,7 +374,7 @@ def bayes_power_loss(
     spend: float | None = None,
     msrp: float | None = None,
     *,
-    seed: int | None = None,
+    seed: Seed = None,
     n_jobs: int = 1,
 ) -> float:
     """Estimate the Bayesian power of a two-variant binomial experiment via expected loss.
@@ -384,8 +422,9 @@ def bayes_power_loss(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
-    seed : int or None, optional
-        Random seed for reproducibility.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulation. ``None`` (default) is unseeded. The result
+        does not depend on ``n_jobs``.
     n_jobs : int, optional
         Number of parallel jobs for the simulation. ``1`` (default) runs
         sequentially; ``-1`` uses all available cores.
@@ -408,11 +447,9 @@ def bayes_power_loss(
         alt_lift = to_absolute(alt_lift, lift, scale, spend, msrp)
         lift = "absolute"
     alt_rate = _resolve_alt_rate(baseline, alt_lift, alt_rate, lift)
-    samples_null, samples_alt = _simulate_posterior_draws(
-        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples, seed=seed, n_jobs=n_jobs
+    expected_loss = _simulated_statistics(
+        group_sizes, alphas, betas, baseline, alt_rate, n_samples, mc_samples, "loss", seed=seed, n_jobs=n_jobs
     )
-
-    expected_loss = np.mean(np.maximum(samples_null - samples_alt, 0), axis=1)
     return float(np.mean(expected_loss <= loss_threshold))
 
 
@@ -429,6 +466,7 @@ def bayes_minimum_sample_size_loss(
     mc_samples: int = 500,
     max_n: int = 1_000_000,
     *,
+    seed: Seed = None,
     n_jobs: int = 1,
 ) -> int:
     """Find the minimum per-group sample size that achieves a target Bayesian power via expected loss.
@@ -440,8 +478,8 @@ def bayes_minimum_sample_size_loss(
     A simulation counts as a "win" when E[max(A − B, 0)] <= ``loss_threshold``,
     meaning the downside risk of picking B is acceptably small.
 
-    Because power estimates are stochastic, results may vary slightly between
-    calls. Increase ``n_samples`` for a more stable (but slower) result.
+    Power estimates are stochastic. Pass ``seed`` for a reproducible result,
+    and increase ``n_samples`` for a more precise (but slower) one.
 
     Parameters
     ----------
@@ -477,6 +515,11 @@ def bayes_minimum_sample_size_loss(
         Upper bound on the per-group sample size search. A ``ValueError`` is raised
         if ``target_power`` cannot be reached within this limit, by default
         1_000_000.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every power evaluation in the search reuses
+        the same random numbers, so the search is reproducible for a given seed
+        and estimated power changes smoothly with the search variable. ``None``
+        (default) draws one fresh seed for the whole search.
 
     Returns
     -------
@@ -501,6 +544,9 @@ def bayes_minimum_sample_size_loss(
             f"solved for. Convert to 'relative' or 'absolute' lift first."
         )
 
+    # One seed for the whole search: every probe replays the same random numbers.
+    entropy = _entropy(seed)
+
     def _power(n: int) -> float:
         return bayes_power_loss(
             group_sizes=[n, n],
@@ -513,6 +559,7 @@ def bayes_minimum_sample_size_loss(
             n_samples=n_samples,
             mc_samples=mc_samples,
             loss_threshold=loss_threshold,
+            seed=entropy,
             n_jobs=n_jobs,
         )
 
@@ -541,6 +588,7 @@ def bayes_minimum_sample_size(
     mc_samples: int = 500,
     max_n: int = 1_000_000,
     *,
+    seed: Seed = None,
     n_jobs: int = 1,
 ) -> int:
     """Find the minimum per-group sample size that achieves a target Bayesian power.
@@ -549,8 +597,8 @@ def bayes_minimum_sample_size(
     estimated power meets ``target_power``, then binary-searches within the
     resulting bracket to pinpoint the smallest n that suffices.
 
-    Because power estimates are stochastic, results may vary slightly between
-    calls. Increase ``n_samples`` for a more stable (but slower) result.
+    Power estimates are stochastic. Pass ``seed`` for a reproducible result,
+    and increase ``n_samples`` for a more precise (but slower) one.
 
     Parameters
     ----------
@@ -586,6 +634,11 @@ def bayes_minimum_sample_size(
         Upper bound on the per-group sample size search. A ``ValueError`` is raised
         if ``target_power`` cannot be reached within this limit, by default
         1_000_000.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every power evaluation in the search reuses
+        the same random numbers, so the search is reproducible for a given seed
+        and estimated power changes smoothly with the search variable. ``None``
+        (default) draws one fresh seed for the whole search.
 
     Returns
     -------
@@ -610,6 +663,9 @@ def bayes_minimum_sample_size(
             f"solved for. Convert to 'relative' or 'absolute' lift first."
         )
 
+    # One seed for the whole search: every probe replays the same random numbers.
+    entropy = _entropy(seed)
+
     def _power(n: int) -> float:
         return bayes_power_lift(
             group_sizes=[n, n],
@@ -622,6 +678,7 @@ def bayes_minimum_sample_size(
             n_samples=n_samples,
             mc_samples=mc_samples,
             confidence_level=confidence_level,
+            seed=entropy,
             n_jobs=n_jobs,
         )
 
@@ -652,6 +709,7 @@ def bayes_minimum_detectable_lift(
     spend: float | None = None,
     msrp: float | None = None,
     *,
+    seed: Seed = None,
     n_jobs: int = 1,
 ) -> float:
     """Find the minimum lift detectable at a target Bayesian power via P(B > A).
@@ -660,8 +718,8 @@ def bayes_minimum_detectable_lift(
     estimated power meets ``target_power``, then binary-searches within the
     resulting bracket to pinpoint the smallest lift that suffices.
 
-    Because power estimates are stochastic, results may vary slightly between
-    calls. Increase ``n_samples`` for a more stable (but slower) result.
+    Power estimates are stochastic. Pass ``seed`` for a reproducible result,
+    and increase ``n_samples`` for a more precise (but slower) one.
 
     The search never implies a treatment rate of 1 or more: it stops at the
     largest lift that keeps the rate below 1 if that is smaller than ``max_lift``.
@@ -699,6 +757,11 @@ def bayes_minimum_detectable_lift(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every power evaluation in the search reuses
+        the same random numbers, so the search is reproducible for a given seed
+        and estimated power changes smoothly with the search variable. ``None``
+        (default) draws one fresh seed for the whole search.
 
     Returns
     -------
@@ -718,6 +781,9 @@ def bayes_minimum_detectable_lift(
     else:
         internal_lift = lift
 
+    # One seed for the whole search: every probe replays the same random numbers.
+    entropy = _entropy(seed)
+
     def _power(alt_lift_val: float) -> float:
         return bayes_power_lift(
             group_sizes=[group_size, group_size],
@@ -729,6 +795,7 @@ def bayes_minimum_detectable_lift(
             n_samples=n_samples,
             mc_samples=mc_samples,
             confidence_level=confidence_level,
+            seed=entropy,
             n_jobs=n_jobs,
         )
 
@@ -759,6 +826,7 @@ def bayes_minimum_detectable_lift_loss(
     spend: float | None = None,
     msrp: float | None = None,
     *,
+    seed: Seed = None,
     n_jobs: int = 1,
 ) -> float:
     """Find the minimum lift detectable at a target Bayesian power via expected loss.
@@ -769,8 +837,8 @@ def bayes_minimum_detectable_lift_loss(
 
     A simulation counts as a "win" when E[max(A − B, 0)] <= ``loss_threshold``.
 
-    Because power estimates are stochastic, results may vary slightly between
-    calls. Increase ``n_samples`` for a more stable (but slower) result.
+    Power estimates are stochastic. Pass ``seed`` for a reproducible result,
+    and increase ``n_samples`` for a more precise (but slower) one.
 
     The search never implies a treatment rate of 1 or more: it stops at the
     largest lift that keeps the rate below 1 if that is smaller than ``max_lift``.
@@ -808,6 +876,11 @@ def bayes_minimum_detectable_lift_loss(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every power evaluation in the search reuses
+        the same random numbers, so the search is reproducible for a given seed
+        and estimated power changes smoothly with the search variable. ``None``
+        (default) draws one fresh seed for the whole search.
 
     Returns
     -------
@@ -827,6 +900,9 @@ def bayes_minimum_detectable_lift_loss(
     else:
         internal_lift = lift
 
+    # One seed for the whole search: every probe replays the same random numbers.
+    entropy = _entropy(seed)
+
     def _power(alt_lift_val: float) -> float:
         return bayes_power_loss(
             group_sizes=[group_size, group_size],
@@ -838,6 +914,7 @@ def bayes_minimum_detectable_lift_loss(
             n_samples=n_samples,
             mc_samples=mc_samples,
             loss_threshold=loss_threshold,
+            seed=entropy,
             n_jobs=n_jobs,
         )
 
@@ -870,6 +947,7 @@ def plot_bayes_power_curve(
     spend: float | None = None,
     msrp: float | None = None,
     *,
+    seed: Seed = None,
     n_jobs: int = 1,
     dark_mode: bool = False,
 ) -> go.Figure:
@@ -911,6 +989,10 @@ def plot_bayes_power_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every point on the curve reuses the same
+        random numbers, so the curve is smooth and reproducible. ``None``
+        (default) draws one fresh seed for the whole curve.
 
     Returns
     -------
@@ -918,6 +1000,8 @@ def plot_bayes_power_curve(
         An interactive Plotly figure with per-group sample size on the x-axis
         and Bayesian power on the y-axis.
     """
+    # One seed for the whole curve: every point reuses the same random numbers.
+    entropy = _entropy(seed)
     power_fn = bayes_power_lift if decision == "lift" else bayes_power_loss
 
     if sample_sizes is None:
@@ -943,7 +1027,7 @@ def plot_bayes_power_curve(
             common["confidence_level"] = confidence_level
         else:
             common["loss_threshold"] = loss_threshold
-        target_n = search_fn(**common, n_jobs=n_jobs)
+        target_n = search_fn(**common, seed=entropy, n_jobs=n_jobs)
         max_n = int(target_n * 2)
         sample_sizes = np.linspace(max(20, max_n // n_points), max_n, n_points, dtype=int)
 
@@ -961,6 +1045,7 @@ def plot_bayes_power_curve(
             "mc_samples": mc_samples,
             "spend": spend,
             "msrp": msrp,
+            "seed": entropy,
             "n_jobs": n_jobs,
         }
         if decision == "lift":
@@ -1018,6 +1103,7 @@ def plot_bayes_sensitivity_curve(
     spend: float | None = None,
     msrp: float | None = None,
     *,
+    seed: Seed = None,
     n_jobs: int = 1,
     dark_mode: bool = False,
 ) -> go.Figure:
@@ -1057,6 +1143,10 @@ def plot_bayes_sensitivity_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    seed : int, numpy.random.Generator or None, optional
+        Seed for the simulations. Every point on the curve reuses the same
+        random numbers, so the curve is smooth and reproducible. ``None``
+        (default) draws one fresh seed for the whole curve.
 
     Returns
     -------
@@ -1064,6 +1154,8 @@ def plot_bayes_sensitivity_curve(
         An interactive Plotly figure with per-group sample size on the x-axis
         and minimum detectable lift on the y-axis.
     """
+    # One seed for the whole curve: every point reuses the same random numbers.
+    entropy = _entropy(seed)
     mdl_fn = bayes_minimum_detectable_lift if decision == "lift" else bayes_minimum_detectable_lift_loss
 
     if sample_sizes is None:
@@ -1088,7 +1180,7 @@ def plot_bayes_sensitivity_curve(
             common["confidence_level"] = confidence_level
         else:
             common["loss_threshold"] = loss_threshold
-        target_n = search_fn(**common, n_jobs=n_jobs)
+        target_n = search_fn(**common, seed=entropy, n_jobs=n_jobs)
         min_n = max(100, target_n // 10)
         max_n = target_n * 5
         sample_sizes = np.linspace(min_n, max_n, n_points, dtype=int)
@@ -1106,6 +1198,7 @@ def plot_bayes_sensitivity_curve(
             "mc_samples": mc_samples,
             "spend": spend,
             "msrp": msrp,
+            "seed": entropy,
             "n_jobs": n_jobs,
         }
         if decision == "lift":

@@ -26,8 +26,13 @@ and minimum detectable lift
 :func:`~ab_test.bayesian_binomial.power_calculations.bayes_minimum_detectable_lift_loss`)
 via binary search.
 
-Because power estimates are stochastic, results may vary slightly between calls.
-Increase ``n_samples`` for more stable (but slower) results.
+Power estimates are stochastic. Pass ``seed`` (an int or a ``numpy.random.Generator``)
+for reproducible results, and increase ``n_samples`` for more precise (but slower) ones.
+With a seed, every evaluation in a search or along a curve reuses the same random numbers
+(common random numbers), so estimated power changes smoothly with the sample size or lift,
+searches return the same answer every time, and curves are no longer jagged. Results do
+not depend on ``n_jobs``. Simulations run in blocks, so memory stays around 20 MB
+whatever ``n_samples`` is.
 
 Example
 -------
@@ -52,7 +57,7 @@ Example
    n = bayes_minimum_sample_size(
        alphas=[1, 1], betas=[1, 1],
        baseline=0.10, alt_lift=0.20,
-       target_power=0.80,
+       target_power=0.80, seed=42,
    )
    print(f"Min sample size per group: {n:,}")
 
@@ -69,4 +74,4 @@ API Reference
 
 .. automodule:: ab_test.bayesian_binomial.power_calculations
    :members:
-   :exclude-members: _resolve_alt_rate, _two_smallest_group_sizes, _simulate_posterior_draws, _search_min_sample_size, _search_min_lift
+   :exclude-members: _resolve_alt_rate, _two_smallest_group_sizes, _search_min_sample_size, _search_min_lift
