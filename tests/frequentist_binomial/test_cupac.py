@@ -1091,3 +1091,69 @@ class TestClusterRobustStatisticalProperties:
 
         coverage = covered / n_sims
         assert coverage >= 0.92
+
+
+class TestCR2SatterthwaiteDf:
+    """Bell-McCaffrey degrees of freedom, as in Pustejovsky & Tipton (2018)."""
+
+    @staticmethod
+    def _two_arm(treated_clusters, n_clusters=8, cluster_size=5, seed=0):
+        rng = np.random.default_rng(seed)
+        cluster_ids = np.repeat(np.arange(n_clusters), cluster_size)
+        treatment = np.isin(cluster_ids, treated_clusters).astype(float)
+        X = np.column_stack([np.ones(len(cluster_ids)), treatment])
+        y = rng.normal(size=len(cluster_ids))
+        return X, y, cluster_ids
+
+    def test_balanced_cluster_randomized_df_is_k_minus_two(self):
+        # Used to report 8.0: the cross-cluster terms of the variance were dropped.
+        X, y, cluster_ids = self._two_arm([1, 3, 5, 7])
+        _, df_val = _cr2_standard_errors(X, y, _ols_fit(X, y), cluster_ids)
+        assert df_val == pytest.approx(6.0)
+
+    def test_unbalanced_matches_closed_form(self):
+        # For a difference in means of equal-size clusters, the df is
+        # (1/k1 + 1/k2)^2 / (1/(k1^2 (k1 - 1)) + 1/(k2^2 (k2 - 1))).
+        X, y, cluster_ids = self._two_arm([0, 1, 2])
+        k1, k2 = 3, 5
+        expected = (1 / k1 + 1 / k2) ** 2 / (1 / (k1**2 * (k1 - 1)) + 1 / (k2**2 * (k2 - 1)))
+        _, df_val = _cr2_standard_errors(X, y, _ols_fit(X, y), cluster_ids)
+        assert df_val == pytest.approx(expected)
+
+    @staticmethod
+    def test_matches_full_hat_matrix_formula():
+        rng = np.random.default_rng(1)
+        cluster_ids = np.repeat(np.arange(8), 5)
+        X = np.column_stack([np.ones(40), (cluster_ids % 2).astype(float), rng.normal(size=40)])
+        y = rng.normal(size=40)
+        _, df_val = _cr2_standard_errors(X, y, _ols_fit(X, y), cluster_ids)
+
+        XtX_inv = np.linalg.inv(X.T @ X)
+        resid_maker = np.eye(40) - X @ XtX_inv @ X.T
+        q_cols = []
+        for g in range(8):
+            idx = np.flatnonzero(cluster_ids == g)
+            eigvals, eigvecs = np.linalg.eigh(resid_maker[np.ix_(idx, idx)])
+            A_g = eigvecs @ np.diag(1 / np.sqrt(eigvals)) @ eigvecs.T
+            q_cols.append(resid_maker[:, idx] @ A_g @ X[idx] @ XtX_inv[:, 1])
+        Q = np.column_stack(q_cols)
+        G = Q.T @ Q
+        assert df_val == pytest.approx(np.trace(G) ** 2 / np.sum(G**2))
+
+
+@pytest.mark.slow
+class TestCR2TypeIErrorFewClusters:
+    @staticmethod
+    def test_rejection_rate_matches_alpha():
+        # With 6 clusters the old df (too high) rejected 6.9% of the time at 5%.
+        n_sims = 4000
+        rejections = 0
+        for seed in range(n_sims):
+            df = _make_clustered_experiment_data(n_clusters=6, cluster_size=5, icc=0.3, seed=seed)
+            exp = CupacExperiment(
+                df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+            ).fit()
+            rejections += exp.p_value < 0.05
+
+        # Monte Carlo SE is about 0.0034.
+        assert rejections / n_sims == pytest.approx(0.05, abs=0.0103)

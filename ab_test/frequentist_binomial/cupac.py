@@ -138,7 +138,13 @@ def _cr2_standard_errors(
         CR2 standard errors for each coefficient.
     df : float
         Satterthwaite degrees of freedom for the treatment coefficient
-        (index 1).
+        (index 1), from Bell & McCaffrey (2002) as given by Pustejovsky &
+        Tipton (2018): df = tr(G)^2 / ||G||_F^2, where under a working model of
+        independent, equal-variance errors the variance estimate is
+        sum_g (q_g' e)^2 and G[g, h] = q_g' q_h. With u_g = A_g X_g v and
+        s_g = X_g' u_g, q_g = (I - H)[:, g] u_g gives
+        G[g, h] = [g == h] u_g' u_g - s_g' (X'X)^{-1} s_h, so the n x n hat
+        matrix is never formed.
     """
     p = X.shape[1]
     residuals = y - X @ beta
@@ -148,7 +154,8 @@ def _cr2_standard_errors(
     meat = np.zeros((p, p))
 
     c = XtX_inv[:, 1]
-    m_g_list: list[float] = []
+    u_sq: list[float] = []
+    s_cols: list[np.ndarray[Any, Any]] = []
 
     for g in clusters:
         idx = np.where(cluster_ids == g)[0]
@@ -167,15 +174,17 @@ def _cr2_standard_errors(
         e_g_adj = A_g @ e_g
         meat += X_g.T @ np.outer(e_g_adj, e_g_adj) @ X_g
 
-        m_g = float(c @ X_g.T @ A_g.T @ A_g @ X_g @ c)
-        m_g_list.append(m_g)
+        u_g = A_g @ X_g @ c
+        u_sq.append(float(u_g @ u_g))
+        s_cols.append(X_g.T @ u_g)
 
     cov = XtX_inv @ meat @ XtX_inv
     se = np.sqrt(np.diag(cov))
 
-    v_hat = sum(m_g_list)
-    sum_m_sq = sum(m**2 for m in m_g_list)
-    df = float(v_hat**2 / sum_m_sq) if sum_m_sq > 0 else float(len(clusters) - 1)
+    S = np.column_stack(s_cols)
+    G = np.diag(u_sq) - S.T @ XtX_inv @ S
+    G_norm_sq = float(np.sum(G**2))
+    df = float(np.trace(G) ** 2 / G_norm_sq) if G_norm_sq > 0 else float(len(clusters) - 1)
 
     return se, df
 
