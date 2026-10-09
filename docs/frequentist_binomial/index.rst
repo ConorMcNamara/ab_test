@@ -3,7 +3,7 @@ Frequentist Binomial
 
 Classical hypothesis-testing tools for A/B tests on binomial outcomes. This
 subpackage provides significance tests, confidence intervals, power and sample
-size calculations, sequential testing via mSPRT and group sequential designs, equivalence
+size calculations, sequential testing via mSPRT, an exact e-test and group sequential designs, equivalence
 testing via TOST, randomization inference, cluster-randomized trials,
 covariate-adjusted variance reduction via CUPAC, Lin and MLRATE, stratified
 analysis via Cochran-Mantel-Haenszel, and difference-in-differences analysis
@@ -18,6 +18,7 @@ for heterogeneous treatment effects.
    confidence_intervals
    power_calculations
    msprt
+   e_test
    gst
    equivalence
    randomization_inference
