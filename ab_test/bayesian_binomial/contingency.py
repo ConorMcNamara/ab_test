@@ -15,10 +15,10 @@ from ab_test._display import (
     resolve_plot_color,
     tabulate_summary,
 )
-from ab_test._lift import from_absolute, scale_bounds, scale_metric
+from ab_test._lift import scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
-from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
+from ab_test.bayesian_binomial.utils import _default_rope_half_width, posterior_mean, sample_beta
 
 __all__ = [
     "BayesianContingencyTable",
@@ -298,10 +298,8 @@ class BayesianContingencyTable(BaseContingencyTable):
 
     def _default_rope_half_width(self, lift: str) -> float:
         """Half-width of the default ROPE: 10% of the control's posterior rate, in ``lift`` units."""
-        if lift in ("relative", "cpa"):
-            return 0.1
         control_rate = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
-        return float(from_absolute(0.1 * control_rate, lift, max(self.trials), self.spend, self.msrp))
+        return _default_rope_half_width(control_rate, lift, max(self.trials), self.spend, self.msrp)
 
     def analyze_individually(
         self,
