@@ -34,6 +34,7 @@ from ab_test._display import (
 )
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.power_calculations import _max_feasible_lift, _search_min_lift
+from ab_test.bayesian_binomial.utils import _default_rope_half_width
 
 __all__ = [
     "BayesianClusterRandomizedTrial",
@@ -388,8 +389,8 @@ class BayesianClusterRandomizedTrial:
         confidence_level: float = 0.95,
         n_samples: int = 100_000,
         cred_int_method: Literal["credible", "hdi"] = "credible",
-        low_threshold: float = -0.1,
-        high_threshold: float = 0.1,
+        low_threshold: float | None = None,
+        high_threshold: float | None = None,
     ) -> str:
         """Analyze the cluster-randomized experiment.
 
@@ -409,10 +410,13 @@ class BayesianClusterRandomizedTrial:
         cred_int_method : {"credible", "hdi"}, default="credible"
             ``"credible"`` uses equal-tailed percentiles; ``"hdi"`` uses
             the Highest Density Interval.
-        low_threshold : float, default=-0.1
-            Lower bound of the ROPE.
-        high_threshold : float, default=0.1
-            Upper bound of the ROPE.
+        low_threshold : float, optional
+            Lower bound of the ROPE, in the units of ``lift``. Defaults to
+            minus 10% of the control rate in those units (-0.1 for relative
+            lift), matching :class:`BayesianContingencyTable`.
+        high_threshold : float, optional
+            Upper bound of the ROPE. Defaults to 10% of the control rate in
+            the units of ``lift``.
 
         Returns
         -------
@@ -447,10 +451,13 @@ class BayesianClusterRandomizedTrial:
         expected_loss = float(np.mean(np.maximum(-lift_samples, 0)))
         lift_mean = float(np.mean(lift_samples))
         ci_lo, ci_hi = self._credible_interval(lift_samples, confidence_level, cred_int_method)
-        prob_rope = float(np.mean((lift_samples >= low_threshold) & (lift_samples <= high_threshold)))
-
         p_control = params[ctrl]["mean"]
         p_treatment = params[treat]["mean"]
+        if low_threshold is None or high_threshold is None:
+            default_rope = _default_rope_half_width(p_control, lift, 1)
+            low_threshold = -default_rope if low_threshold is None else low_threshold
+            high_threshold = default_rope if high_threshold is None else high_threshold
+        prob_rope = float(np.mean((lift_samples >= low_threshold) & (lift_samples <= high_threshold)))
 
         self.pooled_results = {
             "lift_type": lift,

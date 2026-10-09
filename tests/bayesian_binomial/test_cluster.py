@@ -233,6 +233,26 @@ class TestBayesianCRTAnalyze:
         assert relative_loss == pytest.approx(absolute_loss / crt.pooled_results["p_control"], rel=0.15)
 
     @staticmethod
+    def test_default_rope_scales_with_lift():
+        # 10% -> 12%: the old +/-0.1 default covered every absolute lift (P = 1).
+        crt = _make_crt()
+        np.random.seed(0)
+        crt.analyze(lift="relative")
+        relative_rope = crt.pooled_results["prob_rope"]
+        np.random.seed(0)
+        crt.analyze(lift="absolute")
+        absolute_rope = crt.pooled_results["prob_rope"]
+        assert absolute_rope < 0.9
+        assert absolute_rope == pytest.approx(relative_rope, abs=0.1)
+
+    @staticmethod
+    def test_explicit_rope_unchanged():
+        crt = _make_crt()
+        np.random.seed(0)
+        crt.analyze(lift="absolute", low_threshold=-0.1, high_threshold=0.1)
+        assert crt.pooled_results["prob_rope"] == pytest.approx(1.0)
+
+    @staticmethod
     def test_treatment_higher_detected():
         np.random.seed(42)
         crt = _make_crt()
