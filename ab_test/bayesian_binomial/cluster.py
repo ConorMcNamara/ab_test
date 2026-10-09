@@ -395,7 +395,8 @@ class BayesianClusterRandomizedTrial:
 
         Fits a beta-binomial model per arm, draws posterior samples for the
         arm-level rates, and computes P(T > C), expected loss, credible
-        intervals, and ROPE probabilities.
+        intervals, and ROPE probabilities. The expected loss, E[max(-lift, 0)],
+        is in the units of ``lift``.
 
         Parameters
         ----------
@@ -443,7 +444,7 @@ class BayesianClusterRandomizedTrial:
             lift_samples = samples_t - samples_c
 
         prob_t_gt_c = float(np.mean(samples_t > samples_c))
-        expected_loss = float(np.mean(np.maximum(samples_c - samples_t, 0)))
+        expected_loss = float(np.mean(np.maximum(-lift_samples, 0)))
         lift_mean = float(np.mean(lift_samples))
         ci_lo, ci_hi = self._credible_interval(lift_samples, confidence_level, cred_int_method)
         prob_rope = float(np.mean((lift_samples >= low_threshold) & (lift_samples <= high_threshold)))
@@ -499,7 +500,7 @@ class BayesianClusterRandomizedTrial:
             + [fmt_rate(r["p_control"]), fmt_rate(r["p_treatment"])]
             + [fmt(r["lift"]), fmt(r["ci_lower"]), fmt(r["ci_upper"])]
             + [str_prob]
-            + [convert_to_tabulate_str(r["expected_loss"], "relative")]
+            + [fmt(r["expected_loss"])]
             + [convert_to_tabulate_str(r["prob_rope"], "relative")]
         )
         return_string = tabulate_summary(row_labels, values)

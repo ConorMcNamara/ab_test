@@ -215,6 +215,24 @@ class TestBayesianCRTAnalyze:
         assert crt.pooled_results["expected_loss"] >= 0
 
     @staticmethod
+    def test_expected_loss_in_lift_units():
+        # Treatment is worse: 12% -> 10%. The loss used to be the rate difference
+        # (about 0.02) whatever the lift, shown as a percent beside relative lift.
+        rng = np.random.default_rng(1)
+        crt = BayesianClusterRandomizedTrial(name="Loss", metric_name="conv")
+        for i in range(10):
+            crt.add(f"c{i}", int(rng.binomial(500, 0.12)), 500, group="Control")
+        for i in range(10):
+            crt.add(f"t{i}", int(rng.binomial(500, 0.10)), 500, group="Treatment")
+        np.random.seed(0)
+        crt.analyze(lift="absolute")
+        absolute_loss = crt.pooled_results["expected_loss"]
+        np.random.seed(0)
+        crt.analyze(lift="relative")
+        relative_loss = crt.pooled_results["expected_loss"]
+        assert relative_loss == pytest.approx(absolute_loss / crt.pooled_results["p_control"], rel=0.15)
+
+    @staticmethod
     def test_treatment_higher_detected():
         np.random.seed(42)
         crt = _make_crt()
