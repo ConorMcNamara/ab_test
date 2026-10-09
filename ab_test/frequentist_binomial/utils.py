@@ -140,10 +140,18 @@ def observed_lift(
     -------
     ote : float
         The observed treatment effect, i.e., lift of our experiment
+
+    Raises
+    ------
+    ZeroDivisionError
+        If ``lift="relative"`` and the control group has no successes.
     """
     pa = successes[0] / trials[0]
     pb = successes[1] / trials[1]
     if lift == "relative":
+        # Checked explicitly: numpy returns inf with a warning rather than raising.
+        if pa == 0:
+            raise ZeroDivisionError("Relative lift is undefined with no control successes")
         ote = (pb - pa) / pa
     else:
         if lift == "incremental":

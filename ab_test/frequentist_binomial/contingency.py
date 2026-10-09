@@ -172,6 +172,8 @@ class ContingencyTable(BaseContingencyTable):
                 "cannot be inverted. Use test_method 'score', 'likelihood', 'z', 'wald' or 'msprt', or a "
                 "conf_int_method such as 'wilson'."
             )
+        if lift == "relative" and self.successes[0] == 0:
+            raise ValueError('Relative lift is undefined with no control successes; use lift="absolute"')
         test_lift = observed_lift(self.trials, self.successes, lift)
         if test_method == "randomization":
             test_fn = functools.partial(randomization_test, n_permutations=n_permutations, seed=seed)
