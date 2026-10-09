@@ -9,7 +9,7 @@ from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
 from ab_test._display import convert_to_tabulate_str, format_percent, tabulate_summary
-from ab_test._lift import scale_bounds, scale_metric
+from ab_test._lift import scale_bounds, scale_metric, to_absolute
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, individual_confidence_interval
 from ab_test.frequentist_binomial.msprt import msprt_test
 from ab_test.frequentist_binomial.randomization_inference import randomization_test
@@ -134,9 +134,13 @@ class ContingencyTable(BaseContingencyTable):
         alpha : float, default = 0.05
             The alpha level of our experiment, to be used to craft confidence intervals.
         null_lift : float
-            Lift associated with null hypothesis. Defaults to 0.0. Only
-            ``'score'``, ``'likelihood'``, ``'z'``, ``'wald'``, ``'msprt'`` and
-            ``'randomization'`` support a nonzero value.
+            Lift associated with null hypothesis, in the units of ``lift``.
+            Defaults to 0.0. Only ``'score'``, ``'likelihood'``, ``'z'``,
+            ``'wald'``, ``'msprt'`` and ``'randomization'`` support a nonzero
+            value. Scaled lifts (``'incremental'``, ``'roas'``, ``'revenue'``,
+            ``'cpa'``) are converted to a difference in proportions before
+            testing. For ``'cpa'``, ``null_lift=0`` means no incremental
+            conversions (an unbounded CPA); any other value is a target CPA.
         tau : float or None, optional
             Scale of the Gaussian mixing distribution for the mSPRT test.
             Only used when ``test_method="msprt"``. When ``None``, the scale
@@ -175,22 +179,29 @@ class ContingencyTable(BaseContingencyTable):
         if lift == "relative" and self.successes[0] == 0:
             raise ValueError('Relative lift is undefined with no control successes; use lift="absolute"')
         test_lift = observed_lift(self.trials, self.successes, lift)
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
+            # The tests work on proportions, so test the null on the same absolute
+            # scale that the interval is built on (and that _scale_bound converts back).
+            ci_lift = "absolute"
+            if lift == "cpa" and null_lift == 0:
+                test_null = 0.0
+            else:
+                test_null = to_absolute(null_lift, lift, max(self.trials), self.spend, self.msrp)
+        else:
+            ci_lift = lift
+            test_null = null_lift
         if test_method == "randomization":
             test_fn = functools.partial(randomization_test, n_permutations=n_permutations, seed=seed)
             functools.update_wrapper(test_fn, randomization_test)
-            p_value = test_fn(self.trials, self.successes, null_lift, lift)
+            p_value = test_fn(self.trials, self.successes, test_null, ci_lift)
         elif test_method == "msprt":
-            p_value = msprt_test(self.trials, self.successes, null_lift, lift, tau=tau)
+            p_value = msprt_test(self.trials, self.successes, test_null, ci_lift, tau=tau)
             test_fn = functools.partial(msprt_test, tau=tau)
             functools.update_wrapper(test_fn, msprt_test)
         else:
-            p_value = ab_test(self.trials, self.successes, null_lift, lift, method=test_method)
+            p_value = ab_test(self.trials, self.successes, test_null, ci_lift, method=test_method)
             # Only used by binary_search, which the check above limits to invertible tests.
             test_fn = invertible_tests.get(test_method, score_test)
-        if lift in ["incremental", "roas", "revenue", "cpa"]:
-            ci_lift = "absolute"
-        else:
-            ci_lift = lift
         if test_method == "randomization":
             lb, ub = -math.inf, math.inf
         else:

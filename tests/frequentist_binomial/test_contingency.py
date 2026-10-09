@@ -312,6 +312,31 @@ class TestContingencyTableWald:
             TestContingencyTableWald._table().analyze(lift="relative", test_method="wald")
 
 
+class TestAnalyzeScaledNullLift:
+    @staticmethod
+    def _p_value(lift, null_lift):
+        table = ContingencyTable("Scaled", "conversion", spend=5000, msrp=50)
+        table.add("Control", 100, 1000).add("Treatment", 140, 1000)
+        table.analyze(lift=lift, null_lift=null_lift)
+        return table.incremental_results["p_value"]
+
+    @pytest.mark.parametrize(
+        "lift, null_lift",
+        # Each is a 3-point difference in conversion rate at 1,000 per arm.
+        [("incremental", 30), ("roas", 0.006), ("revenue", 1500), ("cpa", 5000 / 30)],
+    )
+    def test_null_is_converted_to_the_absolute_scale(self, lift, null_lift):
+        # The null used to be passed through unconverted, e.g. incremental 30 as a
+        # difference in proportions of 30, giving p = 1.0.
+        expected = self._p_value("absolute", 0.03)
+        assert expected == pytest.approx(0.490, abs=1e-3)
+        assert self._p_value(lift, null_lift) == pytest.approx(expected)
+
+    @pytest.mark.parametrize("lift", ["incremental", "roas", "revenue", "cpa"])
+    def test_zero_null_unchanged(self, lift):
+        assert self._p_value(lift, 0.0) == pytest.approx(self._p_value("absolute", 0.0))
+
+
 class TestAnalyzeZeroControl:
     @staticmethod
     def _table():
