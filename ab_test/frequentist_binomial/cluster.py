@@ -63,6 +63,12 @@ _VALID_LIFTS = frozenset({"absolute", "relative"})
 # ---------------------------------------------------------------------------
 
 
+def _binomial_floor(successes: np.ndarray[Any, Any], trials: np.ndarray[Any, Any]) -> float:
+    """Variance of cluster rates from binomial sampling alone, at the arm's pooled rate."""
+    pooled = float(np.sum(successes) / np.sum(trials))
+    return pooled * (1 - pooled) * float(np.mean(1.0 / np.asarray(trials, dtype=float)))
+
+
 def estimate_icc(
     successes: np.ndarray[Any, Any] | list[int],
     trials: np.ndarray[Any, Any] | list[int],
@@ -85,7 +91,9 @@ def estimate_icc(
     Returns
     -------
     float
-        Estimated ICC, clamped to [0, 1].
+        Estimated ICC, clamped to [0, 1]. NaN when every cluster has a
+        single trial: there is then no within-cluster variation, so the ICC
+        cannot be estimated (and does not matter: the design effect is 1).
 
     Notes
     -----
@@ -109,6 +117,9 @@ def estimate_icc(
         raise ValueError("estimate_icc requires more clusters than groups")
 
     N = float(np.sum(m))
+    if N == K:
+        # Every cluster has one trial, so the within-cluster mean square is 0/0.
+        return math.nan
     p_k = s / m
     s_g = np.bincount(g, weights=s)
     N_g = np.bincount(g, weights=m)
@@ -597,8 +608,12 @@ class ClusterRandomizedTrial:
             ci_upper_abs = math.inf
             pvalue_label = "p-value (RI)"
         else:
-            var_ctrl = float(np.var(p_ctrl, ddof=1))
-            var_treat = float(np.var(p_treat, ddof=1))
+            # Identical cluster rates give a sample variance of exactly 0, so the SE was 0,
+            # p = 0 and the interval had zero width. Cluster rates vary at least as much as
+            # binomial sampling makes them (ICC >= 0), so use that variance instead. Only the
+            # degenerate case: flooring every small variance made the test overly conservative.
+            var_ctrl = float(np.var(p_ctrl, ddof=1)) or _binomial_floor(s_ctrl, m_ctrl)
+            var_treat = float(np.var(p_treat, ddof=1)) or _binomial_floor(s_treat, m_treat)
 
             se_ctrl = var_ctrl / K_ctrl
             se_treat = var_treat / K_treat
@@ -645,7 +660,8 @@ class ClusterRandomizedTrial:
         arms = np.repeat([0, 1], [K_ctrl, K_treat])
         icc_val = estimate_icc(all_s, all_m, groups=arms)
         avg_m = float(np.mean(all_m))
-        deff_val = design_effect(avg_m, icc_val)
+        # With clusters of one trial the ICC is undefined but irrelevant: the design effect is 1.
+        deff_val = 1.0 if math.isnan(icc_val) else design_effect(avg_m, icc_val)
 
         self._analyzed = {
             "method": method,
@@ -685,7 +701,8 @@ class ClusterRandomizedTrial:
         )
         return_string = tabulate_summary(row_labels, values)
         ctrl_name, treat_name = self._group_names
-        footer = f"\nICC: {icc_val:.4f} | DEFF: {deff_val:.2f} | Clusters: {K_ctrl} {ctrl_name}, {K_treat} {treat_name}"
+        icc_str = "n/a" if math.isnan(icc_val) else f"{icc_val:.4f}"
+        footer = f"\nICC: {icc_str} | DEFF: {deff_val:.2f} | Clusters: {K_ctrl} {ctrl_name}, {K_treat} {treat_name}"
         if method == "welch":
             footer += f" | Welch df: {welch_df:.1f}"
         return_string += footer
