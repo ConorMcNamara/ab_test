@@ -1157,3 +1157,85 @@ class TestCR2TypeIErrorFewClusters:
 
         # Monte Carlo SE is about 0.0034.
         assert rejections / n_sims == pytest.approx(0.05, abs=0.0103)
+
+
+class _NearestClusterModel:
+    """Predicts the mean outcome of the training cluster with the closest feature.
+
+    Like a tree or k-NN it memorises clusters it has seen and generalises to new
+    ones from similar clusters, so it leaks cluster-mates' outcomes if they share
+    a training fold. It needs no scikit-learn.
+    """
+
+    def fit(self, X, y):
+        keys = X[:, 0]
+        self.keys_ = np.unique(keys)
+        self.means_ = np.array([y[keys == k].mean() for k in self.keys_])
+        return self
+
+    def predict(self, X):
+        return self.means_[np.abs(X[:, [0]] - self.keys_[np.newaxis, :]).argmin(axis=1)]
+
+
+def _make_cluster_feature_data(seed, n_clusters=20, cluster_size=50, treatment_effect=0.12):
+    """Cluster-randomized data with a pre-experiment feature that predicts each cluster's rate."""
+    rng = np.random.default_rng(seed)
+    cluster_ids = np.repeat(np.arange(n_clusters), cluster_size)
+    treatment = np.isin(cluster_ids, rng.permutation(n_clusters)[: n_clusters // 2])
+    feature = rng.uniform(0, 1, n_clusters)
+    rate = (0.15 + 0.4 * feature + rng.normal(0, 0.03, n_clusters))[cluster_ids] + treatment_effect * treatment
+    return pd.DataFrame(
+        {
+            "converted": rng.binomial(1, np.clip(rate, 0.01, 0.99)),
+            "group": np.where(treatment, "treatment", "control"),
+            "cluster_feature": feature[cluster_ids],
+            "cluster_id": cluster_ids,
+        }
+    )
+
+
+class TestMlrateClusterFolds:
+    @staticmethod
+    def _experiment(df, estimator=None):
+        return CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["cluster_feature"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=estimator or _NearestClusterModel(),
+            cluster_col="cluster_id",
+        )
+
+    def test_no_prediction_is_trained_on_its_own_cluster(self):
+        df = _make_cluster_feature_data(seed=0)
+        calls = []
+
+        class Recorder(_NearestClusterModel):
+            def fit(self, X, y):
+                calls.append([set(X[:, 0]), None])
+                return super().fit(X, y)
+
+            def predict(self, X):
+                calls[-1][1] = set(X[:, 0])
+                return super().predict(X)
+
+        exp = self._experiment(df, estimator=Recorder())
+        exp._cross_fit_predictions(df[["cluster_feature"]].to_numpy(), df["converted"].to_numpy(dtype=float))
+
+        assert len(calls) == 5
+        for trained_on, predicted in calls:
+            assert trained_on.isdisjoint(predicted)
+
+    def test_ate_not_shrunk_by_cluster_mates(self):
+        # With unit-level folds the model saw each unit's cluster-mates, whose
+        # outcomes include the treatment effect: the mean ATE was 0.03, not 0.12.
+        ates = [self._experiment(_make_cluster_feature_data(seed)).fit().ate for seed in range(40)]
+        assert np.mean(ates) == pytest.approx(0.12, abs=0.025)
+
+    def test_fewer_clusters_than_folds_raises(self):
+        df = _make_cluster_feature_data(seed=0, n_clusters=4)
+        with pytest.raises(ValueError, match="at least n_folds=5 clusters, got 4"):
+            self._experiment(df).fit()

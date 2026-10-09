@@ -236,6 +236,8 @@ class CupacExperiment:
     cluster_col : str or None
         Column identifying clusters for CR2 cluster-robust standard
         errors.  When ``None`` (default), HC2 standard errors are used.
+        With ``method="mlrate"``, whole clusters are also assigned to
+        cross-fitting folds, so there must be at least ``n_folds`` clusters.
 
     Examples
     --------
@@ -346,7 +348,9 @@ class CupacExperiment:
 
         Each unit's prediction comes from a model trained on all other
         folds, ensuring the prediction is independent of the unit's own
-        outcome.
+        outcome. When ``cluster_col`` is set, whole clusters are assigned to
+        folds, so no unit's prediction is trained on its cluster-mates, whose
+        outcomes are correlated with its own.
 
         Parameters
         ----------
@@ -361,10 +365,21 @@ class CupacExperiment:
             Out-of-fold predictions.
         """
         n = len(y)
-        indices = np.arange(n)
         rng = np.random.default_rng(0)
-        rng.shuffle(indices)
-        folds = np.array_split(indices, self.n_folds)
+        if self.cluster_col is None:
+            indices = np.arange(n)
+            rng.shuffle(indices)
+            folds = np.array_split(indices, self.n_folds)
+        else:
+            cluster_ids = self.data[self.cluster_col].to_numpy()
+            clusters = np.unique(cluster_ids)
+            if len(clusters) < self.n_folds:
+                raise ValueError(
+                    f"Cross-fitting assigns whole clusters to folds, so it needs at least n_folds={self.n_folds} "
+                    f"clusters, got {len(clusters)}"
+                )
+            rng.shuffle(clusters)
+            folds = [np.flatnonzero(np.isin(cluster_ids, group)) for group in np.array_split(clusters, self.n_folds)]
 
         y_hat = np.empty(n, dtype=float)
         for fold_idx in folds:
