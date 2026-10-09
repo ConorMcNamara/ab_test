@@ -19,6 +19,12 @@ It computes:
    interval.
 3. **All pairwise DiD comparisons** with posterior probabilities P(lift_i > lift_j)
 
+With ``lift="incremental"``, ``"roas"`` or ``"revenue"``, per-segment effects
+are reported in those units, but tau and the pairwise comparisons use the risk
+difference: scaling each segment by its own size, spend or price would make
+equal rate effects look different. ``lift="cpa"`` is not supported; use
+``"roas"``.
+
 This is the Bayesian counterpart to
 :class:`~ab_test.frequentist_binomial.diff_in_diff.DiffInDiff`, which uses
 Cochran's Q and Wald confidence intervals.  The Bayesian version replaces
