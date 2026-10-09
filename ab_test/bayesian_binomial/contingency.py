@@ -15,10 +15,10 @@ from ab_test._display import (
     resolve_plot_color,
     tabulate_summary,
 )
-from ab_test._lift import from_absolute, scale_bounds, scale_metric
+from ab_test._lift import scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
-from ab_test.bayesian_binomial.utils import posterior_mean, sample_beta
+from ab_test.bayesian_binomial.utils import _default_rope_half_width, posterior_mean, sample_beta
 
 __all__ = [
     "BayesianContingencyTable",
@@ -159,7 +159,9 @@ class BayesianContingencyTable(BaseContingencyTable):
         str
             A grid-formatted table summarising the lift, credible interval,
             probability B is best, expected loss, and ROPE probability, with
-            footnotes explaining annotated values.
+            footnotes explaining annotated values. The expected loss,
+            E[max(-lift, 0)], is in the units of ``lift``; for ``"cpa"`` it is
+            a difference in rates.
 
         Raises
         ------
@@ -187,7 +189,15 @@ class BayesianContingencyTable(BaseContingencyTable):
             high_threshold = default_rope if high_threshold is None else high_threshold
         if lift in ["relative", "absolute"]:
             results = calculate_metrics(
-                self.successes, self.trials, self.alphas, self.betas, n_samples, lift, low_threshold, high_threshold
+                self.successes,
+                self.trials,
+                self.alphas,
+                self.betas,
+                n_samples,
+                lift,
+                low_threshold,
+                high_threshold,
+                loss_in_lift_units=True,
             )
             lb, ub = credible_interval(
                 self.successes,
@@ -212,6 +222,7 @@ class BayesianContingencyTable(BaseContingencyTable):
                 high_threshold,
                 spend=self.spend,
                 msrp=self.msrp,
+                loss_in_lift_units=True,
             )
             lb, ub = credible_interval(
                 self.successes,
@@ -271,7 +282,8 @@ class BayesianContingencyTable(BaseContingencyTable):
                 "Cred. Int. Lower **",
                 "Cred. Int. Upper **",
                 f"Prob {self.names[1]} Is Best",
-                f"Expected Loss of {self.names[1]}",
+                # The loss is in the lift's units, except for CPA (see calculate_metrics).
+                f"Expected Loss of {self.names[1]}" + (" (rate difference)" if lift == "cpa" else ""),
                 "Probability Lift is in ROPE ***",
             ]
         )
@@ -281,7 +293,7 @@ class BayesianContingencyTable(BaseContingencyTable):
             + convert_to_tabulate_str(success_rate, lift)
             + convert_to_tabulate_str([test_lift, lb, ub], lift)
             + [str_pvalue]
-            + [convert_to_tabulate_str(results["Expected loss"], "relative")]
+            + [convert_to_tabulate_str(results["Expected loss"], "absolute" if lift == "cpa" else lift)]
             + [
                 "n/a"
                 if np.isnan(results["Probability of ROPE"])
@@ -298,10 +310,8 @@ class BayesianContingencyTable(BaseContingencyTable):
 
     def _default_rope_half_width(self, lift: str) -> float:
         """Half-width of the default ROPE: 10% of the control's posterior rate, in ``lift`` units."""
-        if lift in ("relative", "cpa"):
-            return 0.1
         control_rate = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
-        return float(from_absolute(0.1 * control_rate, lift, max(self.trials), self.spend, self.msrp))
+        return _default_rope_half_width(control_rate, lift, max(self.trials), self.spend, self.msrp)
 
     def analyze_individually(
         self,

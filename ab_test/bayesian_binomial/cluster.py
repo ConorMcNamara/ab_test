@@ -34,6 +34,7 @@ from ab_test._display import (
 )
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.power_calculations import _max_feasible_lift, _search_min_lift
+from ab_test.bayesian_binomial.utils import _default_rope_half_width
 
 __all__ = [
     "BayesianClusterRandomizedTrial",
@@ -388,14 +389,15 @@ class BayesianClusterRandomizedTrial:
         confidence_level: float = 0.95,
         n_samples: int = 100_000,
         cred_int_method: Literal["credible", "hdi"] = "credible",
-        low_threshold: float = -0.1,
-        high_threshold: float = 0.1,
+        low_threshold: float | None = None,
+        high_threshold: float | None = None,
     ) -> str:
         """Analyze the cluster-randomized experiment.
 
         Fits a beta-binomial model per arm, draws posterior samples for the
         arm-level rates, and computes P(T > C), expected loss, credible
-        intervals, and ROPE probabilities.
+        intervals, and ROPE probabilities. The expected loss, E[max(-lift, 0)],
+        is in the units of ``lift``.
 
         Parameters
         ----------
@@ -408,10 +410,13 @@ class BayesianClusterRandomizedTrial:
         cred_int_method : {"credible", "hdi"}, default="credible"
             ``"credible"`` uses equal-tailed percentiles; ``"hdi"`` uses
             the Highest Density Interval.
-        low_threshold : float, default=-0.1
-            Lower bound of the ROPE.
-        high_threshold : float, default=0.1
-            Upper bound of the ROPE.
+        low_threshold : float, optional
+            Lower bound of the ROPE, in the units of ``lift``. Defaults to
+            minus 10% of the control rate in those units (-0.1 for relative
+            lift), matching :class:`BayesianContingencyTable`.
+        high_threshold : float, optional
+            Upper bound of the ROPE. Defaults to 10% of the control rate in
+            the units of ``lift``.
 
         Returns
         -------
@@ -443,13 +448,16 @@ class BayesianClusterRandomizedTrial:
             lift_samples = samples_t - samples_c
 
         prob_t_gt_c = float(np.mean(samples_t > samples_c))
-        expected_loss = float(np.mean(np.maximum(samples_c - samples_t, 0)))
+        expected_loss = float(np.mean(np.maximum(-lift_samples, 0)))
         lift_mean = float(np.mean(lift_samples))
         ci_lo, ci_hi = self._credible_interval(lift_samples, confidence_level, cred_int_method)
-        prob_rope = float(np.mean((lift_samples >= low_threshold) & (lift_samples <= high_threshold)))
-
         p_control = params[ctrl]["mean"]
         p_treatment = params[treat]["mean"]
+        if low_threshold is None or high_threshold is None:
+            default_rope = _default_rope_half_width(p_control, lift, 1)
+            low_threshold = -default_rope if low_threshold is None else low_threshold
+            high_threshold = default_rope if high_threshold is None else high_threshold
+        prob_rope = float(np.mean((lift_samples >= low_threshold) & (lift_samples <= high_threshold)))
 
         self.pooled_results = {
             "lift_type": lift,
@@ -499,7 +507,7 @@ class BayesianClusterRandomizedTrial:
             + [fmt_rate(r["p_control"]), fmt_rate(r["p_treatment"])]
             + [fmt(r["lift"]), fmt(r["ci_lower"]), fmt(r["ci_upper"])]
             + [str_prob]
-            + [convert_to_tabulate_str(r["expected_loss"], "relative")]
+            + [fmt(r["expected_loss"])]
             + [convert_to_tabulate_str(r["prob_rope"], "relative")]
         )
         return_string = tabulate_summary(row_labels, values)
@@ -1075,13 +1083,20 @@ def _search_min_clusters(
     max_clusters: int,
     error_message: str,
 ) -> int:
-    low, high = 2, 4
-    while high <= max_clusters:
-        if power_fn(high) >= target_power:
-            break
-        low, high = high, high * 2
-    else:
-        raise ValueError(error_message)
+    """Smallest clusters per arm in ``[2, max_clusters]`` whose power reaches ``target_power``.
+
+    Doubles from 2 (the fewest clusters the model can fit), clamping the last
+    step to ``max_clusters``, then bisects. Assumes power increases with the
+    number of clusters.
+    """
+    if max_clusters < 2:
+        raise ValueError(f"max_clusters must be at least 2, got {max_clusters}")
+    # ``low`` is always inadequate; 1 cluster per arm can't be fitted, so it's the floor.
+    low, high = 1, 2
+    while power_fn(high) < target_power:
+        if high >= max_clusters:
+            raise ValueError(error_message)
+        low, high = high, min(high * 2, max_clusters)
 
     while high - low > 1:
         mid = (low + high) // 2

@@ -67,6 +67,25 @@ class TestStatsTests:
         assert 0 < result["Proportion of samples where B exceeds A"] < 1
 
     @staticmethod
+    @pytest.mark.parametrize("lift, scale", [("absolute", 1.0), ("incremental", 1000.0), ("revenue", 2000.0)])
+    def test_calculate_metrics_loss_in_lift_units(lift, scale):
+        args = ([100, 110], [1000, 1000], [1, 1], [1, 1], 50_000, lift)
+        np.random.seed(0)
+        rate_loss = calculate_metrics(*args, msrp=2.0)["Expected loss"]
+        np.random.seed(0)
+        lift_loss = calculate_metrics(*args, msrp=2.0, loss_in_lift_units=True)["Expected loss"]
+        # The default stays a rate difference; the flag rescales it to the lift's units.
+        assert lift_loss == pytest.approx(rate_loss * scale)
+
+    @staticmethod
+    def test_calculate_metrics_cpa_loss_stays_a_rate_difference():
+        args = ([100, 110], [1000, 1000], [1, 1], [1, 1], 50_000, "cpa")
+        np.random.seed(0)
+        rate_loss = calculate_metrics(*args, spend=100)["Expected loss"]
+        np.random.seed(0)
+        assert calculate_metrics(*args, spend=100, loss_in_lift_units=True)["Expected loss"] == rate_loss
+
+    @staticmethod
     def test_calculate_metrics_cpa_requires_spend():
         with pytest.raises(ValueError, match="spend must be provided"):
             calculate_metrics([100, 110], [1000, 1000], [1, 1], [1, 1], 1_000, lift="cpa")

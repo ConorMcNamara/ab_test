@@ -37,6 +37,7 @@ __all__ = [
 ]
 
 _VALID_LIFTS = frozenset({"absolute", "relative", "incremental", "roas", "revenue"})
+_SCALED_LIFTS = frozenset({"incremental", "roas", "revenue"})
 _CPA_ERROR = (
     "lift='cpa' is not supported for difference-in-differences: CPA is spend / incremental conversions, so a "
     "difference of segment CPAs has no posterior mean and is not monotone in the effects being compared. "
@@ -78,10 +79,14 @@ def _compute_segment_samples(
     -------
     dict
         Keys: ``names``, ``lift_samples`` (list of arrays),
-        ``p_controls``, ``p_treatments``.
+        ``comparison_samples`` (list of arrays), ``p_controls``,
+        ``p_treatments``. ``comparison_samples`` are what segments are
+        compared on: the lift itself, except for scaled lifts, where they are
+        the risk difference.
     """
     names: list[str] = []
     all_lift_samples: list[np.ndarray[Any, Any]] = []
+    all_comparison_samples: list[np.ndarray[Any, Any]] = []
     p_controls: list[float] = []
     p_treatments: list[float] = []
 
@@ -101,7 +106,7 @@ def _compute_segment_samples(
         if lift == "relative":
             safe_c = np.where(samples_c == 0, 1e-9, samples_c)
             segment_lift = (samples_t - samples_c) / safe_c
-        elif lift in ("incremental", "roas", "revenue"):
+        elif lift in _SCALED_LIFTS:
             n_max = max(n_c, n_t)
             segment_lift = (samples_t - samples_c) * n_max
             if lift == "roas":
@@ -116,10 +121,14 @@ def _compute_segment_samples(
             segment_lift = samples_t - samples_c
 
         all_lift_samples.append(segment_lift)
+        # Scaled lifts are compared on the risk difference: each segment's own size,
+        # spend or price would otherwise make equal rate effects look different.
+        all_comparison_samples.append(samples_t - samples_c if lift in _SCALED_LIFTS else segment_lift)
 
     return {
         "names": names,
         "lift_samples": all_lift_samples,
+        "comparison_samples": all_comparison_samples,
         "p_controls": p_controls,
         "p_treatments": p_treatments,
     }
@@ -199,9 +208,12 @@ class BayesianDiffInDiff:
         ----------
         lift : str, default="absolute"
             Scale for treatment effects: ``"absolute"``, ``"relative"``,
-            ``"incremental"``, ``"roas"``, or ``"revenue"``. ``"cpa"`` is
-            rejected because differences of CPAs are not well defined; use
-            ``"roas"`` instead.
+            ``"incremental"``, ``"roas"``, or ``"revenue"``. For the last
+            three, per-segment effects are shown in those units, but tau and
+            the pairwise comparisons use the risk difference, since each
+            segment's own size, spend or price would otherwise make equal rate
+            effects look different. ``"cpa"`` is rejected because differences
+            of CPAs are not well defined; use ``"roas"`` instead.
         confidence_level : float, default=0.95
             Probability mass for credible intervals.
         n_samples : int, default=100_000
@@ -240,8 +252,9 @@ class BayesianDiffInDiff:
                 "p_treatment": stats["p_treatments"][i],
             }
 
+        comparison_samples = stats["comparison_samples"]
         tau_samples = _between_group_sd_samples(
-            [float(np.mean(s)) for s in lift_samples], [float(np.var(s)) for s in lift_samples], n_samples
+            [float(np.mean(s)) for s in comparison_samples], [float(np.var(s)) for s in comparison_samples], n_samples
         )
         tau_mean = float(np.mean(tau_samples))
         tau_ci_lo, tau_ci_hi = _credible_interval_from_samples(tau_samples, confidence_level, cred_int_method)
@@ -255,7 +268,7 @@ class BayesianDiffInDiff:
         pairs = list(itertools.combinations(range(k), 2))
         pairwise: list[dict[str, Any]] = []
         for i, j in pairs:
-            did_samples = lift_samples[i] - lift_samples[j]
+            did_samples = comparison_samples[i] - comparison_samples[j]
             did_mean = float(np.mean(did_samples))
             did_ci_lo, did_ci_hi = _credible_interval_from_samples(did_samples, confidence_level, cred_int_method)
             prob_i_gt_j = float(np.mean(did_samples > 0))
@@ -305,22 +318,29 @@ class BayesianDiffInDiff:
             )
         seg_table = tabulate(seg_rows, headers=seg_headers, tablefmt="grid")
 
+        # Scaled lifts compare segments on the risk difference (see analyze).
+        scaled = lift in _SCALED_LIFTS
+        fmt_cmp = fmt_rate if scaled else fmt
+
         assert self.heterogeneity_results is not None
         het = self.heterogeneity_results
+        tau_label = "Between-segment tau (risk difference)" if scaled else "Between-segment tau"
         het_line = (
-            f"\nBetween-segment tau: {fmt(het['tau_mean'])} ({fmt(het['tau_ci_lower'])}, {fmt(het['tau_ci_upper'])})"
+            f"\n{tau_label}: {fmt_cmp(het['tau_mean'])} "
+            f"({fmt_cmp(het['tau_ci_lower'])}, {fmt_cmp(het['tau_ci_upper'])})"
         )
 
         assert self.pairwise_results is not None
-        pw_headers = ["Comparison", "DiD", "CI Lower **", "CI Upper **", "P(i > j)"]
+        did_header = "DiD (risk difference)" if scaled else "DiD"
+        pw_headers = ["Comparison", did_header, "CI Lower **", "CI Upper **", "P(i > j)"]
         pw_rows = []
         for pw in self.pairwise_results:
             pw_rows.append(
                 [
                     f"{pw['segment_i']} vs {pw['segment_j']}",
-                    fmt(pw["did_estimate"]),
-                    fmt(pw["ci_lower"]),
-                    fmt(pw["ci_upper"]),
+                    fmt_cmp(pw["did_estimate"]),
+                    fmt_cmp(pw["ci_lower"]),
+                    fmt_cmp(pw["ci_upper"]),
                     f"{pw['prob_i_gt_j']:.4f}",
                 ]
             )

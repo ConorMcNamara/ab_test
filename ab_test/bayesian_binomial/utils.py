@@ -4,6 +4,8 @@ from typing import Any
 
 import numpy as np
 
+from ab_test._lift import from_absolute
+
 __all__ = [
     "sample_beta",
     "posterior_mean",
@@ -62,6 +64,24 @@ def posterior_mean(s: int, n: int, alpha: float, beta: float) -> float:
     alpha_post = alpha + s
     beta_post = beta + (n - s)
     return alpha_post / (alpha_post + beta_post)
+
+
+def _default_rope_half_width(
+    control_rate: float,
+    lift: str,
+    scale: int | float,
+    spend: float | None = None,
+    msrp: float | None = None,
+) -> float:
+    """Half-width of the default ROPE: 10% of the control rate, in ``lift`` units.
+
+    For relative lift that is 0.1; ``"cpa"`` also returns 0.1, though its ROPE
+    is not computed. ``scale`` is the number of units scaled lifts are
+    expressed over, as used for the reported lift.
+    """
+    if lift in ("relative", "cpa"):
+        return 0.1
+    return float(from_absolute(0.1 * control_rate, lift, int(scale), spend, msrp))
 
 
 def _between_group_sd_samples(

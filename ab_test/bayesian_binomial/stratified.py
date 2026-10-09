@@ -25,7 +25,12 @@ from ab_test._display import (
 )
 from ab_test._lift import scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
-from ab_test.bayesian_binomial.utils import _between_group_sd_samples, posterior_mean, sample_beta
+from ab_test.bayesian_binomial.utils import (
+    _between_group_sd_samples,
+    _default_rope_half_width,
+    posterior_mean,
+    sample_beta,
+)
 
 __all__ = [
     "BayesianStratifiedContingencyTable",
@@ -290,8 +295,8 @@ class BayesianStratifiedContingencyTable:
         confidence_level: float = 0.95,
         n_samples: int = 100_000,
         cred_int_method: Literal["credible", "hdi"] = "credible",
-        low_threshold: float = -0.1,
-        high_threshold: float = 0.1,
+        low_threshold: float | None = None,
+        high_threshold: float | None = None,
     ) -> str:
         """Analyze the stratified experiment with Bayesian pooling.
 
@@ -301,7 +306,9 @@ class BayesianStratifiedContingencyTable:
         the posterior of the between-stratum standard deviation of the true
         effects (tau) from a normal random-effects model, which does not count
         within-stratum noise as heterogeneity. For relative lift, tau is on
-        the log risk-ratio scale. It is not reported for ``"cpa"``.
+        the log risk-ratio scale. It is not reported for ``"cpa"``. The
+        expected loss, E[max(-lift, 0)], is in the units of ``lift``; for
+        ``"cpa"`` it is a difference in rates.
 
         Parameters
         ----------
@@ -315,10 +322,16 @@ class BayesianStratifiedContingencyTable:
         cred_int_method : {"credible", "hdi"}, default="credible"
             ``"credible"`` uses equal-tailed percentiles; ``"hdi"`` uses
             the Highest Density Interval.
-        low_threshold : float, default=-0.1
-            Lower bound of the ROPE.
-        high_threshold : float, default=0.1
-            Upper bound of the ROPE.
+        low_threshold : float, optional
+            Lower bound of the Region of Practical Equivalence (ROPE), in the
+            units of ``lift``. By default the ROPE is +/-10% of the pooled
+            control's posterior rate expressed in those units, as in
+            :class:`~ab_test.bayesian_binomial.contingency.BayesianContingencyTable`,
+            so for relative lift it is +/-0.1. The ROPE is not computed for
+            ``lift="cpa"`` (shown as n/a).
+        high_threshold : float, optional
+            Upper bound of the ROPE, in the units of ``lift``. Defaults as
+            described for ``low_threshold``.
 
         Returns
         -------
@@ -334,15 +347,6 @@ class BayesianStratifiedContingencyTable:
         pooled_mean, ci_lo, ci_hi, prob_t_gt_c = self._summarize(
             pooled_samples, lift, confidence_level, cred_int_method
         )
-        if lift == "cpa":
-            # Loss and ROPE are not meaningful on the CPA scale; report the loss as a rate difference.
-            n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
-            expected_loss = float(np.mean(np.maximum(-pooled_samples / n_max, 0)))
-            prob_in_rope = float("nan")
-        else:
-            expected_loss = float(np.mean(np.maximum(-pooled_samples, 0)))
-            prob_in_rope = float(np.mean((pooled_samples >= low_threshold) & (pooled_samples <= high_threshold)))
-
         p_control = float(
             np.sum(
                 [
@@ -361,6 +365,19 @@ class BayesianStratifiedContingencyTable:
             )
             / np.sum(trials[:, 1])
         )
+
+        n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
+        if lift == "cpa":
+            # Loss and ROPE are not meaningful on the CPA scale; report the loss as a rate difference.
+            expected_loss = float(np.mean(np.maximum(-pooled_samples / n_max, 0)))
+            prob_in_rope = float("nan")
+        else:
+            expected_loss = float(np.mean(np.maximum(-pooled_samples, 0)))
+            if low_threshold is None or high_threshold is None:
+                default_rope = _default_rope_half_width(p_control, lift, n_max, self.spend, self.msrp)
+                low_threshold = -default_rope if low_threshold is None else low_threshold
+                high_threshold = default_rope if high_threshold is None else high_threshold
+            prob_in_rope = float(np.mean((pooled_samples >= low_threshold) & (pooled_samples <= high_threshold)))
 
         self.pooled_results = {
             "lift_type": lift,
@@ -420,7 +437,7 @@ class BayesianStratifiedContingencyTable:
                 "Cred. Int. Lower **",
                 "Cred. Int. Upper **",
                 f"Prob {self._cell_names[1]} Is Best",
-                f"Expected Loss of {self._cell_names[1]}",
+                f"Expected Loss of {self._cell_names[1]}" + (" (rate difference)" if lift == "cpa" else ""),
                 "Probability Lift is in ROPE ***",
             ]
         )
@@ -429,7 +446,8 @@ class BayesianStratifiedContingencyTable:
             + [fmt_rate(r["p_control"]), fmt_rate(r["p_treatment"])]
             + [fmt(r["lift"]), fmt(r["ci_lower"]), fmt(r["ci_upper"])]
             + [str_prob]
-            + [convert_to_tabulate_str(r["expected_loss"], "relative")]
+            # The loss is on the lift's scale, except for CPA, where it is a rate difference.
+            + [fmt_rate(r["expected_loss"]) if lift == "cpa" else fmt(r["expected_loss"])]
             + ["n/a" if np.isnan(r["prob_rope"]) else convert_to_tabulate_str(r["prob_rope"], "relative")]
         )
         return_string = tabulate_summary(row_labels, values)

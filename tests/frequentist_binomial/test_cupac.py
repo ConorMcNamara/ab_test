@@ -1091,3 +1091,151 @@ class TestClusterRobustStatisticalProperties:
 
         coverage = covered / n_sims
         assert coverage >= 0.92
+
+
+class TestCR2SatterthwaiteDf:
+    """Bell-McCaffrey degrees of freedom, as in Pustejovsky & Tipton (2018)."""
+
+    @staticmethod
+    def _two_arm(treated_clusters, n_clusters=8, cluster_size=5, seed=0):
+        rng = np.random.default_rng(seed)
+        cluster_ids = np.repeat(np.arange(n_clusters), cluster_size)
+        treatment = np.isin(cluster_ids, treated_clusters).astype(float)
+        X = np.column_stack([np.ones(len(cluster_ids)), treatment])
+        y = rng.normal(size=len(cluster_ids))
+        return X, y, cluster_ids
+
+    def test_balanced_cluster_randomized_df_is_k_minus_two(self):
+        # Used to report 8.0: the cross-cluster terms of the variance were dropped.
+        X, y, cluster_ids = self._two_arm([1, 3, 5, 7])
+        _, df_val = _cr2_standard_errors(X, y, _ols_fit(X, y), cluster_ids)
+        assert df_val == pytest.approx(6.0)
+
+    def test_unbalanced_matches_closed_form(self):
+        # For a difference in means of equal-size clusters, the df is
+        # (1/k1 + 1/k2)^2 / (1/(k1^2 (k1 - 1)) + 1/(k2^2 (k2 - 1))).
+        X, y, cluster_ids = self._two_arm([0, 1, 2])
+        k1, k2 = 3, 5
+        expected = (1 / k1 + 1 / k2) ** 2 / (1 / (k1**2 * (k1 - 1)) + 1 / (k2**2 * (k2 - 1)))
+        _, df_val = _cr2_standard_errors(X, y, _ols_fit(X, y), cluster_ids)
+        assert df_val == pytest.approx(expected)
+
+    @staticmethod
+    def test_matches_full_hat_matrix_formula():
+        rng = np.random.default_rng(1)
+        cluster_ids = np.repeat(np.arange(8), 5)
+        X = np.column_stack([np.ones(40), (cluster_ids % 2).astype(float), rng.normal(size=40)])
+        y = rng.normal(size=40)
+        _, df_val = _cr2_standard_errors(X, y, _ols_fit(X, y), cluster_ids)
+
+        XtX_inv = np.linalg.inv(X.T @ X)
+        resid_maker = np.eye(40) - X @ XtX_inv @ X.T
+        q_cols = []
+        for g in range(8):
+            idx = np.flatnonzero(cluster_ids == g)
+            eigvals, eigvecs = np.linalg.eigh(resid_maker[np.ix_(idx, idx)])
+            A_g = eigvecs @ np.diag(1 / np.sqrt(eigvals)) @ eigvecs.T
+            q_cols.append(resid_maker[:, idx] @ A_g @ X[idx] @ XtX_inv[:, 1])
+        Q = np.column_stack(q_cols)
+        G = Q.T @ Q
+        assert df_val == pytest.approx(np.trace(G) ** 2 / np.sum(G**2))
+
+
+@pytest.mark.slow
+class TestCR2TypeIErrorFewClusters:
+    @staticmethod
+    def test_rejection_rate_matches_alpha():
+        # With 6 clusters the old df (too high) rejected 6.9% of the time at 5%.
+        n_sims = 4000
+        rejections = 0
+        for seed in range(n_sims):
+            df = _make_clustered_experiment_data(n_clusters=6, cluster_size=5, icc=0.3, seed=seed)
+            exp = CupacExperiment(
+                df, "converted", "group", ["pre_visits"], "control", "treatment", cluster_col="cluster_id"
+            ).fit()
+            rejections += exp.p_value < 0.05
+
+        # Monte Carlo SE is about 0.0034.
+        assert rejections / n_sims == pytest.approx(0.05, abs=0.0103)
+
+
+class _NearestClusterModel:
+    """Predicts the mean outcome of the training cluster with the closest feature.
+
+    Like a tree or k-NN it memorises clusters it has seen and generalises to new
+    ones from similar clusters, so it leaks cluster-mates' outcomes if they share
+    a training fold. It needs no scikit-learn.
+    """
+
+    def fit(self, X, y):
+        keys = X[:, 0]
+        self.keys_ = np.unique(keys)
+        self.means_ = np.array([y[keys == k].mean() for k in self.keys_])
+        return self
+
+    def predict(self, X):
+        return self.means_[np.abs(X[:, [0]] - self.keys_[np.newaxis, :]).argmin(axis=1)]
+
+
+def _make_cluster_feature_data(seed, n_clusters=20, cluster_size=50, treatment_effect=0.12):
+    """Cluster-randomized data with a pre-experiment feature that predicts each cluster's rate."""
+    rng = np.random.default_rng(seed)
+    cluster_ids = np.repeat(np.arange(n_clusters), cluster_size)
+    treatment = np.isin(cluster_ids, rng.permutation(n_clusters)[: n_clusters // 2])
+    feature = rng.uniform(0, 1, n_clusters)
+    rate = (0.15 + 0.4 * feature + rng.normal(0, 0.03, n_clusters))[cluster_ids] + treatment_effect * treatment
+    return pd.DataFrame(
+        {
+            "converted": rng.binomial(1, np.clip(rate, 0.01, 0.99)),
+            "group": np.where(treatment, "treatment", "control"),
+            "cluster_feature": feature[cluster_ids],
+            "cluster_id": cluster_ids,
+        }
+    )
+
+
+class TestMlrateClusterFolds:
+    @staticmethod
+    def _experiment(df, estimator=None):
+        return CupacExperiment(
+            df,
+            "converted",
+            "group",
+            ["cluster_feature"],
+            "control",
+            "treatment",
+            method="mlrate",
+            estimator=estimator or _NearestClusterModel(),
+            cluster_col="cluster_id",
+        )
+
+    def test_no_prediction_is_trained_on_its_own_cluster(self):
+        df = _make_cluster_feature_data(seed=0)
+        calls = []
+
+        class Recorder(_NearestClusterModel):
+            def fit(self, X, y):
+                calls.append([set(X[:, 0]), None])
+                return super().fit(X, y)
+
+            def predict(self, X):
+                calls[-1][1] = set(X[:, 0])
+                return super().predict(X)
+
+        exp = self._experiment(df, estimator=Recorder())
+        exp._cross_fit_predictions(df[["cluster_feature"]].to_numpy(), df["converted"].to_numpy(dtype=float))
+
+        assert len(calls) == 5
+        for trained_on, predicted in calls:
+            assert trained_on.isdisjoint(predicted)
+
+    def test_ate_not_shrunk_by_cluster_mates(self):
+        # With unit-level folds the model saw each unit's cluster-mates, whose
+        # outcomes include the treatment effect: the mean ATE was 0.03, not 0.12.
+        ates = [self._experiment(_make_cluster_feature_data(seed)).fit().ate for seed in range(40)]
+        assert np.mean(ates) == pytest.approx(0.12, abs=0.025)
+
+    def test_fewer_clusters_than_folds_raises(self):
+        df = _make_cluster_feature_data(seed=0, n_clusters=4)
+        with pytest.raises(ValueError, match="at least n_folds=5 clusters, got 4"):
+            self._experiment(df).fit()

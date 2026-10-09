@@ -230,6 +230,25 @@ class TestBayesianDiffInDiffIncremental:
         assert dd.pairwise_results is not None
         assert dd.pairwise_results[0]["did_estimate"] > 0
 
+    @staticmethod
+    def test_segment_size_does_not_create_heterogeneity():
+        # Identical rates in segments of different sizes: scaling each segment by its own
+        # size before comparing used to give P(i > j) = 8e-5 and tau of about 140 conversions.
+        np.random.seed(7)
+        small = _make_table("Small", 100, 1000, 120, 1000)
+        large = _make_table("Large", 1000, 10000, 1200, 10000)
+        dd = BayesianDiffInDiff(small, large)
+        output = dd.analyze(lift="incremental", n_samples=50_000)
+        assert 0.35 < dd.pairwise_results[0]["prob_i_gt_j"] < 0.65
+        assert "DiD (risk difference)" in output and "tau (risk difference)" in output
+        # Per-segment effects stay in incremental conversions.
+        np.testing.assert_allclose(dd.segment_results["Large"]["effect"], 200.0, rtol=0.1)
+
+        dd.analyze(lift="absolute", n_samples=50_000)
+        absolute_tau = dd.heterogeneity_results["tau_mean"]
+        dd.analyze(lift="incremental", n_samples=50_000)
+        assert dd.heterogeneity_results["tau_mean"] == pytest.approx(absolute_tau, rel=0.25)
+
 
 class TestBayesianDiffInDiffRoas:
     @staticmethod

@@ -241,6 +241,66 @@ class TestBayesianStratifiedAnalyzeLifts:
         assert "expected_loss" in st.pooled_results
 
 
+class TestBayesianStratifiedDefaultRope:
+    @staticmethod
+    def _table():
+        st = BayesianStratifiedContingencyTable("Test", "converted", spend=5000.0, msrp=50.0)
+        for stratum in ("mobile", "desktop"):
+            st.add("Control", successes=500, trials=5000, alpha=1, beta=1, stratum=stratum)
+            st.add("Treatment", successes=525, trials=5000, alpha=1, beta=1, stratum=stratum)
+        return st
+
+    def test_default_rope_consistent_across_lifts(self):
+        # The default was +/-0.1 in every lift's units: P(ROPE) was 1.000 for absolute
+        # (+/-10pp) and 0.001 for incremental (+/-0.1 conversions) on the same data.
+        probs = {}
+        for lift in ("absolute", "relative", "incremental", "roas", "revenue"):
+            np.random.seed(0)
+            table = self._table()
+            table.analyze(lift=lift, n_samples=50_000)
+            probs[lift] = table.pooled_results["prob_rope"]
+        assert 0.6 < probs["relative"] < 0.95
+        for lift, prob in probs.items():
+            assert prob == pytest.approx(probs["relative"], abs=0.05), lift
+
+    def test_explicit_thresholds_unchanged(self):
+        np.random.seed(0)
+        table = self._table()
+        table.analyze(lift="absolute", n_samples=50_000, low_threshold=-0.1, high_threshold=0.1)
+        assert table.pooled_results["prob_rope"] == 1.0
+
+
+class TestBayesianStratifiedExpectedLoss:
+    @staticmethod
+    def _table():
+        st = BayesianStratifiedContingencyTable("Test", "converted", spend=5000.0, msrp=50.0)
+        for stratum in ("mobile", "desktop"):
+            st.add("Control", successes=100, trials=1000, alpha=1, beta=1, stratum=stratum)
+            st.add("Treatment", successes=105, trials=1000, alpha=1, beta=1, stratum=stratum)
+        return st
+
+    @pytest.mark.parametrize(
+        "lift, unit", [("absolute", "%"), ("relative", "%"), ("incremental", None), ("roas", "$"), ("revenue", "$")]
+    )
+    def test_loss_formatted_in_lift_units(self, lift, unit):
+        # The loss was always formatted as a percent: about 8.9 incremental conversions showed as "889.4%".
+        np.random.seed(0)
+        table = self._table()
+        output = table.analyze(lift=lift, n_samples=50_000)
+        loss_row = next(line for line in output.splitlines() if "Expected Loss" in line)
+        for marker in ("%", "$"):
+            assert (marker in loss_row) == (marker == unit)
+        if lift == "incremental":
+            assert 1 < table.pooled_results["expected_loss"] < 50
+
+    @staticmethod
+    def test_cpa_loss_labelled_rate_difference():
+        np.random.seed(0)
+        output = _cpa_table().analyze(lift="cpa")
+        loss_row = next(line for line in output.splitlines() if "Expected Loss" in line)
+        assert "(rate difference)" in loss_row and "%" in loss_row
+
+
 class TestBayesianStratifiedAnalyzeByStratum:
     @staticmethod
     def test_returns_string():

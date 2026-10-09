@@ -17,6 +17,7 @@ from ab_test.bayesian_binomial.cluster import (
     plot_cluster_bayes_power_curve,
     plot_cluster_bayes_sensitivity_curve,
 )
+from ab_test.bayesian_binomial.cluster import _search_min_clusters
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +213,44 @@ class TestBayesianCRTAnalyze:
         crt = _make_crt()
         crt.analyze()
         assert crt.pooled_results["expected_loss"] >= 0
+
+    @staticmethod
+    def test_expected_loss_in_lift_units():
+        # Treatment is worse: 12% -> 10%. The loss used to be the rate difference
+        # (about 0.02) whatever the lift, shown as a percent beside relative lift.
+        rng = np.random.default_rng(1)
+        crt = BayesianClusterRandomizedTrial(name="Loss", metric_name="conv")
+        for i in range(10):
+            crt.add(f"c{i}", int(rng.binomial(500, 0.12)), 500, group="Control")
+        for i in range(10):
+            crt.add(f"t{i}", int(rng.binomial(500, 0.10)), 500, group="Treatment")
+        np.random.seed(0)
+        crt.analyze(lift="absolute")
+        absolute_loss = crt.pooled_results["expected_loss"]
+        np.random.seed(0)
+        crt.analyze(lift="relative")
+        relative_loss = crt.pooled_results["expected_loss"]
+        assert relative_loss == pytest.approx(absolute_loss / crt.pooled_results["p_control"], rel=0.15)
+
+    @staticmethod
+    def test_default_rope_scales_with_lift():
+        # 10% -> 12%: the old +/-0.1 default covered every absolute lift (P = 1).
+        crt = _make_crt()
+        np.random.seed(0)
+        crt.analyze(lift="relative")
+        relative_rope = crt.pooled_results["prob_rope"]
+        np.random.seed(0)
+        crt.analyze(lift="absolute")
+        absolute_rope = crt.pooled_results["prob_rope"]
+        assert absolute_rope < 0.9
+        assert absolute_rope == pytest.approx(relative_rope, abs=0.1)
+
+    @staticmethod
+    def test_explicit_rope_unchanged():
+        crt = _make_crt()
+        np.random.seed(0)
+        crt.analyze(lift="absolute", low_threshold=-0.1, high_threshold=0.1)
+        assert crt.pooled_results["prob_rope"] == pytest.approx(1.0)
 
     @staticmethod
     def test_treatment_higher_detected():
@@ -460,6 +499,39 @@ class TestClusterBayesMinimumClusters:
             mc_samples=500,
         )
         assert k_high >= k_low
+
+
+class TestSearchMinClusters:
+    """The search logic, with a deterministic power stub that is adequate from ``answer`` clusters."""
+
+    @staticmethod
+    def _search(answer, max_clusters=500):
+        evaluated = []
+
+        def power_fn(k):
+            evaluated.append(k)
+            return 0.9 if k >= answer else 0.1
+
+        result = _search_min_clusters(power_fn, 0.8, max_clusters, error_message="unreachable")
+        assert all(2 <= k <= max_clusters for k in evaluated)
+        return result
+
+    @pytest.mark.parametrize("answer", [1, 2, 3, 5, 47, 300, 499, 500])
+    def test_returns_smallest_adequate(self, answer):
+        # The search used to start at 4 and could return 3 but never 2, and it
+        # only tried 4 * 2^k, so with max_clusters=500 an answer of 300 was "unreachable".
+        assert self._search(answer) == max(answer, 2)
+
+    def test_answer_at_max_clusters(self):
+        assert self._search(37, max_clusters=37) == 37
+
+    def test_unreachable_raises(self):
+        with pytest.raises(ValueError, match="unreachable"):
+            self._search(501)
+
+    def test_max_clusters_below_two_raises(self):
+        with pytest.raises(ValueError, match="at least 2"):
+            self._search(2, max_clusters=1)
 
 
 class TestClusterBayesMinimumClustersLoss:

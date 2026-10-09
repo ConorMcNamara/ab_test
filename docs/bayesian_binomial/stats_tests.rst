@@ -14,7 +14,8 @@ Available metrics include:
 - **P(B > A)**: the posterior probability that variant B's conversion rate exceeds A's.
 - **Expected loss**: the average downside of choosing B when A is actually better,
   computed as E[max(A - B, 0)]. A low expected loss indicates that choosing B carries
-  little risk.
+  little risk. With ``loss_in_lift_units=True`` it is E[max(-lift, 0)] in the units
+  of ``lift`` instead, which is what the Bayesian tables report.
 - **ROPE analysis**: the probability that the lift falls within a Region of Practical
   Equivalence, i.e., an interval where the difference is considered negligible.
 - **Threshold probabilities**: the probability that the lift exceeds or falls below
