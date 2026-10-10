@@ -7,6 +7,7 @@ import scipy.stats as ss
 
 from ab_test.frequentist_binomial.cluster import (
     ClusterRandomizedTrial,
+    _welch_anova,
     _fieller_ratio_interval,
     cluster_adjusted_power,
     cluster_minimum_detectable_lift,
@@ -294,12 +295,13 @@ class TestClusterRandomizedTrial:
         assert isinstance(crt, ClusterRandomizedTrial)
 
     @staticmethod
-    def test_add_third_group_raises():
+    def test_add_third_group():
+        # Three or more groups are analyzed pairwise (see TestMultiGroup).
         crt = ClusterRandomizedTrial()
         crt.add("c1", 10, 100, group="control")
         crt.add("t1", 15, 100, group="treatment")
-        with pytest.raises(ValueError, match="Only 2 groups"):
-            crt.add("x1", 12, 100, group="other")
+        crt.add("x1", 12, 100, group="other")
+        assert crt._group_names == ["control", "treatment", "other"]
 
     @staticmethod
     def test_add_duplicate_cluster_raises():
@@ -592,3 +594,157 @@ class TestDegenerateClusters:
         expected = ss.ttest_ind([1, 1, 0, 1, 1], [0, 1, 1, 0, 1], equal_var=False).pvalue
         assert crt.summary()["p_value"] == pytest.approx(expected)
         assert crt.deff == 1.0
+
+
+def _three_group_crt():
+    data = {
+        "A": [(48, 500), (52, 510), (45, 490), (50, 500)],
+        "B": [(55, 500), (58, 510), (52, 490), (57, 500)],
+        "C": [(63, 500), (67, 510), (60, 490), (61, 505)],
+    }
+    crt = ClusterRandomizedTrial("Stores", "conversion")
+    for group, clusters in data.items():
+        for i, (s, n) in enumerate(clusters):
+            crt.add(f"{group}{i}", s, n, group=group)
+    return crt, data
+
+
+def _two_group_crt(data, first, second):
+    crt = ClusterRandomizedTrial("Stores", "conversion")
+    for group in (first, second):
+        for i, (s, n) in enumerate(data[group]):
+            crt.add(f"{group}{i}", s, n, group=group)
+    return crt
+
+
+class TestWelchAnova:
+    @staticmethod
+    def test_two_groups_reduce_to_welch_t():
+        rng = np.random.default_rng(0)
+        for _ in range(20):
+            groups = []
+            for _g in range(2):
+                m = rng.integers(20, 500, rng.integers(2, 8)).astype(float)
+                groups.append((rng.binomial(m.astype(int), rng.uniform(0.05, 0.4)).astype(float), m))
+            statistic, df1, df2, p_value = _welch_anova(groups)
+            t = ss.ttest_ind(groups[1][0] / groups[1][1], groups[0][0] / groups[0][1], equal_var=False)
+            assert statistic == pytest.approx(t.statistic**2)
+            assert p_value == pytest.approx(t.pvalue)
+            assert df1 == 1
+
+    @staticmethod
+    def test_three_groups_hand_computed():
+        # Welch (1951) on rates [.1, .12], [.15, .17, .16], [.2, .24]: weights n / s^2.
+        groups = [
+            (np.array([10.0, 12.0]), np.array([100.0, 100.0])),
+            (np.array([15.0, 17.0, 16.0]), np.array([100.0, 100.0, 100.0])),
+            (np.array([20.0, 24.0]), np.array([100.0, 100.0])),
+        ]
+        rates = [s / m for s, m in groups]
+        n = np.array([len(r) for r in rates], dtype=float)
+        means = np.array([r.mean() for r in rates])
+        w = n / np.array([r.var(ddof=1) for r in rates])
+        grand = np.sum(w * means) / w.sum()
+        lam = np.sum((1 - w / w.sum()) ** 2 / (n - 1))
+        expected = (np.sum(w * (means - grand) ** 2) / 2) / (1 + 2 * lam / 8)
+        statistic, df1, df2, p_value = _welch_anova(groups)
+        assert statistic == pytest.approx(expected)
+        assert df2 == pytest.approx(8 / (3 * lam))
+        assert p_value == pytest.approx(ss.f.sf(expected, 2, 8 / (3 * lam)))
+
+    @staticmethod
+    @pytest.mark.slow
+    def test_null_type_i_error():
+        rng = np.random.default_rng(1)
+        kappa = 1 / 0.02 - 1
+        reps, rejections = 4000, 0
+        for _ in range(reps):
+            groups = []
+            for n_clusters in (5, 6, 7):
+                theta = rng.beta(0.1 * kappa, 0.9 * kappa, n_clusters)
+                m = rng.integers(100, 400, n_clusters)
+                groups.append((rng.binomial(m, theta).astype(float), m.astype(float)))
+            rejections += _welch_anova(groups)[3] < 0.05
+        # Monte Carlo SE is about 0.0034.
+        assert rejections / reps == pytest.approx(0.05, abs=0.012)
+
+
+class TestMultiGroup:
+    @staticmethod
+    def test_control_comparisons_match_two_group_analyses():
+        crt, data = _three_group_crt()
+        crt.analyze(lift="relative")
+        r = crt.summary()
+        assert list(r["comparisons"]) == ["B vs A", "C vs A"]
+        raw = []
+        for label, group in (("B vs A", "B"), ("C vs A", "C")):
+            pair = _two_group_crt(data, "A", group)
+            pair.analyze(lift="relative", alpha=0.025)  # Bonferroni: alpha / 2 per interval
+            expected = pair.summary()
+            comparison = r["comparisons"][label]
+            for key in ("lift", "ci_lower", "ci_upper"):
+                assert comparison[key] == pytest.approx(expected[key])
+            assert comparison["raw_p_value"] == pytest.approx(expected["p_value"])
+            raw.append(expected["p_value"])
+        small, large = sorted(raw)
+        adjusted = sorted(c["p_value"] for c in r["comparisons"].values())
+        assert adjusted == pytest.approx([2 * small, max(large, 2 * small)])
+
+    @staticmethod
+    def test_all_pairs_and_correction():
+        crt, data = _three_group_crt()
+        crt.analyze(lift="absolute", comparisons="all", correction="bonferroni")
+        r = crt.summary()
+        assert list(r["comparisons"]) == ["B vs A", "C vs A", "C vs B"]
+        pair = _two_group_crt(data, "B", "C")
+        pair.analyze(lift="absolute", alpha=0.05 / 3)
+        assert r["comparisons"]["C vs B"]["ci_lower"] == pytest.approx(pair.summary()["ci_lower"])
+        for comparison in r["comparisons"].values():
+            assert comparison["p_value"] == pytest.approx(min(1.0, 3 * comparison["raw_p_value"]))
+
+    @staticmethod
+    def test_omnibus_and_output():
+        crt, data = _three_group_crt()
+        output = crt.analyze()
+        omnibus = crt.summary()["omnibus"]
+        expected = _welch_anova(
+            [(np.array([s for s, _ in c], float), np.array([n for _, n in c], float)) for c in data.values()]
+        )
+        assert omnibus["statistic"] == pytest.approx(expected[0])
+        assert omnibus["p_value"] == pytest.approx(expected[3])
+        assert "Welch's ANOVA on cluster rates that all 3 groups share one mean rate" in output
+        assert "Clusters: 4 A, 4 B, 4 C" in output
+        assert "Bonferroni: each at 97.5%" in output
+        assert np.isfinite(crt.icc) and crt.deff >= 1
+
+    @staticmethod
+    def test_randomization_needs_two_groups():
+        crt, _ = _three_group_crt()
+        with pytest.raises(ValueError, match="supports two groups only"):
+            crt.analyze(method="randomization")
+
+    @staticmethod
+    def test_invalid_options():
+        crt, _ = _three_group_crt()
+        with pytest.raises(ValueError, match="comparisons must be"):
+            crt.analyze(comparisons="pairs")
+        with pytest.raises(ValueError, match="Unknown method"):
+            crt.analyze(correction="nope")
+
+    @staticmethod
+    def test_two_groups_ignore_the_new_options():
+        _, data = _three_group_crt()
+        crt = _two_group_crt(data, "A", "B")
+        default = crt.analyze()
+        assert crt.analyze(comparisons="all", correction="bonferroni") == default
+        assert "comparisons" not in crt.summary()
+
+    @staticmethod
+    def test_plot_draws_every_group(monkeypatch):
+        figures = []
+        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+        crt, _ = _three_group_crt()
+        crt.plot(color="ibm")
+        means = [trace for trace in figures[-1].data if trace.y[0].endswith("(mean)")]
+        assert [trace.y[0] for trace in means] == ["A (mean)", "B (mean)", "C (mean)"]
+        assert len({trace.marker.color for trace in means}) == 3

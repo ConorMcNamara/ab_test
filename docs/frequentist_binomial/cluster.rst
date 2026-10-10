@@ -74,6 +74,39 @@ Compare power curves with and without clustering:
    )
    fig.show()
 
+Three or More Groups
+--------------------
+
+Add clusters to as many groups as you like; the first group added is the
+control. With three or more groups, ``analyze()`` reports:
+
+* an **omnibus test** that every group has the same mean cluster rate:
+  Welch's heteroscedastic one-way ANOVA (Welch, 1951), which allows each
+  group its own variance and reduces to the Welch t-test (F = t^2) with two
+  groups;
+* **pairwise comparisons**, each computed exactly as a two-group analysis
+  (Welch t-test on cluster rates, Fieller's interval for relative lift).
+  ``comparisons="control"`` (the default) compares each group against the
+  control; ``comparisons="all"`` compares every pair;
+* **adjusted p-values**, Holm by default (``correction`` takes any method of
+  :func:`~ab_test.corrections.adjust_pvalues`), alongside the raw p-values;
+* **simultaneous confidence intervals**: Bonferroni intervals at
+  ``1 - alpha / m`` for ``m`` comparisons;
+* the ICC and design effect, estimated within each group as before.
+
+``method="randomization"`` supports two groups only. ``plot()`` draws every
+group's clusters and mean. With two groups the output is unchanged.
+
+.. code-block:: python
+
+   crt = ClusterRandomizedTrial("Store test", "conversion")
+   for group, clusters in {"A": a_clusters, "B": b_clusters, "C": c_clusters}.items():
+       for name, successes, trials in clusters:
+           crt.add(name, successes, trials, group=group)
+   print(crt.analyze(comparisons="all"))
+   crt.summary()["omnibus"]["p_value"]
+   crt.summary()["comparisons"]["C vs A"]["p_value"]   # Holm-adjusted
+
 When to Use This vs CupacExperiment
 ------------------------------------
 
