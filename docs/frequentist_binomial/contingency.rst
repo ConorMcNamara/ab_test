@@ -59,6 +59,11 @@ With three or more cells (an A/B/n test), ``analyze()`` reports:
    ct.incremental_results["comparisons"]["C vs A"]["p_value"]   # adjusted
    ct.plot(is_individual=False)                            # one row per comparison
 
+Scaled lifts (``"incremental"``, ``"roas"``, ``"revenue"``, ``"cpa"``) are
+expressed over one common number of units for every comparison, the table's
+largest arm, so identical rate differences give identical lifts. The output
+states the scale.
+
 With two cells the output and ``incremental_results`` are unchanged, and
 ``comparisons`` and ``correction`` are ignored.
 
