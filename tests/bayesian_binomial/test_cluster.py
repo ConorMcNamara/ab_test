@@ -17,7 +17,7 @@ from ab_test.bayesian_binomial.cluster import (
     plot_cluster_bayes_power_curve,
     plot_cluster_bayes_sensitivity_curve,
 )
-from ab_test.bayesian_binomial.cluster import _search_min_clusters
+from ab_test.bayesian_binomial.cluster import _sample_mu, _search_min_clusters
 
 
 # ---------------------------------------------------------------------------
@@ -132,12 +132,13 @@ class TestBayesianCRTAdd:
         assert result is crt
 
     @staticmethod
-    def test_max_two_groups():
+    def test_third_group_accepted():
+        # Three or more groups are analyzed pairwise (see TestBayesianMultiGroup).
         crt = BayesianClusterRandomizedTrial()
         crt.add("a", 10, 100, group="A")
         crt.add("b", 10, 100, group="B")
-        with pytest.raises(ValueError, match="Only 2 groups"):
-            crt.add("c", 10, 100, group="C")
+        crt.add("c", 10, 100, group="C")
+        assert crt._groups == ["A", "B", "C"]
 
     @staticmethod
     def test_duplicate_cluster():
@@ -272,7 +273,7 @@ class TestBayesianCRTAnalyze:
         crt = BayesianClusterRandomizedTrial()
         crt.add("a", 10, 100, group="Control")
         crt.add("b", 15, 100, group="Control")
-        with pytest.raises(ValueError, match="exactly 2 groups"):
+        with pytest.raises(ValueError, match="at least 2 groups"):
             crt.analyze()
 
 
@@ -843,3 +844,96 @@ class TestMomentEstimateBias:
         np.random.seed(0)
         crt.analyze(n_samples=2000)
         assert 0 <= crt.pooled_results["prob_t_gt_c"] <= 1
+
+
+def _three_group_bayes():
+    data = {
+        "A": [(48, 500), (52, 510), (45, 490), (50, 500)],
+        "B": [(55, 500), (58, 510), (52, 490), (57, 500)],
+        "C": [(63, 500), (67, 510), (60, 490), (61, 505)],
+    }
+    crt = BayesianClusterRandomizedTrial("Stores", "conversion")
+    for group, clusters in data.items():
+        for i, (s, n) in enumerate(clusters):
+            crt.add(f"{group}{i}", s, n, group=group)
+    return crt
+
+
+class TestBayesianMultiGroup:
+    @staticmethod
+    def test_prob_best_and_expected_loss_match_independent_draws():
+        crt = _three_group_bayes()
+        np.random.seed(0)
+        crt.analyze(n_samples=200_000)
+        r = crt.pooled_results
+        assert sum(r["prob_best"].values()) == pytest.approx(1.0)
+        # Independent Monte Carlo from the same per-arm posteriors.
+        params = crt.model_params
+        np.random.seed(1)
+        draws = np.column_stack(
+            [_sample_mu(params[g]["logit_mu_grid"], params[g]["mu_weights"], 200_000) for g in "ABC"]
+        )
+        best = np.argmax(draws, axis=1)
+        regret = draws.max(axis=1, keepdims=True) - draws
+        for i, g in enumerate("ABC"):
+            assert r["prob_best"][g] == pytest.approx(np.mean(best == i), abs=0.006)
+            assert r["expected_loss"][g] == pytest.approx(regret[:, i].mean(), abs=5e-4)
+
+    @staticmethod
+    def test_pairwise_comparisons():
+        crt = _three_group_bayes()
+        np.random.seed(0)
+        crt.analyze(lift="absolute", comparisons="all", n_samples=100_000)
+        comparisons = crt.pooled_results["comparisons"]
+        assert list(comparisons) == ["B vs A", "C vs A", "C vs B"]
+        means = crt.pooled_results["group_rates"]
+        assert comparisons["C vs B"]["lift"] == pytest.approx(means["C"] - means["B"], abs=1e-3)
+        assert comparisons["C vs A"]["prob_greater"] > comparisons["B vs A"]["prob_greater"]
+        for c in comparisons.values():
+            assert c["ci_lower"] < c["lift"] < c["ci_upper"]
+            assert 0 <= c["prob_rope"] <= 1
+
+    @staticmethod
+    def test_default_rope_scaled_to_each_reference_group():
+        crt = _three_group_bayes()
+        np.random.seed(0)
+        crt.analyze(lift="absolute", comparisons="all", n_samples=100_000)
+        c_vs_b = crt.pooled_results["comparisons"]["C vs B"]["prob_rope"]
+        # Same ROPE as an explicit +/-10% of B's posterior rate.
+        half_width = 0.1 * crt.pooled_results["group_rates"]["B"]
+        np.random.seed(0)
+        crt.analyze(
+            lift="absolute", comparisons="all", n_samples=100_000, low_threshold=-half_width, high_threshold=half_width
+        )
+        assert crt.pooled_results["comparisons"]["C vs B"]["prob_rope"] == pytest.approx(c_vs_b)
+
+    @staticmethod
+    def test_output_and_summary():
+        crt = _three_group_bayes()
+        np.random.seed(0)
+        output = crt.analyze(n_samples=20_000)
+        assert "Prob Is Best *" in output and "Expected Loss (rate difference) ****" in output
+        assert "| C vs A" in output and "C vs B" not in output
+        np.random.seed(0)
+        summary = crt.summary(comparisons="all")
+        assert list(summary["comparisons"]) == ["B vs A", "C vs A", "C vs B"]
+        assert "model_params" in summary
+
+    @staticmethod
+    def test_invalid_comparisons():
+        with pytest.raises(ValueError, match="comparisons must be"):
+            _three_group_bayes().analyze(comparisons="pairs")
+
+    @staticmethod
+    def test_plots_cover_every_group(monkeypatch):
+        figures = []
+        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+        crt = _three_group_bayes()
+        np.random.seed(0)
+        crt.analyze(n_samples=20_000)
+        crt.plot(n_samples=2_000)
+        pooled = [trace.y[0] for trace in figures[-1].data if trace.y[0].endswith("(pooled)")]
+        assert pooled == ["A (pooled)", "B (pooled)", "C (pooled)"]
+        fig = crt.plot_pdf(n_samples=2_000)
+        assert len(fig.data) == 3
+        assert "is best" in fig.layout.title.text

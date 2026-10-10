@@ -17,6 +17,7 @@ P(B > A) and expected-loss decision criteria.
 
 from __future__ import annotations
 
+import itertools
 import math
 from typing import Any, Literal, Self
 
@@ -251,7 +252,7 @@ def _sample_mu(
 
 
 class BayesianClusterRandomizedTrial:
-    """Bayesian analysis of a two-group cluster-randomized trial.
+    """Bayesian analysis of a cluster-randomized trial with two or more groups.
 
     Collects per-cluster binomial observations via :meth:`add`, fits a
     beta-binomial hierarchical model per arm (see the module docstring),
@@ -310,6 +311,8 @@ class BayesianClusterRandomizedTrial:
             Number of trials in the cluster.
         group : str
             Group name (e.g. ``"Control"``, ``"Treatment"``). Keyword-only.
+            The first group added is the control; with three or more groups,
+            :meth:`analyze` compares them pairwise.
 
         Returns
         -------
@@ -317,8 +320,6 @@ class BayesianClusterRandomizedTrial:
             Self, for method chaining.
         """
         if group not in self._groups:
-            if len(self._groups) >= 2:
-                raise ValueError(f"Only 2 groups are supported, got third group {group!r}")
             self._groups.append(group)
 
         if group not in self._clusters:
@@ -342,8 +343,8 @@ class BayesianClusterRandomizedTrial:
         return self
 
     def _build_arm_arrays(self) -> dict[str, tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]]:
-        if len(self._groups) != 2:
-            raise ValueError(f"analyze requires exactly 2 groups, got {len(self._groups)}")
+        if len(self._groups) < 2:
+            raise ValueError(f"analyze requires at least 2 groups, got {len(self._groups)}")
         result: dict[str, tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]] = {}
         for g in self._groups:
             clusters = self._clusters[g]
@@ -421,6 +422,8 @@ class BayesianClusterRandomizedTrial:
         cred_int_method: Literal["credible", "hdi"] = "credible",
         low_threshold: float | None = None,
         high_threshold: float | None = None,
+        *,
+        comparisons: str = "control",
     ) -> str:
         """Analyze the cluster-randomized experiment.
 
@@ -447,15 +450,37 @@ class BayesianClusterRandomizedTrial:
         high_threshold : float, optional
             Upper bound of the ROPE. Defaults to 10% of the control rate in
             the units of ``lift``.
+        comparisons : {"control", "all"}, default="control"
+            With three or more groups, which pairs to compare: each group
+            against the first group added (the control), or every pair.
+            Ignored with two groups.
 
         Returns
         -------
         str
             Formatted results table.
+
+        Notes
+        -----
+        With three or more groups, the summary reports each group's
+        probability of being best and its expected loss, E[best rate - its
+        rate] (a difference in rates), from one joint draw of the arm-level
+        posteriors, then the chosen pairwise comparisons, each reported as a
+        two-group analysis would be (lift, credible interval, probability of
+        being greater, expected loss in the lift's units, and the ROPE
+        probability with its default scaled to that comparison's reference
+        group). ``pooled_results`` then holds ``"prob_best"``,
+        ``"expected_loss"`` and ``"group_rates"`` (keyed by group) and a
+        ``"comparisons"`` dict keyed by labels such as ``"B vs A"``. Posterior
+        probabilities need no multiple-comparison correction, but stopping as
+        soon as one crosses a threshold still inflates false wins.
         """
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
+        comparisons = comparisons.casefold()
+        if comparisons not in ("control", "all"):
+            raise ValueError(f"comparisons must be 'control' or 'all', got {comparisons!r}")
         self._analyze_kwargs = {
             "lift": lift,
             "confidence_level": confidence_level,
@@ -463,9 +488,14 @@ class BayesianClusterRandomizedTrial:
             "cred_int_method": cred_int_method,
             "low_threshold": low_threshold,
             "high_threshold": high_threshold,
+            "comparisons": comparisons,
         }
 
         params = self._fit_model()
+        if len(self._groups) > 2:
+            return self._analyze_many(
+                params, lift, confidence_level, n_samples, cred_int_method, low_threshold, high_threshold, comparisons
+            )
         ctrl, treat = self._groups[0], self._groups[1]
 
         samples_c = _sample_mu(params[ctrl]["logit_mu_grid"], params[ctrl]["mu_weights"], n_samples)
@@ -502,6 +532,127 @@ class BayesianClusterRandomizedTrial:
         }
 
         return self._format_analyze(lift, confidence_level)
+
+    def _analyze_many(
+        self,
+        params: dict[str, Any],
+        lift: str,
+        confidence_level: float,
+        n_samples: int,
+        cred_int_method: Literal["credible", "hdi"],
+        low_threshold: float | None,
+        high_threshold: float | None,
+        comparisons: str,
+    ) -> str:
+        """Three or more groups: P(each group is best), expected loss per group, and pairwise comparisons."""
+        k = len(self._groups)
+        # One joint draw: each arm's hierarchical posterior is independent, so stack per-arm draws.
+        draws = np.column_stack(
+            [_sample_mu(params[g]["logit_mu_grid"], params[g]["mu_weights"], n_samples) for g in self._groups]
+        )
+        best = np.argmax(draws, axis=1)
+        prob_best = {g: float(np.mean(best == i)) for i, g in enumerate(self._groups)}
+        regret = draws.max(axis=1, keepdims=True) - draws
+        expected_loss = {g: float(regret[:, i].mean()) for i, g in enumerate(self._groups)}
+        rates = {g: params[g]["mean"] for g in self._groups}
+
+        pairs = [(0, j) for j in range(1, k)] if comparisons == "control" else list(itertools.combinations(range(k), 2))
+        compared: dict[str, dict[str, Any]] = {}
+        for i, j in pairs:
+            ref, var = self._groups[i], self._groups[j]
+            samples_c, samples_t = draws[:, i], draws[:, j]
+            if lift == "relative":
+                safe_c = np.where(samples_c == 0, 1e-9, samples_c)
+                lift_samples = (samples_t - samples_c) / safe_c
+            else:
+                lift_samples = samples_t - samples_c
+            low, high = low_threshold, high_threshold
+            if low is None or high is None:
+                default_rope = _default_rope_half_width(rates[ref], lift, 1)
+                low = -default_rope if low is None else low
+                high = default_rope if high is None else high
+            ci_lo, ci_hi = self._credible_interval(lift_samples, confidence_level, cred_int_method)
+            compared[f"{var} vs {ref}"] = {
+                "lift": float(np.mean(lift_samples)),
+                f"{ref}": rates[ref],
+                f"{var}": rates[var],
+                "ci_lower": ci_lo,
+                "ci_upper": ci_hi,
+                "prob_greater": float(np.mean(samples_t > samples_c)),
+                "expected_loss": float(np.mean(np.maximum(-lift_samples, 0))),
+                "prob_rope": float(np.mean((lift_samples >= low) & (lift_samples <= high))),
+            }
+
+        self.pooled_results = {
+            "lift_type": lift,
+            "comparison_type": comparisons,
+            "group_rates": rates,
+            "prob_best": prob_best,
+            "expected_loss": expected_loss,
+            "comparisons": compared,
+        }
+
+        def pct(v: float) -> str | float:
+            return convert_to_tabulate_str(v, "relative")
+
+        group_rows = []
+        for g in self._groups:
+            star = "*" if prob_best[g] >= confidence_level else ""
+            group_rows.append(
+                [
+                    g,
+                    convert_to_tabulate_str(rates[g], "absolute"),
+                    f"{pct(prob_best[g])}{star}",
+                    convert_to_tabulate_str(expected_loss[g], "absolute"),
+                    len(self._clusters[g]),
+                    f"{params[g]['icc']:.4f}",
+                ]
+            )
+        return_string = tabulate_summary(["Metric", "Metric Name"], [lift, self.metric_name])
+        return_string += "\n" + tabulate(
+            group_rows,
+            headers=[
+                "Group",
+                "Posterior Mean",
+                "Prob Is Best *",
+                "Expected Loss (rate difference) ****",
+                "Clusters",
+                "ICC",
+            ],
+            tablefmt="grid",
+        )
+        comparison_rows = []
+        for label, c in compared.items():
+            star = "*" if c["prob_greater"] >= confidence_level else ""
+            comparison_rows.append(
+                [label]
+                + convert_to_tabulate_str([c["lift"], c["ci_lower"], c["ci_upper"]], lift)
+                + [
+                    f"{pct(c['prob_greater'])}{star}",
+                    convert_to_tabulate_str(c["expected_loss"], lift),
+                    pct(c["prob_rope"]),
+                ]
+            )
+        return_string += "\n" + tabulate(
+            comparison_rows,
+            headers=[
+                "Comparison",
+                "Lift",
+                "Cred. Int. Lower **",
+                "Cred. Int. Upper **",
+                "Prob Greater *",
+                "Expected Loss",
+                "Probability Lift is in ROPE ***",
+            ],
+            tablefmt="grid",
+        )
+        return_string += f"\nICC pooled across groups: {params['pooled_icc']:.4f}"
+        level = format_percent(confidence_level)
+        return_string += f"\n* next to a probability means it exceeds our confidence level at {level}% level"
+        return_string += f"\n** {level}% Credible Interval"
+        return_string += "\n*** Region of Practical Equivalence"
+        return_string += "\n**** E[best rate - this group's rate], from one joint posterior draw across all groups"
+        return return_string
 
     def _format_analyze(self, lift: str, confidence_level: float) -> str:
         assert self.pooled_results is not None
@@ -584,8 +735,8 @@ class BayesianClusterRandomizedTrial:
         str
             Table with per-cluster posterior estimates.
         """
-        if len(self._groups) != 2:
-            raise ValueError(f"analyze requires exactly 2 groups, got {len(self._groups)}")
+        if len(self._groups) < 2:
+            raise ValueError(f"analyze requires at least 2 groups, got {len(self._groups)}")
 
         self.cluster_results = {}
         table_list = []
@@ -632,6 +783,7 @@ class BayesianClusterRandomizedTrial:
         cred_int_method: Literal["credible", "hdi"] | None = None,
         low_threshold: float | None = None,
         high_threshold: float | None = None,
+        comparisons: str | None = None,
     ) -> dict[str, Any]:
         """Return a dict of analysis results.
 
@@ -655,6 +807,8 @@ class BayesianClusterRandomizedTrial:
             Lower ROPE bound.
         high_threshold : float, optional
             Upper ROPE bound.
+        comparisons : {"control", "all"}, optional
+            Pairs to compare with three or more groups.
 
         Returns
         -------
@@ -668,6 +822,7 @@ class BayesianClusterRandomizedTrial:
             "cred_int_method": cred_int_method,
             "low_threshold": low_threshold,
             "high_threshold": high_threshold,
+            "comparisons": comparisons.casefold() if comparisons is not None else None,
         }
         requested = {k: v for k, v in given.items() if v is not None}
         if self.pooled_results is None or any(self._analyze_kwargs.get(k) != v for k, v in requested.items()):
@@ -864,12 +1019,17 @@ class BayesianClusterRandomizedTrial:
             )
 
         prob_t_gt_c = None
+        prob_best = None
         if self.pooled_results is not None:
-            prob_t_gt_c = self.pooled_results["prob_t_gt_c"]
+            prob_t_gt_c = self.pooled_results.get("prob_t_gt_c")
+            prob_best = self.pooled_results.get("prob_best")
 
         title = f"{self.experiment_name} — {self.metric_name} Posterior"
         if prob_t_gt_c is not None:
             title += f" | P({self._groups[1]} > {self._groups[0]}) = {prob_t_gt_c:.4f}"
+        elif prob_best is not None:
+            leader = max(prob_best, key=prob_best.get)
+            title += f" | P({leader} is best) = {prob_best[leader]:.4f}"
 
         fig.update_layout(
             title=title,

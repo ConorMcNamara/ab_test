@@ -16,6 +16,7 @@ integrating with the existing pluggable power framework via
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,7 @@ import numpy as np
 import plotly.graph_objects as go
 import scipy.stats as ss
 from scipy.optimize import brentq
+from tabulate import tabulate
 
 from ab_test._display import (
     apply_dark_mode,
@@ -32,6 +34,7 @@ from ab_test._display import (
     resolve_plot_color,
     tabulate_summary,
 )
+from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_binomial.randomization_inference import cluster_randomization_test
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
@@ -67,6 +70,46 @@ def _binomial_floor(successes: np.ndarray[Any, Any], trials: np.ndarray[Any, Any
     """Variance of cluster rates from binomial sampling alone, at the arm's pooled rate."""
     pooled = float(np.sum(successes) / np.sum(trials))
     return pooled * (1 - pooled) * float(np.mean(1.0 / np.asarray(trials, dtype=float)))
+
+
+def _arm_variance(successes: np.ndarray[Any, Any], trials: np.ndarray[Any, Any]) -> float:
+    """Sample variance of an arm's cluster rates, or the binomial variance when it is exactly 0."""
+    return float(np.var(successes / trials, ddof=1)) or _binomial_floor(successes, trials)
+
+
+def _welch_anova(groups: list[tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]]) -> tuple[float, int, float, float]:
+    """Welch's heteroscedastic one-way ANOVA on cluster rates (Welch, 1951).
+
+    Parameters
+    ----------
+    groups : list of (successes, trials)
+        Per-cluster successes and trials for each group.
+
+    Returns
+    -------
+    statistic, df1, df2, pvalue : float, int, float, float
+        Welch's F statistic, its degrees of freedom and the p-value. With two
+        groups ``statistic`` is the square of the Welch t statistic and ``df2``
+        its Welch-Satterthwaite degrees of freedom.
+    """
+    k = len(groups)
+    n = np.array([len(s) for s, _ in groups], dtype=float)
+    means = np.array([float(np.mean(s / m)) for s, m in groups])
+    variances = np.array([_arm_variance(s, m) for s, m in groups])
+    if np.all(variances == 0):
+        # Every cluster rate equals its group's (all 0 or all 1), as in the two-group test.
+        if np.ptp(means) == 0:
+            return 0.0, k - 1, float(np.sum(n) - k), 1.0
+        return math.inf, k - 1, math.nan, 0.0
+    # A group whose clusters are all 0 (or all 1) has no variance at all; a tiny one keeps the limit.
+    weights = n / np.maximum(variances, 1e-24)
+    total = float(np.sum(weights))
+    grand = float(np.sum(weights * means)) / total
+    spread = float(np.sum(weights * (means - grand) ** 2)) / (k - 1)
+    lam = float(np.sum((1 - weights / total) ** 2 / (n - 1)))
+    statistic = spread / (1 + 2 * (k - 2) * lam / (k**2 - 1))
+    df2 = (k**2 - 1) / (3 * lam)
+    return statistic, k - 1, df2, float(ss.f.sf(statistic, k - 1, df2))
 
 
 def estimate_icc(
@@ -461,8 +504,8 @@ class ClusterRandomizedTrial:
             Number of trials in this cluster.
         group : str
             Group this cluster belongs to (e.g. ``"control"``,
-            ``"treatment"``).  Exactly two distinct group names are
-            allowed.
+            ``"treatment"``).  The first group added is the control; with
+            three or more groups, :meth:`analyze` compares them pairwise.
 
         Returns
         -------
@@ -470,8 +513,6 @@ class ClusterRandomizedTrial:
             Self, for method chaining.
         """
         if group not in self._group_names:
-            if len(self._group_names) >= 2:
-                raise ValueError(f"Only 2 groups are supported, got third group {group!r}")
             self._group_names.append(group)
 
         if cluster_name in self._clusters:
@@ -489,38 +530,29 @@ class ClusterRandomizedTrial:
         self._analyzed = None
         return self
 
+    def _build_groups(self) -> list[tuple[str, np.ndarray[Any, Any], np.ndarray[Any, Any]]]:
+        """Per-group arrays of cluster successes and trials, in the order groups were added."""
+        if len(self._group_names) < 2:
+            raise ValueError(f"analyze requires at least 2 groups, got {len(self._group_names)}")
+        groups = []
+        for name in self._group_names:
+            s = [info["successes"] for info in self._clusters.values() if info["group"] == name]
+            m = [info["trials"] for info in self._clusters.values() if info["group"] == name]
+            if len(s) < 2:
+                raise ValueError(f"Group {name!r} has {len(s)} cluster(s); need at least 2 per arm")
+            groups.append((name, np.array(s, dtype=float), np.array(m, dtype=float)))
+        return groups
+
     def _build_arm_data(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Extract per-arm arrays of (successes, trials).
+        """Extract per-arm arrays of (successes, trials) for a two-group trial.
 
         Returns
         -------
         s_ctrl, m_ctrl, s_treat, m_treat : np.ndarray
             Per-cluster successes and trials for each arm.
         """
-        if len(self._group_names) != 2:
-            raise ValueError(f"analyze requires exactly 2 groups, got {len(self._group_names)}")
-
-        ctrl_name, treat_name = self._group_names[0], self._group_names[1]
-        ctrl_s, ctrl_m, treat_s, treat_m = [], [], [], []
-        for info in self._clusters.values():
-            if info["group"] == ctrl_name:
-                ctrl_s.append(info["successes"])
-                ctrl_m.append(info["trials"])
-            else:
-                treat_s.append(info["successes"])
-                treat_m.append(info["trials"])
-
-        if len(ctrl_s) < 2:
-            raise ValueError(f"Group {ctrl_name!r} has {len(ctrl_s)} cluster(s); need at least 2 per arm")
-        if len(treat_s) < 2:
-            raise ValueError(f"Group {treat_name!r} has {len(treat_s)} cluster(s); need at least 2 per arm")
-
-        return (
-            np.array(ctrl_s, dtype=float),
-            np.array(ctrl_m, dtype=float),
-            np.array(treat_s, dtype=float),
-            np.array(treat_m, dtype=float),
-        )
+        (_, s_ctrl, m_ctrl), (_, s_treat, m_treat) = self._build_groups()
+        return s_ctrl, m_ctrl, s_treat, m_treat
 
     def analyze(
         self,
@@ -532,6 +564,8 @@ class ClusterRandomizedTrial:
         seed: int | None = None,
         exact: bool = False,
         n_jobs: int = 1,
+        comparisons: str = "control",
+        correction: str = "holm",
     ) -> str:
         """Analyze the cluster-randomized trial.
 
@@ -546,7 +580,7 @@ class ClusterRandomizedTrial:
             Significance level. Defaults to 0.05.
         method : str
             ``"welch"`` for a cluster-summary Welch t-test (default), or
-            ``"randomization"`` for randomization inference.
+            ``"randomization"`` for randomization inference (two groups only).
         n_permutations : int
             Number of Monte Carlo permutations.  Only used when
             ``method="randomization"`` and ``exact=False``.
@@ -559,11 +593,34 @@ class ClusterRandomizedTrial:
             Number of parallel jobs for Monte Carlo permutations.
             ``1`` (default) runs sequentially; ``-1`` uses all cores.
             Only used when ``method="randomization"`` and ``exact=False``.
+        comparisons : {"control", "all"}, default="control"
+            With three or more groups, which pairs to compare: each group
+            against the first group added (the control), or every pair.
+            Ignored with two groups.
+        correction : str, default="holm"
+            With three or more groups, how the pairwise p-values are adjusted
+            for multiple comparisons; any method accepted by
+            :func:`~ab_test.corrections.adjust_pvalues`. Ignored with two
+            groups.
 
         Returns
         -------
         str
             Formatted results table.
+
+        Notes
+        -----
+        With three or more groups, ``analyze()`` reports Welch's
+        heteroscedastic one-way ANOVA on the cluster rates (Welch, 1951) as an
+        omnibus test that every group has the same mean rate, then the chosen
+        pairwise comparisons, each computed exactly as a two-group analysis
+        (Welch t-test, Fieller interval for relative lift). The p-values are
+        adjusted with ``correction`` and the intervals are Bonferroni
+        intervals at ``1 - alpha / m`` for ``m`` comparisons. With two groups
+        Welch's ANOVA reduces to the Welch t-test (F = t^2). Randomization
+        inference supports two groups only. ``summary()`` then returns
+        ``"omnibus"``, ``"group_rates"`` and a ``"comparisons"`` dict keyed by
+        labels such as ``"B vs A"``.
         """
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
@@ -572,6 +629,10 @@ class ClusterRandomizedTrial:
         _valid_methods = {"welch", "randomization"}
         if method not in _valid_methods:
             raise ValueError(f"method must be one of {sorted(_valid_methods)}, got {method!r}")
+        comparisons = comparisons.casefold()
+        if comparisons not in ("control", "all"):
+            raise ValueError(f"comparisons must be 'control' or 'all', got {comparisons!r}")
+        adjust_pvalues([0.5], method=correction)  # Validate the correction before any work.
         self._analyze_kwargs = {
             "lift": lift,
             "alpha": alpha,
@@ -580,88 +641,31 @@ class ClusterRandomizedTrial:
             "seed": seed,
             "exact": exact,
             "n_jobs": n_jobs,
+            "comparisons": comparisons,
+            "correction": correction,
         }
 
-        s_ctrl, m_ctrl, s_treat, m_treat = self._build_arm_data()
+        groups = self._build_groups()
+        if len(groups) > 2:
+            if method == "randomization":
+                raise ValueError(
+                    "method='randomization' supports two groups only; use method='welch' with three or more groups"
+                )
+            return self._analyze_many(groups, lift, alpha, comparisons, correction)
 
-        p_ctrl = s_ctrl / m_ctrl
-        p_treat = s_treat / m_treat
-        K_ctrl = len(p_ctrl)
-        K_treat = len(p_treat)
-
-        mean_ctrl = float(np.mean(p_ctrl))
-        mean_treat = float(np.mean(p_treat))
-        abs_diff = mean_treat - mean_ctrl
-
-        if method == "randomization":
-            p_value = cluster_randomization_test(
-                s_ctrl,
-                m_ctrl,
-                s_treat,
-                m_treat,
-                n_permutations=n_permutations,
-                seed=seed,
-                exact=exact,
-                n_jobs=n_jobs,
-            )
-            ci_lower_abs = -math.inf
-            ci_upper_abs = math.inf
-            pvalue_label = "p-value (RI)"
-        else:
-            # Identical cluster rates give a sample variance of exactly 0, so the SE was 0,
-            # p = 0 and the interval had zero width. Cluster rates vary at least as much as
-            # binomial sampling makes them (ICC >= 0), so use that variance instead. Only the
-            # degenerate case: flooring every small variance made the test overly conservative.
-            var_ctrl = float(np.var(p_ctrl, ddof=1)) or _binomial_floor(s_ctrl, m_ctrl)
-            var_treat = float(np.var(p_treat, ddof=1)) or _binomial_floor(s_treat, m_treat)
-
-            se_ctrl = var_ctrl / K_ctrl
-            se_treat = var_treat / K_treat
-            se_sum = se_ctrl + se_treat
-
-            if se_sum == 0:
-                t_stat = 0.0 if mean_treat == mean_ctrl else math.copysign(math.inf, mean_treat - mean_ctrl)
-                welch_df = float(K_ctrl + K_treat - 2)
-                se = 0.0
-            else:
-                se = math.sqrt(se_sum)
-                t_stat = (mean_treat - mean_ctrl) / se
-                welch_df = se_sum**2 / (se_ctrl**2 / (K_ctrl - 1) + se_treat**2 / (K_treat - 1))
-
-            if math.isinf(t_stat):
-                p_value = 0.0
-            else:
-                p_value = float(2 * ss.t.sf(abs(t_stat), df=welch_df))
-
-            t_crit = float(ss.t.ppf(1 - alpha / 2, df=welch_df))
-            ci_lower_abs = abs_diff - t_crit * se
-            ci_upper_abs = abs_diff + t_crit * se
-            pvalue_label = "p-value (Welch t)"
-
-        if lift == "relative":
-            if mean_ctrl == 0:
-                test_lift = math.inf if abs_diff > 0 else (-math.inf if abs_diff < 0 else 0.0)
-                ci_lower = -math.inf
-                ci_upper = math.inf
-            else:
-                test_lift = abs_diff / mean_ctrl
-                if method == "randomization":
-                    ci_lower, ci_upper = -math.inf, math.inf
-                else:
-                    ratio_lo, ratio_hi = _fieller_ratio_interval(mean_treat, se_treat, mean_ctrl, se_ctrl, t_crit)
-                    ci_lower, ci_upper = ratio_lo - 1, ratio_hi - 1
-        else:
-            test_lift = abs_diff
-            ci_lower = ci_lower_abs
-            ci_upper = ci_upper_abs
+        (_, s_ctrl, m_ctrl), (_, s_treat, m_treat) = groups
+        result = self._compare_arms(
+            s_ctrl, m_ctrl, s_treat, m_treat, lift, alpha, method, n_permutations, seed, exact, n_jobs
+        )
+        test_lift, mean_ctrl, mean_treat = result["lift"], result["control_rate"], result["treatment_rate"]
+        p_value, ci_lower, ci_upper = result["p_value"], result["ci_lower"], result["ci_upper"]
+        pvalue_label = "p-value (Welch t)" if method == "welch" else "p-value (RI)"
+        K_ctrl, K_treat = len(s_ctrl), len(s_treat)
 
         all_s = np.concatenate([s_ctrl, s_treat])
         all_m = np.concatenate([m_ctrl, m_treat])
         arms = np.repeat([0, 1], [K_ctrl, K_treat])
-        icc_val = estimate_icc(all_s, all_m, groups=arms)
-        avg_m = float(np.mean(all_m))
-        # With clusters of one trial the ICC is undefined but irrelevant: the design effect is 1.
-        deff_val = 1.0 if math.isnan(icc_val) else design_effect(avg_m, icc_val)
+        icc_val, deff_val = self._icc_and_deff(all_s, all_m, arms)
 
         self._analyzed = {
             "method": method,
@@ -679,8 +683,9 @@ class ClusterRandomizedTrial:
             "alpha": alpha,
         }
         if method == "welch":
-            self._analyzed["se"] = se
-            self._analyzed["t_stat"] = t_stat
+            welch_df = result["welch_df"]
+            self._analyzed["se"] = result["se"]
+            self._analyzed["t_stat"] = result["t_stat"]
             self._analyzed["welch_df"] = welch_df
 
         str_pvalue = f"{p_value:.4f}" if p_value >= alpha else f"{p_value:.4f}*"
@@ -710,6 +715,199 @@ class ClusterRandomizedTrial:
             f"\n* next to the p-value means it's statistically significant at the {format_percent(alpha)}% level"
         )
         return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
+        return return_string
+
+    @staticmethod
+    def _icc_and_deff(
+        all_s: np.ndarray[Any, Any], all_m: np.ndarray[Any, Any], arms: np.ndarray[Any, Any]
+    ) -> tuple[float, float]:
+        """Within-arm ICC and the design effect at the average cluster size."""
+        icc_val = estimate_icc(all_s, all_m, groups=arms)
+        avg_m = float(np.mean(all_m))
+        # With clusters of one trial the ICC is undefined but irrelevant: the design effect is 1.
+        deff_val = 1.0 if math.isnan(icc_val) else design_effect(avg_m, icc_val)
+        return icc_val, deff_val
+
+    @staticmethod
+    def _compare_arms(
+        s_ctrl: np.ndarray[Any, Any],
+        m_ctrl: np.ndarray[Any, Any],
+        s_treat: np.ndarray[Any, Any],
+        m_treat: np.ndarray[Any, Any],
+        lift: str,
+        alpha: float,
+        method: str,
+        n_permutations: int = 10_000,
+        seed: int | None = None,
+        exact: bool = False,
+        n_jobs: int = 1,
+    ) -> dict[str, Any]:
+        """Compare a treatment arm with a control arm: lift, rates, p-value and interval."""
+        p_ctrl = s_ctrl / m_ctrl
+        p_treat = s_treat / m_treat
+        K_ctrl = len(p_ctrl)
+        K_treat = len(p_treat)
+
+        mean_ctrl = float(np.mean(p_ctrl))
+        mean_treat = float(np.mean(p_treat))
+        abs_diff = mean_treat - mean_ctrl
+        result: dict[str, Any] = {}
+
+        if method == "randomization":
+            p_value = cluster_randomization_test(
+                s_ctrl,
+                m_ctrl,
+                s_treat,
+                m_treat,
+                n_permutations=n_permutations,
+                seed=seed,
+                exact=exact,
+                n_jobs=n_jobs,
+            )
+            ci_lower_abs = -math.inf
+            ci_upper_abs = math.inf
+        else:
+            # Identical cluster rates give a sample variance of exactly 0, so the SE was 0,
+            # p = 0 and the interval had zero width. Cluster rates vary at least as much as
+            # binomial sampling makes them (ICC >= 0), so use that variance instead. Only the
+            # degenerate case: flooring every small variance made the test overly conservative.
+            var_ctrl = _arm_variance(s_ctrl, m_ctrl)
+            var_treat = _arm_variance(s_treat, m_treat)
+
+            se_ctrl = var_ctrl / K_ctrl
+            se_treat = var_treat / K_treat
+            se_sum = se_ctrl + se_treat
+
+            if se_sum == 0:
+                t_stat = 0.0 if mean_treat == mean_ctrl else math.copysign(math.inf, mean_treat - mean_ctrl)
+                welch_df = float(K_ctrl + K_treat - 2)
+                se = 0.0
+            else:
+                se = math.sqrt(se_sum)
+                t_stat = (mean_treat - mean_ctrl) / se
+                welch_df = se_sum**2 / (se_ctrl**2 / (K_ctrl - 1) + se_treat**2 / (K_treat - 1))
+
+            if math.isinf(t_stat):
+                p_value = 0.0
+            else:
+                p_value = float(2 * ss.t.sf(abs(t_stat), df=welch_df))
+
+            t_crit = float(ss.t.ppf(1 - alpha / 2, df=welch_df))
+            ci_lower_abs = abs_diff - t_crit * se
+            ci_upper_abs = abs_diff + t_crit * se
+            result.update({"se": se, "t_stat": t_stat, "welch_df": welch_df})
+
+        if lift == "relative":
+            if mean_ctrl == 0:
+                test_lift = math.inf if abs_diff > 0 else (-math.inf if abs_diff < 0 else 0.0)
+                ci_lower = -math.inf
+                ci_upper = math.inf
+            else:
+                test_lift = abs_diff / mean_ctrl
+                if method == "randomization":
+                    ci_lower, ci_upper = -math.inf, math.inf
+                else:
+                    ratio_lo, ratio_hi = _fieller_ratio_interval(mean_treat, se_treat, mean_ctrl, se_ctrl, t_crit)
+                    ci_lower, ci_upper = ratio_lo - 1, ratio_hi - 1
+        else:
+            test_lift = abs_diff
+            ci_lower = ci_lower_abs
+            ci_upper = ci_upper_abs
+
+        result.update(
+            {
+                "lift": test_lift,
+                "control_rate": mean_ctrl,
+                "treatment_rate": mean_treat,
+                "p_value": p_value,
+                "ci_lower": ci_lower,
+                "ci_upper": ci_upper,
+            }
+        )
+        return result
+
+    def _analyze_many(
+        self,
+        groups: list[tuple[str, np.ndarray[Any, Any], np.ndarray[Any, Any]]],
+        lift: str,
+        alpha: float,
+        comparisons: str,
+        correction: str,
+    ) -> str:
+        """Three or more groups: Welch's ANOVA, then corrected pairwise comparisons."""
+        k = len(groups)
+        pairs = [(0, j) for j in range(1, k)] if comparisons == "control" else list(itertools.combinations(range(k), 2))
+        # Bonferroni intervals: simultaneous coverage of 1 - alpha across all comparisons.
+        ci_alpha = alpha / len(pairs)
+        results = [
+            self._compare_arms(groups[i][1], groups[i][2], groups[j][1], groups[j][2], lift, ci_alpha, "welch")
+            for i, j in pairs
+        ]
+        adjusted = adjust_pvalues([r["p_value"] for r in results], method=correction)
+        statistic, df1, df2, omnibus_p = _welch_anova([(s, m) for _, s, m in groups])
+
+        names = [name for name, _, _ in groups]
+        compared: dict[str, dict[str, Any]] = {}
+        for (i, j), result, adj_p in zip(pairs, results, adjusted):
+            compared[f"{names[j]} vs {names[i]}"] = {
+                "lift": result["lift"],
+                f"{names[i]}": result["control_rate"],
+                f"{names[j]}": result["treatment_rate"],
+                "p_value": adj_p,
+                "raw_p_value": result["p_value"],
+                "ci_lower": result["ci_lower"],
+                "ci_upper": result["ci_upper"],
+            }
+        rates = {name: float(np.mean(s / m)) for name, s, m in groups}
+        all_s = np.concatenate([s for _, s, _ in groups])
+        all_m = np.concatenate([m for _, _, m in groups])
+        arms = np.repeat(np.arange(k), [len(s) for _, s, _ in groups])
+        icc_val, deff_val = self._icc_and_deff(all_s, all_m, arms)
+        self._analyzed = {
+            "method": "welch",
+            "lift_type": lift,
+            "comparison_type": comparisons,
+            "correction": correction,
+            "group_rates": rates,
+            "omnibus": {"test": "Welch ANOVA", "statistic": statistic, "df1": df1, "df2": df2, "p_value": omnibus_p},
+            "comparisons": compared,
+            "icc": icc_val,
+            "deff": deff_val,
+            "n_clusters": {name: len(s) for name, s, _ in groups},
+            "alpha": alpha,
+        }
+
+        str_omnibus = f"{omnibus_p:.4f}*" if omnibus_p < alpha else f"{omnibus_p:.4f}"
+        return_string = tabulate_summary(
+            ["Metric", "Metric Name"] + names + ["Omnibus p-value ***"],
+            [lift, self.metric_name] + [convert_to_tabulate_str(r, "absolute") for r in rates.values()] + [str_omnibus],
+        )
+        rows = []
+        for label, comparison in compared.items():
+            star = "*" if comparison["p_value"] < alpha else ""
+            rows.append(
+                [label]
+                + convert_to_tabulate_str([comparison["lift"], comparison["ci_lower"], comparison["ci_upper"]], lift)
+                + [f"{comparison['raw_p_value']:.4f}", f"{comparison['p_value']:.4f}{star}"]
+            )
+        headers = ["Comparison", "Lift", "Conf. Int. Lower **", "Conf. Int. Upper **", "p-value (Welch t)"]
+        headers.append(f"Adj. p ({correction})")
+        return_string += "\n" + tabulate(rows, headers=headers, tablefmt="grid")
+        icc_str = "n/a" if math.isnan(icc_val) else f"{icc_val:.4f}"
+        clusters = ", ".join(f"{len(s)} {name}" for name, s, _ in groups)
+        return_string += f"\nICC: {icc_str} | DEFF: {deff_val:.2f} | Clusters: {clusters}"
+        return_string += (
+            f"\n* next to a p-value means it's statistically significant at the {format_percent(alpha)}% level"
+            f" ({correction}-adjusted for {len(pairs)} comparisons)"
+        )
+        return_string += (
+            f"\n** {format_percent(1 - alpha)}% simultaneous Confidence Intervals"
+            f" (Bonferroni: each at {round(100 * (1 - ci_alpha), 2):g}%)"
+        )
+        return_string += (
+            f"\n*** Welch's ANOVA on cluster rates that all {k} groups share one mean rate,"
+            f" F({df1}, {df2:.1f}) = {statistic:.3f}"
+        )
         return return_string
 
     @property
@@ -766,6 +964,9 @@ class ClusterRandomizedTrial:
     ) -> None:
         """Forest plot of per-cluster proportions and arm estimates.
 
+        Each cluster is a dot and each group's mean a diamond, for any number
+        of groups.
+
         Parameters
         ----------
         lift : str
@@ -785,62 +986,45 @@ class ClusterRandomizedTrial:
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
-        s_ctrl, m_ctrl, s_treat, m_treat = self._build_arm_data()
-        p_ctrl = s_ctrl / m_ctrl
-        p_treat = s_treat / m_treat
-
-        ctrl_name, treat_name = self._group_names
-
-        ctrl_clusters = [name for name, info in self._clusters.items() if info["group"] == ctrl_name]
-        treat_clusters = [name for name, info in self._clusters.items() if info["group"] == treat_name]
-
+        groups = self._build_groups()
         plot_color = resolve_plot_color(color)
         fig = go.Figure()
 
-        all_labels = ctrl_clusters + treat_clusters
-        all_proportions = list(p_ctrl) + list(p_treat)
-        all_groups = [ctrl_name] * len(ctrl_clusters) + [treat_name] * len(treat_clusters)
+        def group_color(index: int, name: str) -> Any:
+            if isinstance(plot_color, list):
+                return plot_color[min(index, len(plot_color) - 1)]
+            if isinstance(plot_color, dict):
+                return plot_color.get(name)
+            return None
 
-        for i, (label, prop, grp) in enumerate(zip(all_labels, all_proportions, all_groups)):
-            c = None
-            if plot_color is not None:
-                if isinstance(plot_color, list):
-                    c = plot_color[0] if grp == ctrl_name else plot_color[min(1, len(plot_color) - 1)]
-                elif isinstance(plot_color, dict):
-                    c = plot_color.get(grp)
+        # One dot per cluster, grouped by arm in the order the groups were added.
+        for index, (grp, s, m) in enumerate(groups):
+            labels = [name for name, info in self._clusters.items() if info["group"] == grp]
+            for label, prop in zip(labels, s / m):
+                c = group_color(index, grp)
+                marker_kw: dict[str, Any] = {"symbol": "circle", "size": 8}
+                if c is not None:
+                    marker_kw["color"] = c
 
-            marker_kw: dict[str, Any] = {"symbol": "circle", "size": 8}
-            if c is not None:
-                marker_kw["color"] = c
-
-            fig.add_trace(
-                go.Scatter(
-                    x=[float(prop)],
-                    y=[f"{label} ({grp})"],
-                    marker=marker_kw,
-                    name=label,
-                    showlegend=False,
+                fig.add_trace(
+                    go.Scatter(
+                        x=[float(prop)],
+                        y=[f"{label} ({grp})"],
+                        marker=marker_kw,
+                        name=label,
+                        showlegend=False,
+                    )
                 )
-            )
 
-        mean_ctrl_val = float(np.mean(p_ctrl))
-        mean_treat_val = float(np.mean(p_treat))
-
-        for grp_name, grp_mean in [(ctrl_name, mean_ctrl_val), (treat_name, mean_treat_val)]:
-            c_arm = None
-            if plot_color is not None:
-                if isinstance(plot_color, list):
-                    c_arm = plot_color[0] if grp_name == ctrl_name else plot_color[min(1, len(plot_color) - 1)]
-                elif isinstance(plot_color, dict):
-                    c_arm = plot_color.get(grp_name)
-
+        for index, (grp_name, s, m) in enumerate(groups):
+            c_arm = group_color(index, grp_name)
             marker_kw_arm: dict[str, Any] = {"symbol": "diamond", "size": 14}
             if c_arm is not None:
                 marker_kw_arm["color"] = c_arm
 
             fig.add_trace(
                 go.Scatter(
-                    x=[grp_mean],
+                    x=[float(np.mean(s / m))],
                     y=[f"{grp_name} (mean)"],
                     marker=marker_kw_arm,
                     name=f"{grp_name} mean",
