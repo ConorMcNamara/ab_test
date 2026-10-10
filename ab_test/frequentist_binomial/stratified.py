@@ -8,6 +8,7 @@ a :class:`StratifiedContingencyTable` that mirrors the
 
 from __future__ import annotations
 
+import itertools
 import math
 from typing import Any
 
@@ -25,6 +26,7 @@ from ab_test._display import (
     tabulate_summary,
 )
 from ab_test._lift import scale_bounds, scale_metric
+from ab_test.corrections import adjust_pvalues
 
 try:
     from tabulate import tabulate
@@ -34,6 +36,7 @@ except ImportError:  # pragma: no cover
 __all__ = [
     "StratifiedContingencyTable",
     "cmh_test",
+    "generalized_cmh_test",
     "breslow_day_test",
     "stratified_power",
 ]
@@ -89,6 +92,66 @@ def cmh_test(
     pvalue = float(ss.chi2.sf(chi2, df=1))
 
     return chi2, pvalue
+
+
+def generalized_cmh_test(
+    successes: np.ndarray[Any, Any] | list[list[int]],
+    trials: np.ndarray[Any, Any] | list[list[int]],
+) -> tuple[float, int, float]:
+    """Generalized Cochran-Mantel-Haenszel test that every group shares one success rate.
+
+    The test of general association for a ``k x 2`` table in each of ``K``
+    strata (Landis, Heyman & Koch, 1978). Within a stratum, given its margins,
+    the groups' success counts follow a multivariate hypergeometric
+    distribution under the null. Their deviations from expectation and their
+    covariance matrices are summed over strata, and the statistic is
+    ``d' V^- d`` on the first ``k - 1`` groups, chi-squared with ``k - 1``
+    degrees of freedom. With two groups it equals :func:`cmh_test`.
+
+    Parameters
+    ----------
+    successes : array_like, shape (K, k)
+        ``successes[s, i]`` is the number of successes in group *i* of stratum *s*.
+    trials : array_like, shape (K, k)
+        ``trials[s, i]`` is the number of trials in group *i* of stratum *s*.
+
+    Returns
+    -------
+    statistic : float
+        Generalized CMH chi-squared statistic.
+    df : int
+        Degrees of freedom: the rank of the summed covariance matrix, which is
+        ``k - 1`` unless the data leave some group without information.
+    pvalue : float
+        P-value from a chi-squared(df) distribution. ``(0.0, 0, 1.0)`` when no
+        stratum carries information.
+
+    References
+    ----------
+    Landis, J. R., Heyman, E. R., & Koch, G. G. (1978). Average partial
+    association in three-way contingency tables: a review and discussion of
+    alternative tests. *International Statistical Review*, 46(3), 237-254.
+    """
+    successes_arr = np.asarray(successes, dtype=float)
+    trials_arr = np.asarray(trials, dtype=float)
+    # As in cmh_test: a stratum with fewer than two trials adds nothing and has a 0/0 covariance.
+    informative = trials_arr.sum(axis=1) >= 2
+    successes_arr = successes_arr[informative]
+    trials_arr = trials_arr[informative]
+    k = successes_arr.shape[1]
+    deviation = np.zeros(k - 1)
+    covariance = np.zeros((k - 1, k - 1))
+    for x, n in zip(successes_arr, trials_arr):
+        total = n.sum()
+        m1 = x.sum()
+        deviation += x[:-1] - n[:-1] * m1 / total
+        scale = m1 * (total - m1) / (total**2 * (total - 1))
+        covariance += scale * (total * np.diag(n[:-1]) - np.outer(n[:-1], n[:-1]))
+    df = int(np.linalg.matrix_rank(covariance)) if covariance.any() else 0
+    if df == 0:
+        return 0.0, 0, 1.0
+    statistic = float(deviation @ np.linalg.pinv(covariance) @ deviation)
+    return statistic, df, float(ss.chi2.sf(statistic, df=df))
 
 
 def _mh_odds_ratio(
@@ -342,13 +405,16 @@ def _pooled_effect(
     z: float,
     spend: float | None = None,
     msrp: float | None = None,
+    n_scale: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Compute the Mantel-Haenszel pooled effect on the requested scale.
 
     Relative lift pools the risk ratio (Greenland-Robins variance); the other
     lifts pool the risk difference (Sato variance). Both are defined when some
     strata have zero successes, unlike inverse-variance pooling of plug-in
-    estimates. Returns ``(estimate, se, ci_lower, ci_upper)`` on the display scale.
+    estimates. Scaled lifts are expressed over ``n_scale`` units, by default
+    the larger group's total trials. Returns ``(estimate, se, ci_lower,
+    ci_upper)`` on the display scale.
     """
     if lift == "relative":
         rr, var_log = _mh_risk_ratio(successes, trials_arr)
@@ -362,7 +428,7 @@ def _pooled_effect(
     pooled_se = math.sqrt(var_d)
 
     if lift in ("incremental", "roas", "revenue", "cpa"):
-        n_max = float(max(np.sum(trials_arr[:, 0]), np.sum(trials_arr[:, 1])))
+        n_max = float(max(np.sum(trials_arr[:, 0]), np.sum(trials_arr[:, 1]))) if n_scale is None else n_scale
         est = pooled_d * n_max
         se_scaled = pooled_se * n_max
         lb = est - z * se_scaled
@@ -418,6 +484,7 @@ class StratifiedContingencyTable:
         self.msrp: float | None = msrp
         self._strata: dict[str, dict[str, dict[str, int]]] = {}
         self._cell_names: list[str] = []
+        self.comparison_results: dict[str, Any] | None = None
 
     def add(
         self,
@@ -433,6 +500,8 @@ class StratifiedContingencyTable:
         ----------
         cell_name : str
             Experimental group name (e.g. ``"Control"``, ``"Treatment"``).
+            The first group added is the control. Any number of groups may be
+            added; see :meth:`analyze` for three or more.
         successes : int
             Number of successes.
         trials : int
@@ -446,8 +515,6 @@ class StratifiedContingencyTable:
             Self, for method chaining.
         """
         if cell_name not in self._cell_names:
-            if len(self._cell_names) >= 2:
-                raise ValueError(f"Only 2 groups are supported, got third group {cell_name!r}")
             self._cell_names.append(cell_name)
 
         if stratum not in self._strata:
@@ -458,14 +525,24 @@ class StratifiedContingencyTable:
         self._strata[stratum][cell_name] = {"successes": successes, "trials": trials}
         return self
 
-    def _build_arrays(self) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], list[str]]:
-        """Return ``(successes, trials)`` arrays of shape ``(K, 2)`` and stratum names."""
-        if len(self._cell_names) != 2:
-            raise ValueError(f"analyze requires exactly 2 groups, got {len(self._cell_names)}")
+    def _build_arrays(self, two_groups: bool = False) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], list[str]]:
+        """Return ``(successes, trials)`` arrays of shape ``(K, k)`` and stratum names.
+
+        ``two_groups=True`` is for callers that only report a single
+        comparison, so three or more groups raise.
+        """
+        k = len(self._cell_names)
+        if k < 2:
+            raise ValueError(f"analyze requires at least 2 groups, got {k}")
+        if two_groups and k > 2:
+            raise ValueError(
+                f"Per-stratum results and plots compare two groups, but this table has {k}. Use analyze() for "
+                "the pooled comparisons, or build a two-group table for the pair you want per stratum."
+            )
         strata_names = list(self._strata.keys())
         K = len(strata_names)
-        successes = np.empty((K, 2), dtype=float)
-        trials = np.empty((K, 2), dtype=float)
+        successes = np.empty((K, k), dtype=float)
+        trials = np.empty((K, k), dtype=float)
         for k, s_name in enumerate(strata_names):
             stratum = self._strata[s_name]
             for j, c_name in enumerate(self._cell_names):
@@ -491,6 +568,9 @@ class StratifiedContingencyTable:
         self,
         lift: str = "relative",
         alpha: float = 0.05,
+        *,
+        comparisons: str = "control",
+        correction: str = "holm",
     ) -> str:
         """Analyze the stratified experiment.
 
@@ -508,15 +588,44 @@ class StratifiedContingencyTable:
             ``"roas"``, ``"revenue"``, or ``"cpa"``.
         alpha : float, default=0.05
             Significance level for the confidence interval.
+        comparisons : {"control", "all"}, default="control"
+            With three or more groups, which pairs to compare: each group
+            against the first one added (the control), or every pair. Ignored
+            with two groups.
+        correction : str, default="holm"
+            With three or more groups, how the pairwise p-values are adjusted;
+            any method of :func:`~ab_test.corrections.adjust_pvalues`. Ignored
+            with two groups.
 
         Returns
         -------
         str
             Formatted results table.
+
+        Notes
+        -----
+        With three or more groups, the table reports the generalized CMH test
+        that every group shares one rate across strata
+        (:func:`generalized_cmh_test`, ``k - 1`` degrees of freedom), then the
+        chosen pairwise comparisons. Each is computed exactly as a two-group
+        analysis of that pair would be: Mantel-Haenszel pooled effect, CMH
+        p-value and Breslow-Day homogeneity p-value. The p-values are adjusted
+        with ``correction``, and the intervals are Bonferroni intervals at
+        level ``1 - alpha / m`` for ``m`` comparisons, so they hold
+        simultaneously. Scaled lifts are all expressed over the largest
+        group's total trials, so identical rate differences give identical
+        values. The results are stored in ``comparison_results``.
+        :meth:`analyze_by_stratum` and :meth:`plot` remain two-group only.
         """
         lift = self._validate_lift(lift)
+        comparisons = comparisons.casefold()
+        if comparisons not in ("control", "all"):
+            raise ValueError(f"comparisons must be 'control' or 'all', got {comparisons!r}")
+        adjust_pvalues([0.5], method=correction)  # Validate the correction before any work.
 
         successes, trials_arr, strata_names = self._build_arrays()
+        if successes.shape[1] > 2:
+            return self._analyze_many(successes, trials_arr, strata_names, lift, alpha, comparisons, correction)
 
         z = float(ss.norm.ppf(1 - alpha / 2))
         estimate, _, lb, ub = _pooled_effect(successes, trials_arr, lift, z, self.spend, self.msrp)
@@ -552,6 +661,95 @@ class StratifiedContingencyTable:
         return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
         return return_string
 
+    def _analyze_many(
+        self,
+        successes: np.ndarray[Any, Any],
+        trials_arr: np.ndarray[Any, Any],
+        strata_names: list[str],
+        lift: str,
+        alpha: float,
+        comparisons: str,
+        correction: str,
+    ) -> str:
+        """Three or more groups: the generalized CMH test plus corrected pairwise comparisons."""
+        k = successes.shape[1]
+        names = self._cell_names
+        pairs = [(0, j) for j in range(1, k)] if comparisons == "control" else list(itertools.combinations(range(k), 2))
+        # Bonferroni intervals: simultaneous coverage of 1 - alpha across all comparisons.
+        ci_alpha = alpha / len(pairs)
+        z = float(ss.norm.ppf(1 - ci_alpha / 2))
+        # One scale for every comparison, so identical rate differences give identical scaled lifts.
+        n_scale = float(np.max(np.sum(trials_arr, axis=0)))
+        rates = np.sum(successes, axis=0) / np.sum(trials_arr, axis=0)
+
+        compared: dict[str, dict[str, Any]] = {}
+        raw_pvalues: list[float] = []
+        for i, j in pairs:
+            pair_s, pair_t = successes[:, [i, j]], trials_arr[:, [i, j]]
+            estimate, _, lb, ub = _pooled_effect(pair_s, pair_t, lift, z, self.spend, self.msrp, n_scale=n_scale)
+            _, p_value = cmh_test(pair_s, pair_t)
+            bd_pvalue = breslow_day_test(pair_s, pair_t)[1] if len(strata_names) >= 2 else math.nan
+            raw_pvalues.append(p_value)
+            compared[f"{names[j]} vs {names[i]}"] = {
+                "lift": estimate,
+                f"{names[i]}": float(rates[i]),
+                f"{names[j]}": float(rates[j]),
+                "raw_p_value": p_value,
+                "ci_lower": lb,
+                "ci_upper": ub,
+                "breslow_day_p_value": bd_pvalue,
+            }
+        for comparison, adj_p in zip(compared.values(), adjust_pvalues(raw_pvalues, method=correction)):
+            comparison["p_value"] = adj_p
+        statistic, df, omnibus_p = generalized_cmh_test(successes, trials_arr)
+        self.comparison_results = {
+            "lift_type": lift,
+            "comparison_type": comparisons,
+            "correction": correction,
+            "omnibus": {"test": "Generalized CMH", "statistic": statistic, "df": df, "p_value": omnibus_p},
+            "comparisons": compared,
+        }
+
+        # NaN fails every comparison, so test for significance explicitly rather than with >= alpha.
+        str_omnibus = f"{omnibus_p:.4f}*" if omnibus_p < alpha else f"{omnibus_p:.4f}"
+        return_string = tabulate_summary(
+            ["Metric", "Metric Name"] + names + ["p-value (generalized CMH) ***"],
+            [lift, self.metric_name] + convert_to_tabulate_str(list(rates), "absolute") + [str_omnibus],
+        )
+        rows = []
+        for label, comparison in compared.items():
+            star = "*" if comparison["p_value"] < alpha else ""
+            bd = comparison["breslow_day_p_value"]
+            rows.append(
+                [label]
+                + convert_to_tabulate_str([comparison["lift"], comparison["ci_lower"], comparison["ci_upper"]], lift)
+                + [f"{comparison['raw_p_value']:.4f}", f"{comparison['p_value']:.4f}{star}"]
+                + ["n/a" if math.isnan(bd) else f"{bd:.4f}"]
+            )
+        headers = [
+            "Comparison",
+            "Lift",
+            "Conf. Int. Lower **",
+            "Conf. Int. Upper **",
+            "p-value (CMH)",
+            f"Adj. p ({correction})",
+            "Breslow-Day p ****",
+        ]
+        return_string += "\n" + tabulate(rows, headers=headers, tablefmt="grid")
+        return_string += (
+            f"\n* next to a p-value means it's statistically significant at the {format_percent(alpha)}% level"
+            f" ({correction}-adjusted for {len(pairs)} comparisons)"
+        )
+        return_string += (
+            f"\n** {format_percent(1 - alpha)}% simultaneous Confidence Intervals"
+            f" (Bonferroni: each at {round(100 * (1 - ci_alpha), 2):g}%)"
+        )
+        return_string += f"\n*** Generalized CMH test that all {k} groups share one rate across strata, df={df}"
+        return_string += "\n**** Homogeneity of each comparison's odds ratio across strata (not adjusted)"
+        if lift in ("incremental", "roas", "revenue", "cpa"):
+            return_string += f"\nScaled lifts are per {n_scale:,.0f} units (the largest group) for every comparison"
+        return return_string
+
     def analyze_by_stratum(
         self,
         lift: str = "relative",
@@ -574,7 +772,7 @@ class StratifiedContingencyTable:
             intervals.
         """
         lift = self._validate_lift(lift)
-        successes, trials_arr, strata_names = self._build_arrays()
+        successes, trials_arr, strata_names = self._build_arrays(two_groups=True)
 
         p1 = successes[:, 0] / trials_arr[:, 0]
         p2 = successes[:, 1] / trials_arr[:, 1]
@@ -662,7 +860,7 @@ class StratifiedContingencyTable:
     ) -> go.Figure:
         """Build the forest plot for a single lift (see :meth:`plot`)."""
         lift = self._validate_lift(lift)
-        successes, trials_arr, strata_names = self._build_arrays()
+        successes, trials_arr, strata_names = self._build_arrays(two_groups=True)
 
         p1 = successes[:, 0] / trials_arr[:, 0]
         p2 = successes[:, 1] / trials_arr[:, 1]

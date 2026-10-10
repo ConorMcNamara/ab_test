@@ -56,6 +56,46 @@ Usage
    )
    print(f"Power: {power:.1%}")
 
+Three or More Variants
+----------------------
+
+Add any number of groups; the first one added is the control. With three or
+more, ``analyze()`` reports:
+
+* an **omnibus test** that every group shares one rate across strata: the
+  generalized Cochran-Mantel-Haenszel test of general association
+  (:func:`~ab_test.frequentist_binomial.stratified.generalized_cmh_test`,
+  ``k - 1`` degrees of freedom). With two groups it equals the CMH test;
+* **pairwise comparisons**, each computed exactly as a two-group analysis of
+  that pair: Mantel-Haenszel pooled effect, CMH p-value, and the Breslow-Day
+  homogeneity p-value for that pair. ``comparisons="control"`` (the default)
+  compares each group with the control, and ``comparisons="all"`` compares
+  every pair;
+* **adjusted p-values**, with Holm's method by default (``correction`` takes any
+  method of :func:`~ab_test.corrections.adjust_pvalues`), alongside the raw
+  CMH p-values;
+* **simultaneous confidence intervals**: Bonferroni intervals at level
+  ``1 - alpha / m`` for ``m`` comparisons.
+
+Scaled lifts (incremental, ROAS, revenue, CPA) are all expressed over the
+largest group's total trials, so identical rate differences give identical
+values; the output says which scale. The results are stored in
+``comparison_results``.
+
+.. code-block:: python
+
+   st = StratifiedContingencyTable("Landing Page", "Conversion Rate")
+   for stratum, rates in {"mobile": (50, 62, 70), "desktop": (80, 90, 104)}.items():
+       for cell, successes in zip(("A", "B", "C"), rates):
+           st.add(cell, successes, 500, stratum=stratum)
+   print(st.analyze(comparisons="all"))
+   st.comparison_results["omnibus"]["p_value"]
+
+The Breslow-Day p-values are per comparison and not adjusted. Per-stratum
+output (:meth:`analyze_by_stratum` and :meth:`plot`) shows one comparison
+across strata, so it stays two-group only and raises with three or more
+groups: build a two-group table for the pair you want to see by stratum.
+
 API Reference
 -------------
 
