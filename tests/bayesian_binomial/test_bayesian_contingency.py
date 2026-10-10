@@ -634,3 +634,35 @@ class TestBayesianMultiArm:
         table.analyze(comparisons="all")
         table.plot(is_individual=False)
         assert [trace.y[0] for trace in figures[-1].data] == ["B vs A", "C vs A", "C vs B"]
+
+
+class TestBayesianMultiArmCommonScale:
+    @staticmethod
+    def _table():
+        table = BayesianContingencyTable("x", "c")
+        return table.add("A", 100, 1000, 1, 1).add("B", 120, 1000, 1, 1).add("C", 1200, 10000, 1, 1)
+
+    def test_scaled_lifts_share_one_scale(self):
+        # Each pair used to be scaled by its own larger arm: B vs A was 20.0 but C vs A 192.8.
+        table = self._table()
+        np.random.seed(0)
+        output = table.analyze(lift="incremental", comparisons="all")
+        comparisons = table.incremental_results["comparisons"]
+        mean_a, mean_b, mean_c = 101 / 1002, 121 / 1002, 1201 / 10002
+        assert comparisons["B vs A"]["lift"] == pytest.approx((mean_b - mean_a) * 10_000)
+        assert comparisons["C vs A"]["lift"] == pytest.approx((mean_c - mean_a) * 10_000)
+        assert "Scaled lifts are per 10,000 units (the largest arm)" in output
+
+    def test_explicit_rope_means_the_same_for_every_comparison(self):
+        # +/-150 conversions per 10,000 units is a 1.5-point rate difference for every pair.
+        table = self._table()
+        np.random.seed(0)
+        table.analyze(lift="incremental", comparisons="all", low_threshold=-150, high_threshold=150, n_samples=400_000)
+        pair = BayesianContingencyTable("x", "c").add("A", 100, 1000, 1, 1).add("B", 120, 1000, 1, 1)
+        np.random.seed(1)
+        pair.analyze(lift="absolute", low_threshold=-0.015, high_threshold=0.015, n_samples=400_000)
+        comparison = table.incremental_results["comparisons"]["B vs A"]
+        assert comparison["prob_rope"] == pytest.approx(pair.incremental_results["prob_rope"], abs=0.005)
+        # The loss is in the same units as the lift: conversions per 10,000 units.
+        expected_loss = pair.incremental_results["expected_loss"] * 10_000
+        assert comparison["expected_loss"] == pytest.approx(expected_loss, rel=0.05)

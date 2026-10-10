@@ -234,11 +234,24 @@ class BayesianContingencyTable(BaseContingencyTable):
         trials = [self.trials[i], self.trials[j]]
         alphas = [self.alphas[i], self.alphas[j]]
         betas = [self.betas[i], self.betas[j]]
+        # Scaled lifts are expressed over the table's largest arm for every comparison, so
+        # identical rate differences give identical lifts with three or more arms. The
+        # posterior samples are scaled by the pair's larger arm, which is linear in the
+        # scale (inverse for CPA), so thresholds and loss are converted between the two.
+        # With two arms both scales are the same.
+        n_scale = max(self.trials)
+        to_pair = 1.0
+        if lift in ["incremental", "roas", "revenue"]:
+            to_pair = max(trials) / n_scale
+        elif lift == "cpa":
+            to_pair = n_scale / max(trials)
         if low_threshold is None or high_threshold is None:
             control_rate = posterior_mean(successes[0], trials[0], alphas[0], betas[0])
-            default_rope = _default_rope_half_width(control_rate, lift, max(trials), self.spend, self.msrp)
+            default_rope = _default_rope_half_width(control_rate, lift, n_scale, self.spend, self.msrp)
             low_threshold = -default_rope if low_threshold is None else low_threshold
             high_threshold = default_rope if high_threshold is None else high_threshold
+        if to_pair != 1.0:
+            low_threshold, high_threshold = low_threshold * to_pair, high_threshold * to_pair
         if lift in ["relative", "absolute"]:
             results = calculate_metrics(
                 successes,
@@ -293,7 +306,6 @@ class BayesianContingencyTable(BaseContingencyTable):
         pb = posterior_mean(successes[1], trials[1], alphas[1], betas[1])
         if lift in ["incremental", "roas", "revenue", "cpa"]:
             # Scale unrounded values; rounding each bound separately biased the interval.
-            n_scale = max(trials)
             pa, pb, lb, ub = pa * n_scale, pb * n_scale, lb * n_scale, ub * n_scale
             test_lift = scale_metric(pb - pa, lift, self.spend, self.msrp)
             pa = scale_metric(pa, lift, self.spend, self.msrp)
@@ -311,7 +323,8 @@ class BayesianContingencyTable(BaseContingencyTable):
             "prob_greater": results["Proportion of samples where B exceeds A"],
             "ci_lower": lb,
             "ci_upper": ub,
-            "expected_loss": results["Expected loss"],
+            # The loss is in the lift's units on the pair's scale (a rate difference for CPA).
+            "expected_loss": results["Expected loss"] / to_pair if lift != "cpa" else results["Expected loss"],
             "prob_rope": results["Probability of ROPE"],
             "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
             "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
@@ -460,6 +473,8 @@ class BayesianContingencyTable(BaseContingencyTable):
         return_string += f"\n** {level}% Credible Interval"
         return_string += "\n*** Region of Practical Equivalence"
         return_string += "\n**** E[best rate - this variant's rate], from one joint posterior draw across all variants"
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
+            return_string += f"\nScaled lifts are per {max(self.trials):,} units (the largest arm) for every comparison"
         return return_string
 
     def analyze_individually(
