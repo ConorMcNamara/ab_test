@@ -498,6 +498,34 @@ class TestMultiArm:
         assert "95% simultaneous Confidence Intervals (Bonferroni: each at 97.5%)" in output
         assert "Bonferroni: each at 98.33%" in _three_arms().analyze(comparisons="all")
 
+    def test_scaled_lifts_share_one_scale(self):
+        # Each pair used to be scaled by its own larger arm: B vs A = 20 but C vs A = 200
+        # for the same two-point difference.
+        table = ContingencyTable("x", "c").add("A", 100, 1000).add("B", 120, 1000).add("C", 1200, 10000)
+        output = table.analyze(lift="incremental", comparisons="all", conf_int_method="wilson")
+        comparisons = table.incremental_results["comparisons"]
+        assert [c["lift"] for c in comparisons.values()] == [200, 200, 0]
+        assert comparisons["B vs A"]["A"] == 1000 and comparisons["B vs A"]["B"] == 1200
+        assert "Scaled lifts are per 10,000 units (the largest arm)" in output
+
+    def test_scaled_null_lift_uses_the_common_scale(self):
+        table = ContingencyTable("x", "c").add("A", 100, 1000).add("B", 140, 1000).add("C", 1000, 10000)
+        table.analyze(lift="incremental", null_lift=300)
+        pair = ContingencyTable("x", "c").add("A", 100, 1000).add("B", 140, 1000)
+        # A null of 300 per 10,000 units is a 3-point difference.
+        pair.analyze(lift="absolute", null_lift=0.03)
+        assert table.incremental_results["comparisons"]["B vs A"]["raw_p_value"] == pytest.approx(
+            pair.incremental_results["p_value"]
+        )
+
+    def test_scaled_cpa_on_the_common_scale(self):
+        table = ContingencyTable("x", "c", spend=5000).add("A", 100, 1000).add("B", 120, 1000).add("C", 1200, 10000)
+        table.analyze(lift="cpa", comparisons="all", conf_int_method="wilson")
+        comparisons = table.incremental_results["comparisons"]
+        # 200 incremental conversions per 10,000 units at a 5,000 spend: a CPA of 25 for both.
+        assert comparisons["B vs A"]["lift"] == pytest.approx(25.0)
+        assert comparisons["C vs A"]["lift"] == pytest.approx(25.0)
+
     def test_two_variants_ignore_the_new_options(self):
         table = ContingencyTable("x", "c").add("A", 100, 1000).add("B", 130, 1000)
         default = table.analyze()
