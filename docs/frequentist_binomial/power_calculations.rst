@@ -23,10 +23,13 @@ With three or more groups, the functions plan for the comparisons
 :meth:`~ab_test.frequentist_binomial.contingency.ContingencyTable.analyze`
 will make. ``comparisons="control"`` (the default) compares each variant with
 the first group; ``comparisons="all"`` compares every pair. For ``m``
-comparisons, power is computed for the least-powered one (the control against
-the smallest variant, or the two smallest groups) at the Bonferroni level
-``alpha / m``. ``analyze()`` adjusts with Holm by default, which rejects at
-least as often, so the power is a slight underestimate and the sample size a
+comparisons, power is computed for the least-powered comparison with an effect
+at the Bonferroni level ``alpha / m``. Under the stated alternative every
+variant has the same rate, so that is the control against the smallest
+variant in both cases; ``"all"`` only makes ``m`` larger. ``analyze()``
+adjusts with Holm by default, which rejects at least as often, and Bonferroni
+is slightly conservative against Dunnett's procedure (about 2-3% more sample
+for 3-4 groups), so the power is a slight underestimate and the sample size a
 slight overestimate.
 
 .. code-block:: python

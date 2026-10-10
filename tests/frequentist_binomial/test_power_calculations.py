@@ -373,8 +373,13 @@ class TestMultiArmPower:
 
     @staticmethod
     def test_all_pairs():
-        expected = abtest_power([800, 1500], 0.10, 0.30, alpha=0.05 / 3)
-        assert abtest_power([2000, 800, 1500], 0.10, 0.30, comparisons="all") == pytest.approx(expected)
+        # Under the alternative B and C share a rate, so the 800 vs 1500 comparison has no effect.
+        # The weakest comparison with an effect is still the control against the smallest variant.
+        expected = abtest_power([2000, 800], 0.10, 0.30, alpha=0.05 / 3)
+        actual = abtest_power([2000, 800, 1500], 0.10, 0.30, comparisons="all")
+        assert actual == pytest.approx(expected)
+        assert actual == pytest.approx(0.466, abs=0.001)
+        assert actual < abtest_power([2000, 800, 1500], 0.10, 0.30)
 
     @staticmethod
     def test_two_groups_ignore_comparisons():

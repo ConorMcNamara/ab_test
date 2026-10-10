@@ -107,9 +107,14 @@ def _weakest_comparison(
 
     With three or more groups, ``analyze()`` compares each variant against the
     first group (``"control"``) or every pair (``"all"``) and adjusts for the
-    ``m`` comparisons. Power is computed for the smallest comparison at the
-    Bonferroni level ``alpha / m``; Holm (the ``analyze()`` default) rejects at
-    least as often, so this power is a lower bound.
+    ``m`` comparisons. Power is computed for the least-powered comparison
+    that has an effect at the Bonferroni level ``alpha / m``; Holm (the
+    ``analyze()`` default) rejects at least as often, so this power is a lower
+    bound. Under the stated alternative every variant has the same rate, so a
+    comparison between two variants has no effect; with ``"all"`` the weakest
+    comparison is therefore still the control against the smallest variant,
+    just at a smaller ``alpha / m``. Bonferroni is slightly conservative
+    against Dunnett's procedure (about 2-3% more sample for 3-4 groups).
     """
     comparisons = comparisons.casefold()
     if comparisons not in ("control", "all"):
@@ -117,10 +122,8 @@ def _weakest_comparison(
     k = len(group_sizes)
     if k <= 2:
         return list(group_sizes), alpha
-    if comparisons == "control":
-        return [group_sizes[0], min(group_sizes[1:])], alpha / (k - 1)
-    a, b = sorted(group_sizes)[:2]
-    return [a, b], alpha / (k * (k - 1) // 2)
+    m = k - 1 if comparisons == "control" else k * (k - 1) // 2
+    return [group_sizes[0], min(group_sizes[1:])], alpha / m
 
 
 def abtest_power(
@@ -167,8 +170,8 @@ def abtest_power(
     -------
      power : float
         The power of the test. With three or more groups, the power of the
-        least-powered comparison (the control against the smallest variant,
-        or the two smallest groups for ``"all"``) at the Bonferroni level
+        least-powered comparison with an effect (the control against the
+        smallest variant, whichever comparisons are made) at the Bonferroni level
         ``alpha / m`` for ``m`` comparisons. Holm's correction rejects at
         least as often, so this is a lower bound on its power.
     """
