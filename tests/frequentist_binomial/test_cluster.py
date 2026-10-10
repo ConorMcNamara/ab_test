@@ -548,3 +548,47 @@ class TestSummaryArguments:
         crt = _make_crt()
         crt.analyze(lift="absolute")
         assert crt.summary(lift="relative")["lift_type"] == "relative"
+
+
+class TestDegenerateClusters:
+    @staticmethod
+    def test_identical_clusters_do_not_give_certainty():
+        # Zero spread within both arms used to give SE 0, p = 0 and a zero-width interval.
+        crt = ClusterRandomizedTrial("x", "c")
+        crt.add("c1", 10, 100, group="Control").add("c2", 10, 100, group="Control")
+        crt.add("t1", 11, 100, group="Treatment").add("t2", 11, 100, group="Treatment")
+        crt.analyze(lift="absolute")
+        r = crt.summary()
+        assert r["p_value"] > 0.5
+        assert r["ci_lower"] < 0 < r["ci_upper"]
+
+    @staticmethod
+    def test_ordinary_spread_is_unchanged():
+        # The binomial variance is used only when an arm's sample variance is exactly 0.
+        rates = {"Control": [8, 12], "Treatment": [10, 13]}
+        crt = ClusterRandomizedTrial("x", "c")
+        for group, successes in rates.items():
+            for i, s in enumerate(successes):
+                crt.add(f"{group}{i}", s, 100, group=group)
+        crt.analyze(lift="absolute")
+        p_c, p_t = np.array([0.08, 0.12]), np.array([0.10, 0.13])
+        expected = ss.ttest_ind(p_t, p_c, equal_var=False).pvalue
+        assert crt.summary()["p_value"] == pytest.approx(expected)
+
+    @staticmethod
+    def test_estimate_icc_with_single_trial_clusters():
+        assert np.isnan(estimate_icc([0, 1, 1, 0], [1, 1, 1, 1]))
+
+    @staticmethod
+    def test_single_trial_clusters_analyze():
+        # estimate_icc used to raise ZeroDivisionError, losing the Welch result.
+        crt = ClusterRandomizedTrial("x", "c")
+        for i, s in enumerate([0, 1, 1, 0, 1]):
+            crt.add(f"c{i}", s, 1, group="Control")
+        for i, s in enumerate([1, 1, 0, 1, 1]):
+            crt.add(f"t{i}", s, 1, group="Treatment")
+        output = crt.analyze(lift="absolute")
+        assert "ICC: n/a | DEFF: 1.00" in output
+        expected = ss.ttest_ind([1, 1, 0, 1, 1], [0, 1, 1, 0, 1], equal_var=False).pvalue
+        assert crt.summary()["p_value"] == pytest.approx(expected)
+        assert crt.deff == 1.0

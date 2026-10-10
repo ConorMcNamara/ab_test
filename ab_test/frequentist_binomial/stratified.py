@@ -65,6 +65,11 @@ def cmh_test(
     """
     successes_arr = np.asarray(successes, dtype=float)
     trials_arr = np.asarray(trials, dtype=float)
+    # A stratum with fewer than two trials adds nothing to the statistic (a = E[a])
+    # and has a 0/0 variance, which would make the whole statistic NaN.
+    informative = trials_arr.sum(axis=1) >= 2
+    successes_arr = successes_arr[informative]
+    trials_arr = trials_arr[informative]
 
     a = successes_arr[:, 0]
     c = successes_arr[:, 1]
@@ -76,6 +81,9 @@ def cmh_test(
 
     e_a = n1 * m1 / t
     var_a = n1 * n2 * m1 * m0 / (t**2 * (t - 1))
+    if np.sum(var_a) == 0:
+        # No stratum has both arms and both outcomes, so there is no evidence of a difference.
+        return 0.0, 1.0
 
     chi2 = float((np.sum(a - e_a)) ** 2 / np.sum(var_a))
     pvalue = float(ss.chi2.sf(chi2, df=1))
@@ -522,7 +530,7 @@ class StratifiedContingencyTable:
             return convert_to_tabulate_str(v, "absolute")
 
         success_rate: list[str | float] = [fmt_rate(p_control), fmt_rate(p_treatment)]
-        str_pvalue = f"{p_value:.4f}" if p_value >= alpha else f"{p_value:.4f}*"
+        str_pvalue = f"{p_value:.4f}*" if p_value < alpha else f"{p_value:.4f}"
         row_labels = (
             ["Metric", "Metric Name"]
             + self._cell_names

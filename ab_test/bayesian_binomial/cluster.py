@@ -99,7 +99,19 @@ def estimate_beta_binomial_params(
     Returns
     -------
     tuple[float, float]
-        ``(a, b)`` parameters of the fitted Beta distribution.
+        ``(a, b)`` parameters of the fitted Beta distribution. ``(nan, nan)``
+        when every cluster has a single trial: the between- and
+        within-cluster variance cannot then be told apart.
+
+    Notes
+    -----
+    With cluster rates ``p_k`` of mean ``mu`` and between-cluster variance
+    ``sigma^2``, the observed proportions have variance
+    ``v = sigma^2 (1 - h) + mu (1 - mu) h``, with ``h = mean(1 / n_k)``. So
+    ``sigma^2 = (v - mu (1 - mu) h) / (1 - h)``, and the concentration is
+    ``mu (1 - mu) / sigma^2 - 1``. The estimate is descriptive:
+    :class:`BayesianClusterRandomizedTrial` infers the ICC from a
+    hierarchical posterior instead.
 
     Raises
     ------
@@ -123,12 +135,16 @@ def estimate_beta_binomial_params(
     mu = np.clip(mu, 1e-9, 1 - 1e-9)
 
     v = float(np.var(proportions, ddof=1))
+    h = float(np.mean(1.0 / trials))
+    if h >= 1.0:
+        return math.nan, math.nan
 
-    sampling_var = float(mu * (1 - mu) * np.mean(1.0 / trials))
-    between_var = max(v - sampling_var, 1e-12)
+    # Dividing by 1 - h corrects the bias toward zero (the ICC came out as rho * (1 - h)).
+    between_var = max((v - mu * (1 - mu) * h) / (1 - h), 1e-12)
 
     concentration = mu * (1 - mu) / between_var - 1
-    concentration = max(concentration, 2.0)
+    # Keep a and b positive; the old floor of 2 capped the ICC at 1 / 3.
+    concentration = max(concentration, 1e-6)
 
     a = mu * concentration
     b = (1 - mu) * concentration

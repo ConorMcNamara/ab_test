@@ -29,6 +29,9 @@ __all__ = [
 # default bisection tolerance.
 _LIMIT_PROBE = 1e-6
 
+# Relative-lift searches give up past a 100x lift.
+_RELATIVE_CEILING = 100.0
+
 
 def _search_lower_bound(
     test: Any,
@@ -84,7 +87,7 @@ def _search_upper_bound(
         return unbounded
     # Absolute lift is bounded above by 1; relative lift has no bound, so the
     # search gives up past a 100x lift.
-    ceiling = 100.0 if lift == "relative" else 1.0 - _LIMIT_PROBE
+    ceiling = _RELATIVE_CEILING if lift == "relative" else 1.0 - _LIMIT_PROBE
     if ub_lb >= ceiling:
         return unbounded
     eps = 0.01
@@ -108,6 +111,28 @@ def _search_upper_bound(
         else:
             ub_ub = ub
     return 0.5 * (ub_lb + ub_ub)
+
+
+def _accepted_relative_start(test: Any, trials: Any, successes: Any, alpha: float) -> tuple[float, float]:
+    """Bracket for the lower-bound search when the observed relative lift is infinite.
+
+    With no control successes there is no point estimate to start from, so
+    find a lift the test accepts: try 1.0, then double. Returns
+    ``(rejected, accepted)`` for :func:`_search_lower_bound` to bisect, or
+    ``(1 - 0.01, 1.0)`` to search downwards when 1.0 is accepted. If even
+    the 100x ceiling is rejected, the true bound lies above it, and the
+    ceiling is returned as a conservative lower bound.
+    """
+    accepted = 1.0
+    if test(trials, successes, null_lift=accepted, lift="relative") >= alpha:
+        return accepted - 0.01, accepted
+    rejected = accepted
+    while rejected < _RELATIVE_CEILING:
+        accepted = min(2 * rejected, _RELATIVE_CEILING)
+        if test(trials, successes, null_lift=accepted, lift="relative") >= alpha:
+            return rejected, accepted
+        rejected = accepted
+    return _RELATIVE_CEILING, _RELATIVE_CEILING
 
 
 def _mover_ratio_interval(
@@ -199,7 +224,12 @@ def confidence_interval(
     ub: float
     if method == "binary_search":
         if test.__name__ in ["score_test", "likelihood_ratio_test", "z_test", "wald_test", "msprt_test"]:
-            if lift == "relative":
+            if lift == "relative" and not upper_bound_exists:
+                # No control successes: the observed lift is infinite, so find
+                # an accepted lift to search down from (the upper bound is infinite).
+                lb_lb, lb_ub = _accepted_relative_start(test, trials, successes, alpha)
+                ub_lb = ub_ub = math.inf
+            elif lift == "relative":
                 lb_lb = ote - 0.01
                 lb_ub = ote
                 ub_lb = ote

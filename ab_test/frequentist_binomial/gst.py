@@ -29,6 +29,7 @@ from ab_test._display import apply_dark_mode
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
+    _score_contrast,
     required_sample_size,
     score_power,
 )
@@ -450,18 +451,20 @@ class GroupSequentialDesign:
         float
             Overall power (probability of rejection at any look).
         """
-        n_arr = np.asarray(n, dtype=float)
         p_null_arr = np.asarray(p_null, dtype=float)
-        p_alt_arr = np.asarray(p_alt, dtype=float)
-
-        d = (p_alt_arr[1] - p_alt_arr[0]) - (p_null_arr[1] - p_null_arr[0])
-        sigma2 = p_null_arr[0] * (1 - p_null_arr[0]) / n_arr[0] + p_null_arr[1] * (1 - p_null_arr[1]) / n_arr[1]
-
-        if sigma2 <= 1e-24:
+        if np.any(p_null_arr * (1 - p_null_arr) <= 1e-12):
             return 0.0
+        mean, sd_null, sd_alt = _score_contrast(n, p_null, p_alt)
+        if sd_null == 0.0:
+            # No effect: the rejection probability is the type-I error.
+            return float(np.sum(_compute_exit_probabilities(self._boundaries, self._info_fractions, 0.0, self._sided)))
 
-        theta = float(d / math.sqrt(sigma2))
-        exit_probs = _compute_exit_probabilities(self._boundaries, self._info_fractions, theta, self._sided)
+        # The statistic is standardised by its null SD but spreads with its SD
+        # under H1, so on the H1 scale the drift is mean / sd_alt and the
+        # boundaries widen by sd_null / sd_alt.
+        theta = mean / sd_alt
+        boundaries = self._boundaries * (sd_null / sd_alt)
+        exit_probs = _compute_exit_probabilities(boundaries, self._info_fractions, theta, self._sided)
         # Clamp floating-point roundoff (e.g. 1 + 1e-15) when power saturates.
         return min(1.0, float(np.sum(exit_probs)))
 

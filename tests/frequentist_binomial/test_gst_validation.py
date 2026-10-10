@@ -122,3 +122,27 @@ class TestGstPowerValidation:
         assert abs(mc_power - analytical_power) < 0.015, (
             f"MC power {mc_power:.4f} differs from analytical {analytical_power:.4f}"
         )
+
+
+@pytest.mark.slow
+class TestGstPowerUnequalAllocation:
+    @staticmethod
+    @pytest.mark.parametrize("group_sizes", [[3000, 1000], [1000, 3000]])
+    def test_power_matches_simulation(group_sizes):
+        # The statistic is standardised by the null variance but spreads with the
+        # alternative's; ignoring that gave 0.750 and 0.702 here.
+        rng = np.random.default_rng(2)
+        looks, n_sims = 3, 20_000
+        design = GroupSequentialDesign(looks, alpha=0.05)
+        per_look = [group_sizes[0] // looks, group_sizes[1] // looks]
+        rejections = 0
+        for _ in range(n_sims):
+            s_a = np.cumsum(rng.binomial(per_look[0], 0.10, looks))
+            s_b = np.cumsum(rng.binomial(per_look[1], 0.13, looks))
+            rejections += any(
+                design.test([per_look[0] * k, per_look[1] * k], [int(s_a[k - 1]), int(s_b[k - 1])], k)
+                for k in range(1, looks + 1)
+            )
+        analytical = abtest_power(group_sizes, 0.10, 0.30, power=gst_adjusted_power(looks, sided="two"))
+        # Monte Carlo SE is about 0.0034; the null-only variance was 0.014 off for [3000, 1000].
+        assert analytical == pytest.approx(rejections / n_sims, abs=0.01)

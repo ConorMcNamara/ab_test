@@ -102,10 +102,23 @@ def _hc2_standard_errors(
     -------
     se : ndarray of shape (p,)
         HC2 standard errors for each coefficient.
+
+    Raises
+    ------
+    ValueError
+        If an observation has leverage 1, where HC2 divides by zero.
     """
     residuals = y - X @ beta
     Q, R = np.linalg.qr(X)
     h = np.sum(Q**2, axis=1)
+    # Leverage 1 (to rounding) makes the HC2 weight 1 / (1 - h) infinite: the
+    # SE comes out NaN, or astronomically large when h is 1 - 1e-16.
+    if np.any(h > 1 - 1e-8):
+        raise ValueError(
+            "HC2 standard errors are undefined: an observation has leverage 1, so the regression fits it "
+            "exactly. This happens when a covariate (such as a one-hot category) is nonzero for a single "
+            "unit, or with method='lin', for a single unit within one arm. Drop or merge such covariates."
+        )
     adjusted_resid_sq = residuals**2 / (1 - h)
     XtX_inv = np.linalg.inv(R.T @ R)
     meat = X.T @ (X * adjusted_resid_sq[:, np.newaxis])
@@ -480,6 +493,8 @@ class CupacExperiment:
         se_unadj = float(np.sqrt(np.var(y[is_control], ddof=1) / n_ctrl + np.var(y[is_treatment], ddof=1) / n_treat))
 
         # Inference
+        if not np.isfinite(se_tau):
+            raise ValueError(f"The standard error of the treatment effect is not finite ({se_tau}).")
         z_stat = tau_hat / se_tau if se_tau > 0 else 0.0
         if df is not None:
             p_value = float(2 * ss.t.sf(abs(z_stat), df=df))
