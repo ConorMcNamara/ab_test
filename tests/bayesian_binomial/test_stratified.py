@@ -280,7 +280,9 @@ class TestBayesianStratifiedExpectedLoss:
         return st
 
     @pytest.mark.parametrize(
-        "lift, unit", [("absolute", "%"), ("relative", "%"), ("incremental", None), ("roas", "$"), ("revenue", "$")]
+        # ROAS is conversions per dollar, a unitless number, not dollars.
+        "lift, unit",
+        [("absolute", "%"), ("relative", "%"), ("incremental", None), ("roas", None), ("revenue", "$")],
     )
     def test_loss_formatted_in_lift_units(self, lift, unit):
         # The loss was always formatted as a percent: about 8.9 incremental conversions showed as "889.4%".

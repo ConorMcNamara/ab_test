@@ -455,6 +455,12 @@ class BayesianStratifiedContingencyTable:
         het = self.heterogeneity_results
         if np.isnan(het["tau_mean"]):
             return_string += "\nBetween-stratum tau: n/a"
+        elif lift == "relative":
+            # Relative-lift tau is on the log risk-ratio scale, so it is not a percent.
+            return_string += (
+                f"\nBetween-stratum tau (log RR): {het['tau_mean']:.4f} "
+                f"({het['tau_ci_lower']:.4f}, {het['tau_ci_upper']:.4f})"
+            )
         else:
             return_string += (
                 f"\nBetween-stratum tau: {fmt(het['tau_mean'])} "
@@ -705,7 +711,7 @@ class BayesianStratifiedContingencyTable:
             "absolute": ",.1%",
             "relative": ",.1%",
             "incremental": ",",
-            "roas": "$,",
+            "roas": ".3~g",
             "revenue": "$,",
             "cpa": "$,",
         }

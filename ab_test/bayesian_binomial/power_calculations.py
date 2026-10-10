@@ -704,7 +704,9 @@ def bayes_minimum_detectable_lift(
     -------
     float
         Smallest lift estimated to reach ``target_power``, in the units
-        specified by ``lift``.
+        specified by ``lift``. For ``"cpa"`` this is the largest detectable
+        CPA: a smaller effect means fewer incremental conversions, so a
+        higher cost per acquisition.
 
     Raises
     ------
@@ -813,7 +815,9 @@ def bayes_minimum_detectable_lift_loss(
     -------
     float
         Smallest lift estimated to reach ``target_power``, in the units
-        specified by ``lift``.
+        specified by ``lift``. For ``"cpa"`` this is the largest detectable
+        CPA: a smaller effect means fewer incremental conversions, so a
+        higher cost per acquisition.
 
     Raises
     ------
@@ -1131,7 +1135,8 @@ def plot_bayes_sensitivity_curve(
         "incremental": "Minimum detectable incremental lift",
         "roas": "Minimum detectable ROAS",
         "revenue": "Minimum detectable revenue",
-        "cpa": "Minimum detectable CPA",
+        # A smaller detectable effect means fewer incremental conversions, so a higher CPA.
+        "cpa": "Maximum detectable CPA",
     }
     y_label = _lift_labels.get(lift, f"Minimum detectable {lift} lift")
     y_format = ",.0%" if lift in ("relative", "absolute") else ",."

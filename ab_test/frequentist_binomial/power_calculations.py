@@ -199,7 +199,9 @@ def minimum_detectable_lift(
     -------
      mdl : float
         Minimum detectable lift/drop associated with test, in the units
-        specified by ``lift``.
+        specified by ``lift``. For ``"cpa"`` this is the largest detectable
+        CPA: a smaller effect means fewer incremental conversions, so a
+        higher cost per acquisition.
 
     Notes
     -----
@@ -632,7 +634,8 @@ def plot_sensitivity_curve(
         "incremental": "Minimum detectable incremental lift",
         "roas": "Minimum detectable ROAS",
         "revenue": "Minimum detectable revenue",
-        "cpa": "Minimum detectable CPA",
+        # A smaller detectable effect means fewer incremental conversions, so a higher CPA.
+        "cpa": "Maximum detectable CPA",
     }
     y_label = _lift_labels.get(lift, f"Minimum detectable {lift} lift")
     y_format = ",.0%" if lift in ("relative", "absolute") else ",."
