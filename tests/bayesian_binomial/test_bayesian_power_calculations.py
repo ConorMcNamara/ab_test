@@ -526,6 +526,60 @@ class TestScaledLiftMinSampleSizeRejects:
             )
 
 
+class TestSeeding:
+    """Reproducible power and searches, common random numbers, and bounded memory."""
+
+    COMMON = {"alphas": [1.0, 1.0], "betas": [1.0, 1.0], "baseline": 0.10, "alt_lift": 0.20}
+    FAST = {"n_samples": 2_000, "mc_samples": 200}
+
+    @pytest.mark.parametrize("power_fn", [bayes_power_lift, bayes_power_loss])
+    def test_power_reproducible_for_a_seed(self, power_fn):
+        first = power_fn([3000, 3000], **self.COMMON, **self.FAST, seed=11)
+        assert power_fn([3000, 3000], **self.COMMON, **self.FAST, seed=11) == first
+        assert power_fn([3000, 3000], **self.COMMON, **self.FAST, seed=12) != first
+
+    def test_generator_seed(self):
+        first = bayes_power_lift([3000, 3000], **self.COMMON, **self.FAST, seed=np.random.default_rng(3))
+        assert bayes_power_lift([3000, 3000], **self.COMMON, **self.FAST, seed=np.random.default_rng(3)) == first
+
+    def test_does_not_depend_on_n_jobs(self):
+        kwargs = {**self.COMMON, "n_samples": 6_000, "mc_samples": 500, "seed": 4}
+        assert bayes_power_lift([3000, 3000], **kwargs) == bayes_power_lift([3000, 3000], **kwargs, n_jobs=2)
+
+    @pytest.mark.parametrize("search_fn", [bayes_minimum_sample_size, bayes_minimum_sample_size_loss])
+    def test_sample_size_search_reproducible(self, search_fn):
+        # Reviewer: four identical unseeded calls returned 2947, 2949, 2900 and 3009.
+        results = {search_fn(**self.COMMON, **self.FAST, seed=7) for _ in range(4)}
+        assert len(results) == 1
+
+    @pytest.mark.parametrize("search_fn", [bayes_minimum_detectable_lift, bayes_minimum_detectable_lift_loss])
+    def test_lift_search_reproducible(self, search_fn):
+        kwargs = {"group_size": 3000, "alphas": [1.0, 1.0], "betas": [1.0, 1.0], "baseline": 0.10, "tol": 0.001}
+        assert search_fn(**kwargs, **self.FAST, seed=7) == search_fn(**kwargs, **self.FAST, seed=7)
+
+    @pytest.mark.parametrize("seed", [7, 8])
+    def test_power_is_smooth_in_n(self, seed):
+        # Every n replays the same random numbers, so power changes smoothly with n. Re-drawing
+        # them for each n made it fall by up to 0.008-0.0096 between sizes 10 apart; now at most
+        # about 0.001. It is not exactly monotone: the posterior draws share a stream but not
+        # an exact coupling.
+        sizes = range(2950, 3101, 10)
+        powers = [bayes_power_lift([n, n], **self.COMMON, n_samples=5_000, mc_samples=300, seed=seed) for n in sizes]
+        assert min(np.diff(powers)) > -0.003
+
+    def test_memory_stays_bounded(self):
+        import tracemalloc
+
+        # Holding every posterior draw took about 85 MB here (and about 1.6 GB at the defaults).
+        tracemalloc.start()
+        try:
+            bayes_power_lift([3000, 3000], **self.COMMON, n_samples=5_000, mc_samples=1_000, seed=1)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        assert peak < 40e6
+
+
 if __name__ == "__main__":
     pytest.main()
 

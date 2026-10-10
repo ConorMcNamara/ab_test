@@ -13,15 +13,18 @@ from ab_test.frequentist_binomial.power_calculations import (
 )
 from ab_test.frequentist_binomial.stats_tests import score_test
 from ab_test.frequentist_binomial.utils import simple_hypothesis_from_composite
+from ab_test.corrections import bonferroni, holm
 
 
 class TestScorePower:
     @staticmethod
     def test_power():
         trials = [1000, 1000]
-        p_null = [0.1, 0.1]
+        # The restricted MLE under the null, as abtest_power passes it: the pooled rate.
+        p_null = [0.09615384615384615, 0.09615384615384615]
         p_alt = [0.07692307692307691, 0.11538461538461536]
-        expected = 0.8323679253014326
+        # A 1,000,000-run simulation of the score test gives 0.8330.
+        expected = 0.8313166489510471
 
         actual = score_power(trials, p_null, p_alt, alpha=0.05)
         assert actual == pytest.approx(expected)
@@ -32,7 +35,7 @@ class TestScorePower:
         alt_lift = 0.50
         group_sizes = [1000, 1000]
         # 10% -> 15%; a 400,000-run simulation of the score test gives 0.9248.
-        expected = 0.922291
+        expected = 0.9228823416294457
 
         actual = abtest_power(group_sizes, baseline, alt_lift, lift="relative")
         assert actual == pytest.approx(expected)
@@ -43,7 +46,7 @@ class TestScorePower:
         alt_lift = 0.04
         group_sizes = [1000, 1000]
         # 10% -> 14%; a 400,000-run simulation of the score test gives 0.7891.
-        expected = 0.785951
+        expected = 0.7863890614550128
 
         actual = abtest_power(group_sizes, baseline, alt_lift, lift="absolute")
         assert actual == pytest.approx(expected)
@@ -52,7 +55,8 @@ class TestScorePower:
     def test_minimum_detectable_lift_relative_lift():
         baseline = 0.10
         group_sizes = [1000, 1000]
-        expected = 0.40771027
+        # A 1,000,000-run simulation of the score test has power 0.8017 here.
+        expected = 0.40745163
 
         actual = minimum_detectable_lift(group_sizes, baseline, lift="relative")
         assert actual == pytest.approx(expected)
@@ -62,8 +66,8 @@ class TestScorePower:
     def test_minimum_detectable_lift_absolute_lift():
         baseline = 0.10
         group_sizes = [1000, 1000]
-        # The same effect as the relative MDL above: 0.04077 = 0.4077 * 10%.
-        expected = 0.04077145
+        # The same effect as the relative MDL above: 0.040745 = 0.40745 * 10%.
+        expected = 0.04074511
 
         actual = minimum_detectable_lift(group_sizes, baseline, lift="absolute")
         assert actual == pytest.approx(expected)
@@ -73,7 +77,7 @@ class TestScorePower:
     def test_minimum_detectable_drop():
         baseline = 0.10
         group_sizes = [1000, 1000]
-        expected = 0.34516525
+        expected = 0.34497910
 
         actual = minimum_detectable_lift(group_sizes, baseline, drop=True)
         assert actual == pytest.approx(expected)
@@ -133,7 +137,7 @@ class TestScorePower:
     @staticmethod
     @pytest.mark.parametrize(
         "baseline,alt_lift,lift,expected",
-        [(0.3, 1.0, "relative", 88), (0.2, 0.3, "absolute", 80)],
+        [(0.3, 1.0, "relative", 84), (0.2, 0.3, "absolute", 78)],
     )
     def test_required_sample_size_small_answer(baseline, alt_lift, lift, expected):
         # Answers under 100 used to hang: the integer midpoint got stuck at ss_lower.
@@ -195,6 +199,58 @@ class TestPowerConsistency:
     def test_large_relative_lift_is_well_powered():
         # 10% -> 40% with 50 per arm: the score test rejects ~95% of the time; this used to report 0.40.
         assert abtest_power([50, 50], 0.1, 3.0, lift="relative") > 0.9
+
+
+class TestScorePowerUnequalAllocation:
+    """Power must use the alternative's variance, not just the null's (Fleiss, Tytun & Ury, 1980)."""
+
+    @staticmethod
+    def _fleiss(n, p_a, p_b, alpha=0.05):
+        p_bar = (n[0] * p_a + n[1] * p_b) / (n[0] + n[1])
+        sd_null = np.sqrt(p_bar * (1 - p_bar) * (1 / n[0] + 1 / n[1]))
+        sd_alt = np.sqrt(p_a * (1 - p_a) / n[0] + p_b * (1 - p_b) / n[1])
+        z = ss.norm.isf(alpha / 2)
+        diff = abs(p_b - p_a)
+        return ss.norm.cdf((diff - z * sd_null) / sd_alt) + ss.norm.cdf((-diff - z * sd_null) / sd_alt)
+
+    @pytest.mark.parametrize(
+        "group_sizes, simulated",
+        [
+            # Reviewer's example; 200,000-run simulations of the score test. The null-only
+            # variance gave 0.889 and 0.692.
+            ([1900, 100], 0.830),
+            ([100, 1900], 0.751),
+        ],
+    )
+    def test_matches_fleiss_and_simulation(self, group_sizes, simulated):
+        actual = abtest_power(group_sizes, 0.10, 1.0)
+        assert actual == pytest.approx(self._fleiss(group_sizes, 0.10, 0.20), abs=1e-9)
+        assert actual == pytest.approx(simulated, abs=0.01)
+
+    def test_matches_fleiss_across_allocations(self):
+        for n_a in (100, 400, 1000, 1600, 1900):
+            group_sizes = [n_a, 2000 - n_a]
+            expected = self._fleiss(group_sizes, 0.10, 0.13)
+            assert abtest_power(group_sizes, 0.10, 0.30) == pytest.approx(expected, abs=1e-9)
+
+    @staticmethod
+    @pytest.mark.parametrize("proportions", [[0.8, 0.2], [0.2, 0.8]])
+    def test_required_sample_size_with_unequal_allocation(proportions):
+        # [0.8, 0.2] used to be too small (power 0.783) and [0.2, 0.8] too large (0.818).
+        n = required_sample_size(0.10, 0.30, group_proportions=proportions)
+        group_sizes = [int(n * g) for g in proportions]
+        rng = np.random.default_rng(0)
+        a = rng.binomial(group_sizes[0], 0.10, 100_000)
+        b = rng.binomial(group_sizes[1], 0.13, 100_000)
+        pooled = (a + b) / n
+        z = (b / group_sizes[1] - a / group_sizes[0]) / np.sqrt(
+            pooled * (1 - pooled) * (1 / group_sizes[0] + 1 / group_sizes[1])
+        )
+        assert np.mean(np.abs(z) > ss.norm.isf(0.025)) == pytest.approx(0.80, abs=0.01)
+
+    @staticmethod
+    def test_no_effect_gives_alpha():
+        assert score_power([500, 1500], [0.1, 0.1], [0.1, 0.1], alpha=0.05) == pytest.approx(0.05)
 
 
 class TestScaledLiftPower:
@@ -299,6 +355,84 @@ class TestScaledLiftSampleSize:
     def test_scaled_lift_raises(self, lift_type):
         with pytest.raises(ValueError, match="not supported for required_sample_size"):
             required_sample_size(0.10, 0.04, lift=lift_type)
+
+
+class TestMultiArmPower:
+    @staticmethod
+    def test_equal_groups_match_two_groups_at_bonferroni_alpha():
+        assert abtest_power([1000] * 3, 0.10, 0.30) == pytest.approx(abtest_power([1000] * 2, 0.10, 0.30, alpha=0.025))
+        assert abtest_power([1000] * 4, 0.10, 0.30) == pytest.approx(
+            abtest_power([1000] * 2, 0.10, 0.30, alpha=0.05 / 3)
+        )
+
+    @staticmethod
+    def test_control_against_smallest_variant():
+        # Used to take the two smallest groups (800 and 1500), which are both variants.
+        expected = abtest_power([2000, 800], 0.10, 0.30, alpha=0.025)
+        assert abtest_power([2000, 800, 1500], 0.10, 0.30) == pytest.approx(expected)
+
+    @staticmethod
+    def test_all_pairs():
+        # Under the alternative B and C share a rate, so the 800 vs 1500 comparison has no effect.
+        # The weakest comparison with an effect is still the control against the smallest variant.
+        expected = abtest_power([2000, 800], 0.10, 0.30, alpha=0.05 / 3)
+        actual = abtest_power([2000, 800, 1500], 0.10, 0.30, comparisons="all")
+        assert actual == pytest.approx(expected)
+        assert actual == pytest.approx(0.466, abs=0.001)
+        assert actual < abtest_power([2000, 800, 1500], 0.10, 0.30)
+
+    @staticmethod
+    def test_two_groups_ignore_comparisons():
+        assert abtest_power([1000, 1200], 0.10, 0.30, comparisons="all") == abtest_power([1000, 1200], 0.10, 0.30)
+
+    @staticmethod
+    def test_invalid_comparisons():
+        with pytest.raises(ValueError, match="comparisons must be"):
+            abtest_power([1000] * 3, 0.10, 0.30, comparisons="pairs")
+
+    @staticmethod
+    def test_required_sample_size_reaches_target_power():
+        for k in (3, 4):
+            proportions = [1 / k] * k
+            n = required_sample_size(0.10, 0.30, group_proportions=proportions)
+            assert abtest_power([int(n * g) for g in proportions], 0.10, 0.30) >= 0.8
+            # The search stops within a 1% relative tolerance.
+            assert abtest_power([int(0.99 * n * g) for g in proportions], 0.10, 0.30) < 0.8
+
+    @staticmethod
+    def test_required_sample_size_grows_with_arms():
+        sizes = [required_sample_size(0.10, 0.30, group_proportions=[1 / k] * k) for k in (2, 3, 4)]
+        per_arm = [n / k for n, k in zip(sizes, (2, 3, 4))]
+        assert per_arm == sorted(per_arm)
+
+    @staticmethod
+    def test_minimum_detectable_lift_uses_the_weakest_comparison():
+        expected = minimum_detectable_lift([1000, 1000], 0.10, alpha=0.025)
+        assert minimum_detectable_lift([1000, 1000, 1000], 0.10) == pytest.approx(expected)
+
+    @staticmethod
+    def test_scaled_mdl_is_expressed_over_the_compared_groups():
+        # Review finding: the scale was max over every group (5000), giving 203.9.
+        expected = minimum_detectable_lift([1000, 1000], 0.10, lift="incremental", alpha=0.025)
+        actual = minimum_detectable_lift([1000, 1000, 5000], 0.10, lift="incremental")
+        assert actual == pytest.approx(expected)
+        assert actual < 50
+
+    @staticmethod
+    def test_power_is_a_lower_bound_under_holm():
+        # B and C both +30% relative; the predicted power for C vs A uses alpha / 2.
+        rng = np.random.default_rng(4)
+        n, reps = 1000, 4000
+        rejected_bonferroni = rejected_holm = 0
+        for _ in range(reps):
+            a, b, c = rng.binomial(n, 0.10), rng.binomial(n, 0.13), rng.binomial(n, 0.13)
+            pvalues = [score_test([n, n], [a, b]), score_test([n, n], [a, c])]
+            rejected_bonferroni += bonferroni(pvalues)[1] < 0.05
+            rejected_holm += holm(pvalues)[1] < 0.05
+        predicted = abtest_power([n] * 3, 0.10, 0.30)
+        # Monte Carlo SE is about 0.008.
+        assert rejected_bonferroni / reps == pytest.approx(predicted, abs=0.025)
+        assert rejected_holm / reps >= predicted
 
 
 if __name__ == "__main__":

@@ -38,7 +38,12 @@ Power analysis uses simulation-based assurance:
         icc=0.02,
         baseline=0.10,
         alt_lift=0.20,
+        seed=42,
     )
+
+Pass ``seed`` to any power, search or plot function for reproducible results. Each
+cluster has its own random stream, so a search over the number of clusters compares
+nested designs and returns the same answer every time.
 
 Three or More Groups
 --------------------

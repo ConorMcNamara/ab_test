@@ -779,6 +779,39 @@ class TestPlotPdfAndPooledIcc:
         assert crt.pooled_icc == pytest.approx(np.mean(list(crt.icc.values())))
 
 
+class TestClusterSeeding:
+    COMMON = {"icc": 0.02, "cluster_size": 50, "baseline": 0.10, "alt_lift": 0.30}
+    FAST = {"n_samples": 500, "mc_samples": 200}
+
+    @staticmethod
+    @pytest.mark.parametrize("power_fn", [cluster_bayes_power_lift, cluster_bayes_power_loss])
+    def test_power_reproducible_for_a_seed(power_fn):
+        kwargs = {**TestClusterSeeding.COMMON, **TestClusterSeeding.FAST}
+        first = power_fn(20, **kwargs, seed=3)
+        assert power_fn(20, **kwargs, seed=3) == first
+
+    @staticmethod
+    def test_minimum_clusters_reproducible():
+        kwargs = {**TestClusterSeeding.COMMON, **TestClusterSeeding.FAST}
+        results = {cluster_bayes_minimum_clusters(**kwargs, seed=5) for _ in range(3)}
+        assert len(results) == 1
+
+    @staticmethod
+    def test_power_is_smooth_in_clusters():
+        # Each cluster has its own random stream, so larger designs extend smaller ones.
+        kwargs = {**TestClusterSeeding.COMMON, "n_samples": 1_000, "mc_samples": 300}
+        powers = [cluster_bayes_power_lift(k, **kwargs, seed=5) for k in range(10, 41, 6)]
+        assert powers == sorted(powers)
+
+    @staticmethod
+    def test_plot_reproducible(monkeypatch):
+        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: None)
+        kwargs = {**TestClusterSeeding.COMMON, **TestClusterSeeding.FAST, "cluster_counts": [10, 20, 30]}
+        first = plot_cluster_bayes_power_curve(**kwargs, seed=2)
+        second = plot_cluster_bayes_power_curve(**kwargs, seed=2)
+        assert list(first.data[0].y) == list(second.data[0].y)
+
+
 class TestMomentEstimateBias:
     @staticmethod
     @pytest.mark.parametrize("true_icc", [0.1, 0.5, 0.8])

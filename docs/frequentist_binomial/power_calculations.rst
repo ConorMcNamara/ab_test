@@ -9,14 +9,33 @@ power.
 
 All functions use binary search and delegate to
 :func:`~ab_test.frequentist_binomial.power_calculations.score_power` by
-default, which computes power via the noncentrality parameter of a noncentral
-chi-squared distribution. A custom power function can be passed to any of
+default. It uses the score test's contrast with its variance under the null
+(which sets the critical value) and under the alternative (which sets its
+spread), as in Fleiss, Tytun & Ury (1980) and Farrington & Manning (1990), so
+it stays accurate with unequal group sizes. A custom power function can be passed to any of
 these functions -- for example,
 :func:`~ab_test.frequentist_binomial.cupac.cupac_adjusted_power` to account
 for CUPAC variance reduction.
 
-Both relative and absolute lift are supported. When more than two groups are
-provided, the two smallest groups are used, as they govern overall power.
+Both relative and absolute lift are supported.
+
+With three or more groups, the functions plan for the comparisons
+:meth:`~ab_test.frequentist_binomial.contingency.ContingencyTable.analyze`
+will make. ``comparisons="control"`` (the default) compares each variant with
+the first group; ``comparisons="all"`` compares every pair. For ``m``
+comparisons, power is computed for the least-powered comparison with an effect
+at the Bonferroni level ``alpha / m``. Under the stated alternative every
+variant has the same rate, so that is the control against the smallest
+variant in both cases; ``"all"`` only makes ``m`` larger. ``analyze()``
+adjusts with Holm by default, which rejects at least as often, and Bonferroni
+is slightly conservative against Dunnett's procedure (about 2-3% more sample
+for 3-4 groups), so the power is a slight underestimate and the sample size a
+slight overestimate.
+
+.. code-block:: python
+
+   # Total sample size for an A/B/C test, split evenly, comparing B and C to A
+   required_sample_size(0.10, 0.30, group_proportions=[1 / 3] * 3)
 
 Usage
 -----

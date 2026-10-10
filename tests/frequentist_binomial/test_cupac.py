@@ -1239,3 +1239,38 @@ class TestMlrateClusterFolds:
         df = _make_cluster_feature_data(seed=0, n_clusters=4)
         with pytest.raises(ValueError, match="at least n_folds=5 clusters, got 4"):
             self._experiment(df).fit()
+
+
+class TestHC2Leverage:
+    @staticmethod
+    def _data(seed):
+        rng = np.random.default_rng(seed)
+        n = 400
+        group = np.array(["control"] * n + ["treatment"] * n)
+        rare = np.zeros(2 * n)
+        rare[rng.integers(2 * n)] = 1
+        return pd.DataFrame(
+            {
+                "group": group,
+                "converted": rng.binomial(1, 0.1 + 0.03 * (group == "treatment")),
+                "pre_visits": rng.normal(size=2 * n),
+                "rare": rare,
+            }
+        )
+
+    @staticmethod
+    @pytest.mark.parametrize("seed", [0, 1, 2])
+    def test_single_unit_covariate_raises(seed):
+        # A one-hot column that is 1 for one unit has leverage 1 in Lin's regression. The SE was
+        # NaN (seed 0) or about 1e3-1e6 (seeds 1, 2), and either way the p-value came out as 1.0.
+        data = TestHC2Leverage._data(seed)
+        exp = CupacExperiment(data, "converted", "group", ["pre_visits", "rare"], "control", "treatment", method="lin")
+        with pytest.raises(ValueError, match="leverage 1"):
+            exp.fit()
+
+    @staticmethod
+    def test_ordinary_covariates_unaffected():
+        exp = CupacExperiment(
+            TestHC2Leverage._data(0), "converted", "group", ["pre_visits"], "control", "treatment", method="lin"
+        ).fit()
+        assert np.isfinite(exp.p_value) and exp.p_value < 1.0
