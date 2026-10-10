@@ -78,6 +78,11 @@ def tost_test(
     Equivalence is concluded when **both** reject, which is equivalent to
     checking that ``max(p_lower, p_upper) <= alpha``.
 
+    With ``lift="relative"`` and ``delta >= 1``, the lower null hypothesis
+    needs a treatment rate of 0 or less, so ``p_lower`` is 0 (or 1 at
+    ``delta = 1`` when the treatment group has no successes) and the decision
+    rests on the upper test.
+
     One-sided p-values are derived from the two-sided p-values returned by
     the underlying test.  Because the score and likelihood-ratio tests
     produce chi-squared statistics (1 df), the two-sided p-value is halved
@@ -101,6 +106,12 @@ def tost_test(
     p_two_upper = float(ab_test(trials, successes, null_lift=delta, lift=lift, method=method_lower))
 
     p_lower = p_two_lower / 2 if d_hat > -delta else 1 - p_two_lower / 2
+    if lift.casefold() == "relative" and delta >= 1:
+        # A relative lift below -1 needs a negative treatment rate, so the lower
+        # null is impossible; at delta = 1 it is a treatment rate of exactly 0,
+        # which any treatment success refutes. The constrained MLE behind
+        # p_two_lower is invalid here (it gave p_lower = 0.5).
+        p_lower = 1.0 if delta == 1 and successes[1] == 0 else 0.0
     p_upper = p_two_upper / 2 if d_hat < delta else 1 - p_two_upper / 2
 
     p_value = max(p_lower, p_upper)

@@ -100,6 +100,32 @@ def score_power(
     return float(ss.norm.sf((z_crit * sd_null - mean) / sd_alt) + ss.norm.cdf((-z_crit * sd_null - mean) / sd_alt))
 
 
+def _weakest_comparison(
+    group_sizes: np.ndarray[Any, Any] | list[Any], alpha: float, comparisons: str
+) -> tuple[list[Any], float]:
+    """Group sizes of the least-powered comparison, and the per-comparison alpha.
+
+    With three or more groups, ``analyze()`` compares each variant against the
+    first group (``"control"``) or every pair (``"all"``) and adjusts for the
+    ``m`` comparisons. Power is computed for the least-powered comparison
+    that has an effect at the Bonferroni level ``alpha / m``; Holm (the
+    ``analyze()`` default) rejects at least as often, so this power is a lower
+    bound. Under the stated alternative every variant has the same rate, so a
+    comparison between two variants has no effect; with ``"all"`` the weakest
+    comparison is therefore still the control against the smallest variant,
+    just at a smaller ``alpha / m``. Bonferroni is slightly conservative
+    against Dunnett's procedure (about 2-3% more sample for 3-4 groups).
+    """
+    comparisons = comparisons.casefold()
+    if comparisons not in ("control", "all"):
+        raise ValueError(f"comparisons must be 'control' or 'all', got {comparisons!r}")
+    k = len(group_sizes)
+    if k <= 2:
+        return list(group_sizes), alpha
+    m = k - 1 if comparisons == "control" else k * (k - 1) // 2
+    return [group_sizes[0], min(group_sizes[1:])], alpha / m
+
+
 def abtest_power(
     group_sizes: np.ndarray[Any, Any] | list[Any],
     baseline: float,
@@ -110,6 +136,8 @@ def abtest_power(
     lift: str = "relative",
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    comparisons: str = "control",
 ) -> float:
     """Power associated with an A/B Test.
 
@@ -133,16 +161,21 @@ def abtest_power(
         Campaign spend. Required for "roas" and "cpa" lifts.
      msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+     comparisons : {"control", "all"}, optional
+        With three or more groups, which comparisons ``analyze()`` will make:
+        each variant against the first group (the default), or every pair.
+        Ignored with two groups.
 
     Returns
     -------
      power : float
-        The power of the test.
+        The power of the test. With three or more groups, the power of the
+        least-powered comparison with an effect (the control against the
+        smallest variant, whichever comparisons are made) at the Bonferroni level
+        ``alpha / m`` for ``m`` comparisons. Holm's correction rejects at
+        least as often, so this is a lower bound on its power.
     """
-    if len(group_sizes) > 2:
-        # Get two smallest groups -- this governs the overall power
-        a, b, *_ = np.partition(group_sizes, 1)
-        group_sizes = [a, b]
+    group_sizes, alpha = _weakest_comparison(group_sizes, alpha, comparisons)
 
     if lift in _SCALED_LIFTS:
         scale = max(group_sizes)
@@ -167,6 +200,8 @@ def minimum_detectable_lift(
     lift: str = "relative",
     spend: float | None = None,
     msrp: float | None = None,
+    *,
+    comparisons: str = "control",
 ) -> float:
     """Minimum detectable lift.
 
@@ -206,8 +241,11 @@ def minimum_detectable_lift(
     Notes
     -----
     Uses binary search to compute the smallest lift/drop with adequate
-    power.
+    power. With three or more groups, it is the minimum detectable lift of
+    the least-powered comparison at ``alpha / m`` (see :func:`abtest_power`),
+    and scaled lifts are expressed over that comparison's groups.
     """
+    group_sizes, alpha = _weakest_comparison(group_sizes, alpha, comparisons)
     if lift in _SCALED_LIFTS:
         scale = max(group_sizes)
         internal_lift = "absolute"
@@ -302,6 +340,8 @@ def required_sample_size(
     null_lift: float = 0.0,
     power: Callable[..., float] = score_power,
     lift: str = "relative",
+    *,
+    comparisons: str = "control",
 ) -> int:
     """Calculate the required sample size.
 
@@ -328,6 +368,11 @@ def required_sample_size(
         How to interpret the null/alternative lift. Defaults to "relative".
         Scaled lift types (incremental, roas, revenue, cpa) are not
         supported because the effect size depends on the unknown sample size.
+     comparisons : {"control", "all"}, optional
+        With three or more groups (``group_proportions`` of length three or
+        more), which comparisons ``analyze()`` will make; the sample size
+        gives the least-powered comparison the target power at ``alpha / m``
+        (see :func:`abtest_power`). Ignored with two groups.
 
     Returns
     -------
@@ -369,6 +414,7 @@ def required_sample_size(
         null_lift=null_lift,
         power=power,
         lift=lift,
+        comparisons=comparisons,
     )
 
     while pwr < 1 - beta:
@@ -382,6 +428,7 @@ def required_sample_size(
             null_lift=null_lift,
             power=power,
             lift=lift,
+            comparisons=comparisons,
         )
 
     # Stop at a gap of one: below 100 the relative tolerance is under 1, and the
@@ -396,6 +443,7 @@ def required_sample_size(
             null_lift=null_lift,
             power=power,
             lift=lift,
+            comparisons=comparisons,
         )
         if pwr < 1 - beta:
             # Inadequate power, increase ss
@@ -420,6 +468,7 @@ def plot_power_curve(
     spend: float | None = None,
     msrp: float | None = None,
     *,
+    comparisons: str = "control",
     dark_mode: bool = False,
 ) -> go.Figure:
     """Plot statistical power as a function of total sample size.
@@ -450,6 +499,9 @@ def plot_power_curve(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+    comparisons : {"control", "all"}, optional
+        With three or more groups in ``group_proportions``, which comparisons
+        ``analyze()`` will make (see :func:`abtest_power`).
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
@@ -474,6 +526,7 @@ def plot_power_curve(
             null_lift=null_lift,
             power=power,
             lift=lift,
+            comparisons=comparisons,
         )
         max_ss = int(target_ss * 2)
         sample_sizes = np.linspace(max(20, max_ss // n_points), max_ss, n_points, dtype=int)
@@ -487,6 +540,7 @@ def plot_power_curve(
             null_lift=null_lift,
             power=power,
             lift=lift,
+            comparisons=comparisons,
             spend=spend,
             msrp=msrp,
         )
@@ -538,6 +592,7 @@ def plot_sensitivity_curve(
     spend: float | None = None,
     msrp: float | None = None,
     *,
+    comparisons: str = "control",
     dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of total sample size.
@@ -568,6 +623,9 @@ def plot_sensitivity_curve(
         Campaign spend. Required for "roas" and "cpa" lifts.
     msrp : float, optional
         Revenue per unit. Required for "revenue" lift.
+    comparisons : {"control", "all"}, optional
+        With three or more groups in ``group_proportions``, which comparisons
+        ``analyze()`` will make (see :func:`abtest_power`).
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
@@ -597,6 +655,7 @@ def plot_sensitivity_curve(
             null_lift=null_lift,
             power=power,
             lift=lift,
+            comparisons=comparisons,
         )
         min_ss = max(20, target_ss // 10)
         max_ss = target_ss * 5
@@ -611,6 +670,7 @@ def plot_sensitivity_curve(
             null_lift=null_lift,
             power=power,
             lift=lift,
+            comparisons=comparisons,
             spend=spend,
             msrp=msrp,
         )

@@ -1,5 +1,6 @@
 """Our wrapper for analyzing experiment results."""
 
+import itertools
 from typing import Any, ClassVar, Literal, cast
 
 import numpy as np
@@ -120,6 +121,7 @@ class BayesianContingencyTable(BaseContingencyTable):
         n_samples: int = 100_000,
         low_threshold: float | None = None,
         high_threshold: float | None = None,
+        comparisons: str = "control",
     ) -> str:
         """Analyze the experiment and return a formatted summary table.
 
@@ -153,6 +155,10 @@ class BayesianContingencyTable(BaseContingencyTable):
         high_threshold : float, optional
             Upper bound of the ROPE, in the units of ``lift``. Defaults as
             described for ``low_threshold``.
+        comparisons : {"control", "all"}, optional
+            With three or more variants, which pairs to compare: each variant
+            against the first cell added (the control, the default), or every
+            pair. Ignored with two variants.
 
         Returns
         -------
@@ -171,9 +177,27 @@ class BayesianContingencyTable(BaseContingencyTable):
             If ``lift="revenue"`` and ``msrp`` was not set on the table.
         ValueError
             If ``lift`` is not one of the supported types.
+
+        Notes
+        -----
+        With three or more variants, the summary reports each variant's
+        probability of being best and its expected loss, E[best rate - its
+        rate], both from one joint posterior draw across all variants, and the
+        expected loss is a difference in rates whatever ``lift`` is. Each
+        pairwise comparison is reported as a two-variant analysis would be,
+        with its ROPE scaled to that comparison's reference variant.
+        ``incremental_results`` then holds ``"prob_best"``,
+        ``"expected_loss"`` (both keyed by variant) and a ``"comparisons"``
+        dict keyed by labels such as ``"B vs A"``. Posterior probabilities
+        need no multiple-comparison correction, but stopping as soon as one
+        crosses a threshold still inflates false wins.
         """
-        if len(self.names) != 2:
-            raise ValueError(f"analyze requires exactly 2 variants, got {len(self.names)}")
+        k = len(self.names)
+        if k < 2:
+            raise ValueError(f"analyze requires at least 2 variants, got {k}")
+        comparisons = comparisons.casefold()
+        if comparisons not in ("control", "all"):
+            raise ValueError(f"comparisons must be 'control' or 'all', got {comparisons!r}")
         self._analyze_settings = {
             "cred_int_method": cred_int_method,
             "confidence_level": confidence_level,
@@ -181,18 +205,59 @@ class BayesianContingencyTable(BaseContingencyTable):
             "n_samples": n_samples,
             "low_threshold": low_threshold,
             "high_threshold": high_threshold,
+            "comparisons": comparisons,
         }
         lift = lift.casefold()
+        settings: dict[str, Any] = {
+            "lift": lift,
+            "cred_int_method": cred_int_method,
+            "confidence_level": confidence_level,
+            "is_sample": is_sample,
+            "n_samples": n_samples,
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+        }
+        if k == 2:
+            return self._analyze_pair(settings)
+        return self._analyze_many(comparisons, settings)
+
+    def _compare(self, i: int, j: int, settings: dict[str, Any]) -> dict[str, Any]:
+        """Compare cell ``j`` against cell ``i``: posterior lift, interval, P(j > i), loss and ROPE."""
+        lift = settings["lift"]
+        cred_int_method = settings["cred_int_method"]
+        confidence_level = settings["confidence_level"]
+        is_sample = settings["is_sample"]
+        n_samples = settings["n_samples"]
+        low_threshold = settings["low_threshold"]
+        high_threshold = settings["high_threshold"]
+        successes = [self.successes[i], self.successes[j]]
+        trials = [self.trials[i], self.trials[j]]
+        alphas = [self.alphas[i], self.alphas[j]]
+        betas = [self.betas[i], self.betas[j]]
+        # Scaled lifts are expressed over the table's largest arm for every comparison, so
+        # identical rate differences give identical lifts with three or more arms. The
+        # posterior samples are scaled by the pair's larger arm, which is linear in the
+        # scale (inverse for CPA), so thresholds and loss are converted between the two.
+        # With two arms both scales are the same.
+        n_scale = max(self.trials)
+        to_pair = 1.0
+        if lift in ["incremental", "roas", "revenue"]:
+            to_pair = max(trials) / n_scale
+        elif lift == "cpa":
+            to_pair = n_scale / max(trials)
         if low_threshold is None or high_threshold is None:
-            default_rope = self._default_rope_half_width(lift)
+            control_rate = posterior_mean(successes[0], trials[0], alphas[0], betas[0])
+            default_rope = _default_rope_half_width(control_rate, lift, n_scale, self.spend, self.msrp)
             low_threshold = -default_rope if low_threshold is None else low_threshold
             high_threshold = default_rope if high_threshold is None else high_threshold
+        if to_pair != 1.0:
+            low_threshold, high_threshold = low_threshold * to_pair, high_threshold * to_pair
         if lift in ["relative", "absolute"]:
             results = calculate_metrics(
-                self.successes,
-                self.trials,
-                self.alphas,
-                self.betas,
+                successes,
+                trials,
+                alphas,
+                betas,
                 n_samples,
                 lift,
                 low_threshold,
@@ -200,10 +265,10 @@ class BayesianContingencyTable(BaseContingencyTable):
                 loss_in_lift_units=True,
             )
             lb, ub = credible_interval(
-                self.successes,
-                self.trials,
-                self.alphas,
-                self.betas,
+                successes,
+                trials,
+                alphas,
+                betas,
                 confidence_level,
                 cast(Literal["relative", "absolute"], lift),
                 is_sample,
@@ -212,10 +277,10 @@ class BayesianContingencyTable(BaseContingencyTable):
             )
         elif lift in ["incremental", "roas", "revenue", "cpa"]:
             results = calculate_metrics(
-                self.successes,
-                self.trials,
-                self.alphas,
-                self.betas,
+                successes,
+                trials,
+                alphas,
+                betas,
                 n_samples,
                 lift,
                 low_threshold,
@@ -225,10 +290,10 @@ class BayesianContingencyTable(BaseContingencyTable):
                 loss_in_lift_units=True,
             )
             lb, ub = credible_interval(
-                self.successes,
-                self.trials,
-                self.alphas,
-                self.betas,
+                successes,
+                trials,
+                alphas,
+                betas,
                 confidence_level,
                 "absolute",
                 is_sample,
@@ -237,12 +302,10 @@ class BayesianContingencyTable(BaseContingencyTable):
             )
         else:
             raise ValueError(f"No support for lift type {lift}")
-        pa = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
-        pb = posterior_mean(self.successes[1], self.trials[1], self.alphas[1], self.betas[1])
-        success_rate: list[int | float]
+        pa = posterior_mean(successes[0], trials[0], alphas[0], betas[0])
+        pb = posterior_mean(successes[1], trials[1], alphas[1], betas[1])
         if lift in ["incremental", "roas", "revenue", "cpa"]:
             # Scale unrounded values; rounding each bound separately biased the interval.
-            n_scale = max(self.trials)
             pa, pb, lb, ub = pa * n_scale, pb * n_scale, lb * n_scale, ub * n_scale
             test_lift = scale_metric(pb - pa, lift, self.spend, self.msrp)
             pa = scale_metric(pa, lift, self.spend, self.msrp)
@@ -254,21 +317,39 @@ class BayesianContingencyTable(BaseContingencyTable):
             test_lift = pb - pa
         else:
             raise ValueError(f"lift type {lift} not supported")
-        success_rate = [pa, pb]
+        return {
+            "lift": test_lift,
+            "rates": [pa, pb],
+            "prob_greater": results["Proportion of samples where B exceeds A"],
+            "ci_lower": lb,
+            "ci_upper": ub,
+            # The loss is in the lift's units on the pair's scale (a rate difference for CPA).
+            "expected_loss": results["Expected loss"] / to_pair if lift != "cpa" else results["Expected loss"],
+            "prob_rope": results["Probability of ROPE"],
+            "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
+            "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
+        }
+
+    def _analyze_pair(self, settings: dict[str, Any]) -> str:
+        """Two variants: one comparison, reported as before multi-arm support."""
+        lift = settings["lift"]
+        confidence_level = settings["confidence_level"]
+        result = self._compare(0, 1, settings)
+        test_lift, success_rate, lb, ub = result["lift"], result["rates"], result["ci_lower"], result["ci_upper"]
         self.incremental_results = {
             "lift_type": lift,
             "lift": test_lift,
             f"{self.names[0]}": success_rate[0],
             f"{self.names[1]}": success_rate[1],
-            "prob_b_greater_a": results["Proportion of samples where B exceeds A"],
+            "prob_b_greater_a": result["prob_greater"],
             "ci_lower": lb,
             "ci_upper": ub,
-            "expected_loss": results["Expected loss"],
-            "prob_rope": results["Probability of ROPE"],
-            "prob_lift_exceeds_threshold": results[f"Probability {lift} exceeds {high_threshold}"],
-            "prob_lift_below_threshold": results[f"Probability {lift} is below {low_threshold}"],
+            "expected_loss": result["expected_loss"],
+            "prob_rope": result["prob_rope"],
+            "prob_lift_exceeds_threshold": result["prob_lift_exceeds_threshold"],
+            "prob_lift_below_threshold": result["prob_lift_below_threshold"],
         }
-        prob_b_exceeds_a = results["Proportion of samples where B exceeds A"]
+        prob_b_exceeds_a = result["prob_greater"]
         str_pvalue = (
             f"{convert_to_tabulate_str(prob_b_exceeds_a, 'relative')}*"
             if prob_b_exceeds_a >= confidence_level
@@ -293,12 +374,8 @@ class BayesianContingencyTable(BaseContingencyTable):
             + convert_to_tabulate_str(success_rate, lift)
             + convert_to_tabulate_str([test_lift, lb, ub], lift)
             + [str_pvalue]
-            + [convert_to_tabulate_str(results["Expected loss"], "absolute" if lift == "cpa" else lift)]
-            + [
-                "n/a"
-                if np.isnan(results["Probability of ROPE"])
-                else convert_to_tabulate_str(results["Probability of ROPE"], "relative")
-            ]
+            + [convert_to_tabulate_str(result["expected_loss"], "absolute" if lift == "cpa" else lift)]
+            + ["n/a" if np.isnan(result["prob_rope"]) else convert_to_tabulate_str(result["prob_rope"], "relative")]
         )
         return_string = tabulate_summary(row_labels, values)
         return_string += (
@@ -308,10 +385,97 @@ class BayesianContingencyTable(BaseContingencyTable):
         return_string += "\n*** Region of Practical Equivalence"
         return return_string
 
-    def _default_rope_half_width(self, lift: str) -> float:
-        """Half-width of the default ROPE: 10% of the control's posterior rate, in ``lift`` units."""
-        control_rate = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
-        return _default_rope_half_width(control_rate, lift, max(self.trials), self.spend, self.msrp)
+    def _analyze_many(self, comparisons: str, settings: dict[str, Any]) -> str:
+        """Three or more variants: P(each arm is best), expected loss per arm, and pairwise comparisons."""
+        lift = settings["lift"]
+        confidence_level = settings["confidence_level"]
+        k = len(self.names)
+        pairs = [(0, j) for j in range(1, k)] if comparisons == "control" else list(itertools.combinations(range(k), 2))
+        compared: dict[str, dict[str, Any]] = {}
+        for i, j in pairs:
+            result = self._compare(i, j, settings)
+            compared[f"{self.names[j]} vs {self.names[i]}"] = {
+                "lift": result["lift"],
+                f"{self.names[i]}": result["rates"][0],
+                f"{self.names[j]}": result["rates"][1],
+                "prob_greater": result["prob_greater"],
+                "ci_lower": result["ci_lower"],
+                "ci_upper": result["ci_upper"],
+                "expected_loss": result["expected_loss"],
+                "prob_rope": result["prob_rope"],
+            }
+        # One joint draw across every arm for "which arm is best" and its loss.
+        draws = np.column_stack(
+            [
+                sample_beta(s, n, a, b, settings["n_samples"])
+                for s, n, a, b in zip(self.successes, self.trials, self.alphas, self.betas)
+            ]
+        )
+        best = np.argmax(draws, axis=1)
+        prob_best = {name: float(np.mean(best == index)) for index, name in enumerate(self.names)}
+        regret = draws.max(axis=1, keepdims=True) - draws
+        expected_loss = {name: float(regret[:, index].mean()) for index, name in enumerate(self.names)}
+        means = [posterior_mean(s, n, a, b) for s, n, a, b in zip(self.successes, self.trials, self.alphas, self.betas)]
+        self.incremental_results = {
+            "lift_type": lift,
+            "comparison_type": comparisons,
+            "prob_best": prob_best,
+            "expected_loss": expected_loss,
+            "comparisons": compared,
+        }
+
+        arm_rows = []
+        for name, mean in zip(self.names, means):
+            star = "*" if prob_best[name] >= confidence_level else ""
+            arm_rows.append(
+                [
+                    name,
+                    convert_to_tabulate_str(mean, "absolute"),
+                    f"{convert_to_tabulate_str(prob_best[name], 'relative')}{star}",
+                    convert_to_tabulate_str(expected_loss[name], "absolute"),
+                ]
+            )
+        return_string = tabulate_summary(["Metric", "Metric Name"], [lift, self.metric_name])
+        return_string += "\n" + tabulate(
+            arm_rows,
+            headers=["Variant", "Posterior Mean", "Prob Is Best *", "Expected Loss (rate difference) ****"],
+            tablefmt="grid",
+        )
+        comparison_rows = []
+        for label, comparison in compared.items():
+            star = "*" if comparison["prob_greater"] >= confidence_level else ""
+            comparison_rows.append(
+                [label]
+                + convert_to_tabulate_str([comparison["lift"], comparison["ci_lower"], comparison["ci_upper"]], lift)
+                + [
+                    f"{convert_to_tabulate_str(comparison['prob_greater'], 'relative')}{star}",
+                    convert_to_tabulate_str(comparison["expected_loss"], "absolute" if lift == "cpa" else lift),
+                    "n/a"
+                    if np.isnan(comparison["prob_rope"])
+                    else convert_to_tabulate_str(comparison["prob_rope"], "relative"),
+                ]
+            )
+        return_string += "\n" + tabulate(
+            comparison_rows,
+            headers=[
+                "Comparison",
+                "Lift",
+                "Cred. Int. Lower **",
+                "Cred. Int. Upper **",
+                "Prob Greater *",
+                "Expected Loss" + (" (rate difference)" if lift == "cpa" else ""),
+                "Probability Lift is in ROPE ***",
+            ],
+            tablefmt="grid",
+        )
+        level = format_percent(confidence_level)
+        return_string += f"\n* next to a probability means it exceeds our confidence level at {level}% level"
+        return_string += f"\n** {level}% Credible Interval"
+        return_string += "\n*** Region of Practical Equivalence"
+        return_string += "\n**** E[best rate - this variant's rate], from one joint posterior draw across all variants"
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
+            return_string += f"\nScaled lifts are per {max(self.trials):,} units (the largest arm) for every comparison"
+        return return_string
 
     def analyze_individually(
         self,

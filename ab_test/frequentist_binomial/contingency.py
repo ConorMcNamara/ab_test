@@ -294,7 +294,7 @@ class ContingencyTable(BaseContingencyTable):
             if lift == "cpa" and null_lift == 0:
                 test_null = 0.0
             else:
-                test_null = to_absolute(null_lift, lift, max(trials), self.spend, self.msrp)
+                test_null = to_absolute(null_lift, lift, max(self.trials), self.spend, self.msrp)
         else:
             ci_lift = lift
             test_null = null_lift
@@ -320,18 +320,14 @@ class ContingencyTable(BaseContingencyTable):
             )
         success_rate: list[int | float]
         if lift in ["incremental", "roas", "revenue", "cpa"]:
-            pa: int | float
-            pb: int | float
-            if trials[0] > trials[1]:
-                pb = math.ceil(successes[1] * (trials[0] / trials[1]))
-                pa = math.ceil(successes[0])
-                lb = _scale_bound(lb, trials[0])
-                ub = _scale_bound(ub, trials[0])
-            else:
-                pa = math.ceil(successes[0] * (trials[1] / trials[0]))
-                pb = math.ceil(successes[1])
-                lb = _scale_bound(lb, trials[1])
-                ub = _scale_bound(ub, trials[1])
+            # Every comparison is expressed over the table's largest arm, so with three or
+            # more arms identical rate differences give identical scaled lifts. With two
+            # arms that is the larger of the pair, as before.
+            n_scale = max(self.trials)
+            pa: int | float = math.ceil(successes[0] * (n_scale / trials[0]))
+            pb: int | float = math.ceil(successes[1] * (n_scale / trials[1]))
+            lb = _scale_bound(lb, n_scale)
+            ub = _scale_bound(ub, n_scale)
             test_lift = scale_metric(pb - pa, lift, self.spend, self.msrp)
             pa = scale_metric(pa, lift, self.spend, self.msrp)
             pb = scale_metric(pb, lift, self.spend, self.msrp)
@@ -436,6 +432,8 @@ class ContingencyTable(BaseContingencyTable):
             f" (Bonferroni: each at {round(100 * (1 - ci_alpha), 2):g}%)"
         )
         return_string += f"\n*** {omnibus_name} test that all {k} variants share one rate, df={df}"
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
+            return_string += f"\nScaled lifts are per {max(self.trials):,} units (the largest arm) for every comparison"
         return return_string
 
     def analyze_individually(
