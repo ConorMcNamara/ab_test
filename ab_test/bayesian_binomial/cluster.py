@@ -1058,7 +1058,10 @@ def cluster_bayes_power_loss(
     mc_samples : int, default=1_000
         Posterior draws per simulated experiment.
     loss_threshold : float, default=0.001
-        Maximum acceptable expected loss.
+        Maximum acceptable expected loss, E[max(C - T, 0)], in rate units (a
+        difference in rates). Unlike the expected loss that
+        :meth:`BayesianClusterRandomizedTrial.analyze` reports, which is in
+        the lift's units, it does not change with the lift type.
 
     Returns
     -------
@@ -1211,7 +1214,10 @@ def cluster_bayes_minimum_clusters_loss(
     target_power : float, default=0.80
         Minimum acceptable power.
     loss_threshold : float, default=0.001
-        Maximum acceptable expected loss.
+        Maximum acceptable expected loss, E[max(C - T, 0)], in rate units (a
+        difference in rates). Unlike the expected loss that
+        :meth:`BayesianClusterRandomizedTrial.analyze` reports, which is in
+        the lift's units, it does not change with the lift type.
     n_samples : int, default=10_000
         Simulated experiments per evaluation.
     mc_samples : int, default=500
@@ -1353,7 +1359,10 @@ def cluster_bayes_minimum_detectable_lift_loss(
     target_power : float, default=0.80
         Minimum acceptable power.
     loss_threshold : float, default=0.001
-        Maximum acceptable expected loss.
+        Maximum acceptable expected loss, E[max(C - T, 0)], in rate units (a
+        difference in rates). Unlike the expected loss that
+        :meth:`BayesianClusterRandomizedTrial.analyze` reports, which is in
+        the lift's units, it does not change with the lift type.
     n_samples : int, default=10_000
         Simulated experiments per evaluation.
     mc_samples : int, default=500
@@ -1438,7 +1447,8 @@ def plot_cluster_bayes_power_curve(
     confidence_level : float, default=0.95
         P(T > C) threshold when ``decision="lift"``.
     loss_threshold : float, default=0.001
-        Expected loss threshold when ``decision="loss"``.
+        Expected loss threshold when ``decision="loss"``, in rate units (a
+        difference in rates), not the lift units of ``analyze()``.
     n_samples : int, default=10_000
         Simulated experiments per evaluation.
     mc_samples : int, default=500
@@ -1548,7 +1558,8 @@ def plot_cluster_bayes_sensitivity_curve(
     confidence_level : float, default=0.95
         P(T > C) threshold when ``decision="lift"``.
     loss_threshold : float, default=0.001
-        Expected loss threshold when ``decision="loss"``.
+        Expected loss threshold when ``decision="loss"``, in rate units (a
+        difference in rates), not the lift units of ``analyze()``.
     n_samples : int, default=10_000
         Simulated experiments per evaluation.
     mc_samples : int, default=500

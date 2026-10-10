@@ -12,6 +12,15 @@ methods are supported:
   cross-fitting so that flexible models (random forests, gradient boosting,
   etc.) produce valid inference without overfitting bias.
 
+The covariates also enter the final regression, so with ``"cupac"`` and
+``"lin"`` the linear prediction is absorbed: the estimates equal plain
+regression adjustment (ANCOVA, and Lin's 2013 interacted regression). The
+MLRATE here is cross-fitted CUPED followed by that regression adjustment, in
+the spirit of Guo et al. (2021) rather than their exact estimator, which
+regresses the outcome on ``[1, T, g(X) - mean(g), T * (g(X) - mean(g))]``.
+It is consistent, and in simulation its estimates and standard errors are
+nearly identical to theirs.
+
 All methods use HC2 robust standard errors by default.  When a
 ``cluster_col`` is provided, CR2 (Bell-McCaffrey) cluster-robust standard
 errors are used instead, with Satterthwaite degrees of freedom for
@@ -545,7 +554,11 @@ class CupacExperiment:
 
     @property
     def variance_reduction(self) -> float:
-        """R-squared: fraction of variance explained by the covariates."""
+        """R-squared: fraction of outcome variance removed by the adjustment.
+
+        It approximates ``1 - (se / se_unadjusted) ** 2``, the reduction in
+        the variance of the treatment-effect estimate.
+        """
         return self._check_fitted()["r_squared"]
 
     def confidence_interval(self, alpha: float = 0.05) -> tuple[float, float]:

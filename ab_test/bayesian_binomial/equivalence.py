@@ -27,8 +27,9 @@ def bayes_equivalence_test(
 
     Draws posterior samples for each variant's success rate and computes
     the probability that the lift between B and A falls within
-    ``[-delta, delta]``.  If that probability exceeds ``threshold``, the
-    variants are declared practically equivalent.
+    ``[-delta, delta]``.  If that probability is at least ``threshold``, the
+    variants are declared practically equivalent. This is a posterior-mass
+    rule, not Kruschke's HDI+ROPE rule.
 
     Parameters
     ----------
