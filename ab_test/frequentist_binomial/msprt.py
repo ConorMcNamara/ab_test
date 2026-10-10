@@ -1,9 +1,11 @@
 """Mixture Sequential Probability Ratio Test (mSPRT) for always-valid inference.
 
-Provides always-valid p-values and confidence sequences that maintain
-type-I error control regardless of how many times results are checked.
-The test uses a Gaussian mixture on the effect size, following the
-framework of Johari et al. (2017).
+Provides p-values and confidence intervals that maintain type-I error
+control regardless of how many times results are checked. The test uses a
+Gaussian mixture on the effect size, following the framework of Johari et
+al. (2017). The p-value is computed at the current look; Johari et al.'s
+always-valid p-value is its running minimum over looks (see
+:func:`msprt_test`).
 """
 
 from __future__ import annotations
@@ -63,8 +65,8 @@ def msprt_test(
 ) -> float | bool:
     """Mixture Sequential Probability Ratio Test for a 2x2 contingency table.
 
-    Computes an always-valid p-value that controls type-I error no matter
-    how many times the data are examined. The test mixes over a Gaussian
+    Computes a sequentially valid p-value at the current look, which
+    controls type-I error no matter how many times the data are examined. The test mixes over a Gaussian
     prior ``N(0, tau^2)`` on the effect size.
 
     Parameters
@@ -79,8 +81,8 @@ def msprt_test(
         Whether to interpret the null lift relative to the baseline success
         rate, or in absolute terms.
     crit : float, optional
-        Critical value for the likelihood ratio. If omitted, an always-valid
-        p-value is returned. If passed, a boolean is returned indicating
+        Critical value for the likelihood ratio. If omitted, the p-value at
+        the current look is returned. If passed, a boolean is returned indicating
         whether the likelihood ratio exceeds the critical value. Use
         :func:`msprt_critical_value` to obtain the threshold for a given
         alpha.
@@ -106,9 +108,14 @@ def msprt_test(
 
     Notes
     -----
-    The always-valid p-value is ``min(1, 1 / Lambda_n)`` where ``Lambda_n``
-    is the likelihood ratio. It is safe to compute at any sample size and
-    reject whenever it drops below alpha, without inflating the type-I error.
+    The p-value is ``min(1, 1 / Lambda_n)`` where ``Lambda_n`` is the
+    likelihood ratio at the current look. It is safe to compute at any
+    sample size and reject whenever it drops below alpha, without inflating
+    the type-I error. Johari et al.'s always-valid p-value is the running
+    minimum of this over all looks so far; the per-look value is never
+    below it, so it is valid but conservative, and it can rise between
+    looks. Take the minimum over looks yourself to get the always-valid
+    p-value.
 
     References
     ----------
@@ -168,7 +175,12 @@ def plot_msprt_over_time(
     tau: float | None = None,
     dark_mode: bool = False,
 ) -> go.Figure:
-    """Plot the mSPRT point estimate and confidence sequence over time.
+    """Plot the mSPRT point estimate and confidence intervals over time.
+
+    Each checkpoint's interval inverts the mSPRT at that look. They are not
+    intersected across looks, so an interval can widen between checkpoints;
+    the running intersection of the intervals is Johari et al.'s confidence
+    sequence.
 
     Parameters
     ----------

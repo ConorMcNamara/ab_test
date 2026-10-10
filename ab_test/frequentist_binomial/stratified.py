@@ -755,7 +755,7 @@ class StratifiedContingencyTable:
             "absolute": ",.1%",
             "relative": ",.1%",
             "incremental": ",",
-            "roas": "$,",
+            "roas": ".3~g",
             "revenue": "$,",
             "cpa": "$,",
         }

@@ -210,8 +210,10 @@ def cluster_adjusted_power(
         A power function with the same signature as ``power_func`` but with
         effective sample sizes deflated by the design effect, and with the
         two-sided critical value taken from a t distribution with
-        ``n_clusters - 2`` degrees of freedom to match the cluster-summary
-        t-test used by :class:`ClusterRandomizedTrial`.
+        ``n_clusters - 2`` degrees of freedom. That approximates the
+        Welch-Satterthwaite degrees of freedom of the cluster-summary t-test
+        used by :class:`ClusterRandomizedTrial`, and equals them for balanced
+        arms with equal variances.
     """
     deff = design_effect(avg_cluster_size, icc)
 

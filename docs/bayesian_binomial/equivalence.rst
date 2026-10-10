@@ -5,7 +5,9 @@ The Bayesian counterpart to TOST. Instead of two one-sided tests, it draws
 from the Beta posterior of each variant and computes the posterior probability
 that the lift falls inside a Region of Practical Equivalence (ROPE),
 ``[-delta, delta]``. The variants are declared equivalent when that
-probability is at least ``threshold`` (0.95 by default).
+probability is at least ``threshold`` (0.95 by default). This is a
+posterior-mass rule, not Kruschke's HDI+ROPE rule (which requires the whole
+highest-density interval to lie inside the ROPE).
 
 The result also reports the probabilities that the lift lies above or below
 the ROPE, which tell you which way the evidence points when equivalence is
