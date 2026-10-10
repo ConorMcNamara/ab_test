@@ -561,3 +561,30 @@ class TestBreslowDayZeroCells:
     def test_fewer_than_two_informative_strata_is_nan():
         stat, pvalue = breslow_day_test(np.array([[0, 0], [20, 30]]), np.array([[50, 50], [100, 100]]))
         assert np.isnan(stat) and np.isnan(pvalue)
+
+
+class TestCmhUninformativeStrata:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "extra_successes, extra_trials",
+        [([0, 1], [0, 1]), ([1, 0], [1, 0]), ([0, 0], [0, 0])],
+    )
+    def test_strata_with_fewer_than_two_trials_are_ignored(extra_successes, extra_trials):
+        # Used to give a 0/0 variance and a NaN statistic.
+        expected = cmh_test([[10, 12]], [[100, 100]])
+        actual = cmh_test([[10, 12], extra_successes], [[100, 100], extra_trials])
+        assert actual == pytest.approx(expected)
+
+    @staticmethod
+    def test_no_informative_strata():
+        assert cmh_test([[3, 0], [0, 5]], [[3, 0], [0, 5]]) == (0.0, 1.0)
+
+    @staticmethod
+    def test_table_does_not_mark_nan_significant():
+        table = StratifiedContingencyTable("x", "c")
+        table.add("Control", 100, 1000, stratum="S1").add("Treatment", 130, 1000, stratum="S1")
+        table.add("Control", 0, 0, stratum="S2").add("Treatment", 1, 1, stratum="S2")
+        output = table.analyze()
+        assert "nan" not in output.casefold()
+        expected_p = cmh_test([[100, 130]], [[1000, 1000]])[1]
+        assert f"{expected_p:.4f}*" in output

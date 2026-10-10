@@ -122,3 +122,29 @@ def test_z_method_with_relative_lift_raises_clear_error():
     # The docstring listed "z" without noting it only supports absolute lift; it failed deep inside z_test.
     with pytest.raises(ValueError, match="supports only lift='absolute'"):
         tost_test([1000, 1000], [100, 102], delta=0.1, lift="relative", method="z")
+
+
+class TestRelativeMarginOfOneOrMore:
+    @staticmethod
+    @pytest.mark.parametrize("method", ["score", "likelihood"])
+    @pytest.mark.parametrize("delta", [1.0, 1.5])
+    def test_lower_null_is_impossible(method, delta):
+        # The lower null (lift <= -delta <= -1) needs a treatment rate of 0 or less.
+        # The constrained MLE was invalid here: p_lower came out as 0.5 (score) or NaN.
+        result = tost_test([1000, 1000], [100, 110], delta=delta, lift="relative", method=method)
+        assert result["p_lower"] == 0.0
+        assert result["p_value"] == result["p_upper"]
+        assert result["equivalent"]
+
+    @staticmethod
+    def test_continuous_with_margin_just_below_one():
+        below = tost_test([1000, 1000], [100, 110], delta=0.99, lift="relative")
+        assert below["p_lower"] < 1e-12
+        assert below["equivalent"] == tost_test([1000, 1000], [100, 110], delta=1.0, lift="relative")["equivalent"]
+
+    @staticmethod
+    def test_no_treatment_successes_at_margin_of_one():
+        # A treatment rate of exactly 0 is the lower null at delta = 1, and the data agree with it.
+        result = tost_test([1000, 1000], [100, 0], delta=1.0, lift="relative")
+        assert result["p_lower"] == 1.0
+        assert not result["equivalent"]
