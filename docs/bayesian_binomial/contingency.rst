@@ -42,6 +42,42 @@ Example
    fig = bct.plot_pdf(confidence_level=0.95)
    fig.show()
 
+Three or More Variants
+----------------------
+
+With three or more cells, ``analyze()`` reports:
+
+* each variant's **probability of being best** and its **expected loss**,
+  E[best rate - its rate], both from one joint posterior draw across all
+  variants (the loss is a difference in rates whatever ``lift`` is);
+* **pairwise comparisons**, each reported as a two-variant analysis would be
+  (lift, credible interval, probability of being greater, expected loss and
+  ROPE probability, with the ROPE scaled to that comparison's reference
+  variant). ``comparisons="control"`` (the default) compares each variant
+  against the first cell added; ``comparisons="all"`` compares every pair.
+
+Posterior probabilities need no multiple-comparison correction. They are
+calibrated when the true rates behave like the prior, but stopping as soon as a
+probability crosses a threshold still inflates false wins for a fixed truth.
+
+.. code-block:: python
+
+   table = BayesianContingencyTable("Checkout", "conversion")
+   table.add("A", 100, 1000, 1, 1).add("B", 120, 1000, 1, 1).add("C", 140, 1000, 1, 1)
+   print(table.analyze())
+
+   table.incremental_results["prob_best"]["C"]
+   table.incremental_results["comparisons"]["C vs A"]["ci_lower"]
+
+Scaled lifts (``"incremental"``, ``"roas"``, ``"revenue"``, ``"cpa"``) are
+expressed over one common number of units for every comparison, the table's
+largest arm, so identical rate differences give identical lifts, and ROPE
+thresholds and expected losses are in the same units for every comparison. The
+output states the scale.
+
+With two cells the output and ``incremental_results`` are unchanged, and
+``comparisons`` is ignored.
+
 API Reference
 -------------
 
