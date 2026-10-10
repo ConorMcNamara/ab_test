@@ -9,6 +9,7 @@ probabilities instead of p-values and confidence intervals.
 
 from __future__ import annotations
 
+import itertools
 from typing import Any, Literal, Self
 
 import numpy as np
@@ -102,6 +103,8 @@ class BayesianStratifiedContingencyTable:
         ----------
         cell_name : str
             Experimental group name (e.g. ``"Control"``, ``"Treatment"``).
+            The first group added is the control. Any number of groups may be
+            added; see :meth:`analyze` for three or more.
         successes : int
             Number of successes.
         trials : int
@@ -119,8 +122,6 @@ class BayesianStratifiedContingencyTable:
             Self, for method chaining.
         """
         if cell_name not in self._cell_names:
-            if len(self._cell_names) >= 2:
-                raise ValueError(f"Only 2 groups are supported, got third group {cell_name!r}")
             self._cell_names.append(cell_name)
 
         if stratum not in self._strata:
@@ -138,6 +139,7 @@ class BayesianStratifiedContingencyTable:
 
     def _build_arrays(
         self,
+        two_groups: bool = False,
     ) -> tuple[
         np.ndarray[Any, Any],
         np.ndarray[Any, Any],
@@ -147,22 +149,31 @@ class BayesianStratifiedContingencyTable:
     ]:
         """Return per-stratum arrays and stratum names.
 
+        ``two_groups=True`` is for callers that only report a single
+        comparison, so three or more groups raise.
+
         Returns
         -------
-        successes : ndarray, shape (K, 2)
-        trials : ndarray, shape (K, 2)
-        alphas : ndarray, shape (K, 2)
-        betas : ndarray, shape (K, 2)
+        successes : ndarray, shape (K, k)
+        trials : ndarray, shape (K, k)
+        alphas : ndarray, shape (K, k)
+        betas : ndarray, shape (K, k)
         strata_names : list[str]
         """
-        if len(self._cell_names) != 2:
-            raise ValueError(f"analyze requires exactly 2 groups, got {len(self._cell_names)}")
+        k = len(self._cell_names)
+        if k < 2:
+            raise ValueError(f"analyze requires at least 2 groups, got {k}")
+        if two_groups and k > 2:
+            raise ValueError(
+                f"Per-stratum results and plots compare two groups, but this table has {k}. Use analyze() for "
+                "the pooled comparisons, or build a two-group table for the pair you want per stratum."
+            )
         strata_names = list(self._strata.keys())
         K = len(strata_names)
-        successes = np.empty((K, 2), dtype=float)
-        trials = np.empty((K, 2), dtype=float)
-        alphas = np.empty((K, 2), dtype=float)
-        betas = np.empty((K, 2), dtype=float)
+        successes = np.empty((K, k), dtype=float)
+        trials = np.empty((K, k), dtype=float)
+        alphas = np.empty((K, k), dtype=float)
+        betas = np.empty((K, k), dtype=float)
         for k, s_name in enumerate(strata_names):
             stratum = self._strata[s_name]
             for j, c_name in enumerate(self._cell_names):
@@ -220,11 +231,14 @@ class BayesianStratifiedContingencyTable:
         stratum_lift_samples: list[np.ndarray[Any, Any]],
         trials: np.ndarray[Any, Any],
         lift: str,
+        n_scale: float | None = None,
     ) -> np.ndarray[Any, Any]:
         """Inverse-variance weighted pooling of per-stratum lift samples.
 
         Returns pooled samples on the display scale, except for ``"cpa"``,
         which is returned in incremental conversions (see :meth:`_summarize`).
+        Scaled lifts are expressed over ``n_scale`` units, by default the
+        larger group's total trials.
         """
         stacked = np.vstack(stratum_lift_samples)
         variances = np.var(stacked, axis=1)
@@ -237,7 +251,7 @@ class BayesianStratifiedContingencyTable:
             return np.exp(pooled) - 1
 
         if lift in ("incremental", "roas", "revenue", "cpa"):
-            n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
+            n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1]))) if n_scale is None else n_scale
             pooled = scale_metric(pooled * n_max, "incremental" if lift == "cpa" else lift, self.spend, self.msrp)
 
         return pooled
@@ -297,6 +311,8 @@ class BayesianStratifiedContingencyTable:
         cred_int_method: Literal["credible", "hdi"] = "credible",
         low_threshold: float | None = None,
         high_threshold: float | None = None,
+        *,
+        comparisons: str = "control",
     ) -> str:
         """Analyze the stratified experiment with Bayesian pooling.
 
@@ -332,17 +348,78 @@ class BayesianStratifiedContingencyTable:
         high_threshold : float, optional
             Upper bound of the ROPE, in the units of ``lift``. Defaults as
             described for ``low_threshold``.
+        comparisons : {"control", "all"}, default="control"
+            With three or more groups, which pairs to compare: each group
+            against the first one added (the control), or every pair. Ignored
+            with two groups.
 
         Returns
         -------
         str
             Formatted results table.
+
+        Notes
+        -----
+        With three or more groups, the table reports each group's probability
+        of being best and its expected loss, E[best rate - its rate], from one
+        joint posterior draw of every group's stratified rate (each stratum's
+        posterior rate weighted by that stratum's share of all trials, so every
+        group is standardized to the same stratum mix); the loss is a
+        difference in rates whatever ``lift`` is. Each pairwise comparison is
+        then reported as a two-group analysis of that pair would be (pooled
+        lift, credible interval, P(greater), expected loss, ROPE probability
+        and between-stratum tau), with scaled lifts and the default ROPE all on
+        one scale, the largest group's total trials; the ROPE is still 10% of
+        each comparison's reference group's rate. Posterior probabilities need
+        no multiple-comparison correction. ``pooled_results`` then holds
+        ``"prob_best"``, ``"expected_loss"`` and a ``"comparisons"`` dict keyed
+        by labels such as ``"B vs A"``, and ``heterogeneity_results`` is
+        ``None``. :meth:`analyze_by_stratum` and :meth:`plot` remain two-group
+        only.
         """
         lift = self._validate_lift(lift)
+        comparisons = comparisons.casefold()
+        if comparisons not in ("control", "all"):
+            raise ValueError(f"comparisons must be 'control' or 'all', got {comparisons!r}")
         successes, trials, alphas, betas, strata_names = self._build_arrays()
+        settings: dict[str, Any] = {
+            "lift": lift,
+            "confidence_level": confidence_level,
+            "n_samples": n_samples,
+            "cred_int_method": cred_int_method,
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+        }
+        if successes.shape[1] > 2:
+            return self._analyze_many(successes, trials, alphas, betas, comparisons, settings)
+        self.pooled_results, self.heterogeneity_results = self._compare(successes, trials, alphas, betas, settings)
+        return self._format_analyze(lift, confidence_level)
+
+    def _compare(
+        self,
+        successes: np.ndarray[Any, Any],
+        trials: np.ndarray[Any, Any],
+        alphas: np.ndarray[Any, Any],
+        betas: np.ndarray[Any, Any],
+        settings: dict[str, Any],
+        n_scale: float | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Pooled comparison of the second group against the first (``(K, 2)`` arrays).
+
+        Returns the pooled results and the heterogeneity results. Scaled lifts,
+        the CPA loss and the default ROPE are expressed over ``n_scale`` units,
+        by default the larger group's total trials.
+        """
+        lift = settings["lift"]
+        confidence_level = settings["confidence_level"]
+        n_samples = settings["n_samples"]
+        cred_int_method = settings["cred_int_method"]
+        low_threshold = settings["low_threshold"]
+        high_threshold = settings["high_threshold"]
+        strata_names = range(successes.shape[0])
 
         stratum_samples = self._draw_stratum_samples(successes, trials, alphas, betas, lift, n_samples)
-        pooled_samples = self._pool_samples(stratum_samples, trials, lift)
+        pooled_samples = self._pool_samples(stratum_samples, trials, lift, n_scale)
 
         pooled_mean, ci_lo, ci_hi, prob_t_gt_c = self._summarize(
             pooled_samples, lift, confidence_level, cred_int_method
@@ -366,7 +443,7 @@ class BayesianStratifiedContingencyTable:
             / np.sum(trials[:, 1])
         )
 
-        n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
+        n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1]))) if n_scale is None else n_scale
         if lift == "cpa":
             # Loss and ROPE are not meaningful on the CPA scale; report the loss as a rate difference.
             expected_loss = float(np.mean(np.maximum(-pooled_samples / n_max, 0)))
@@ -379,7 +456,7 @@ class BayesianStratifiedContingencyTable:
                 high_threshold = default_rope if high_threshold is None else high_threshold
             prob_in_rope = float(np.mean((pooled_samples >= low_threshold) & (pooled_samples <= high_threshold)))
 
-        self.pooled_results = {
+        pooled_results = {
             "lift_type": lift,
             "lift": pooled_mean,
             "ci_lower": ci_lo,
@@ -400,17 +477,144 @@ class BayesianStratifiedContingencyTable:
                 [float(np.mean(s)) for s in stratum_samples], [float(np.var(s)) for s in stratum_samples], n_samples
             )
             if lift in ("incremental", "roas", "revenue"):
-                n_max = float(max(np.sum(trials[:, 0]), np.sum(trials[:, 1])))
                 tau_samples = scale_metric(tau_samples * n_max, lift, self.spend, self.msrp)
             tau_mean = float(np.mean(tau_samples))
             tau_ci_lo, tau_ci_hi = self._credible_interval(tau_samples, confidence_level, cred_int_method)
-        self.heterogeneity_results = {
+        heterogeneity_results = {
             "tau_mean": tau_mean,
             "tau_ci_lower": tau_ci_lo,
             "tau_ci_upper": tau_ci_hi,
         }
+        return pooled_results, heterogeneity_results
 
-        return self._format_analyze(lift, confidence_level)
+    def _analyze_many(
+        self,
+        successes: np.ndarray[Any, Any],
+        trials: np.ndarray[Any, Any],
+        alphas: np.ndarray[Any, Any],
+        betas: np.ndarray[Any, Any],
+        comparisons: str,
+        settings: dict[str, Any],
+    ) -> str:
+        """Three or more groups: P(each group is best), expected loss per group, and pairwise comparisons."""
+        lift = settings["lift"]
+        confidence_level = settings["confidence_level"]
+        names = self._cell_names
+        k = len(names)
+        pairs = [(0, j) for j in range(1, k)] if comparisons == "control" else list(itertools.combinations(range(k), 2))
+        # One scale for every comparison, so identical rate differences give identical scaled lifts.
+        n_scale = float(np.max(np.sum(trials, axis=0)))
+        compared: dict[str, dict[str, Any]] = {}
+        for i, j in pairs:
+            cols = [i, j]
+            pooled, heterogeneity = self._compare(
+                successes[:, cols], trials[:, cols], alphas[:, cols], betas[:, cols], settings, n_scale
+            )
+            compared[f"{names[j]} vs {names[i]}"] = {
+                "lift": pooled["lift"],
+                f"{names[i]}": pooled["p_control"],
+                f"{names[j]}": pooled["p_treatment"],
+                "prob_greater": pooled["prob_t_gt_c"],
+                "ci_lower": pooled["ci_lower"],
+                "ci_upper": pooled["ci_upper"],
+                "expected_loss": pooled["expected_loss"],
+                "prob_rope": pooled["prob_rope"],
+                **heterogeneity,
+            }
+
+        # One joint draw of every group's stratified rate: each stratum's posterior rate, weighted by the
+        # stratum's share of all trials, so every group is standardized to the same stratum mix.
+        stratum_weights = np.sum(trials, axis=1) / np.sum(trials)
+        draws = np.column_stack(
+            [
+                sum(
+                    stratum_weights[s]
+                    * sample_beta(
+                        int(successes[s, g]), int(trials[s, g]), alphas[s, g], betas[s, g], settings["n_samples"]
+                    )
+                    for s in range(successes.shape[0])
+                )
+                for g in range(k)
+            ]
+        )
+        best = np.argmax(draws, axis=1)
+        regret = draws.max(axis=1, keepdims=True) - draws
+        prob_best = {name: float(np.mean(best == g)) for g, name in enumerate(names)}
+        expected_loss = {name: float(regret[:, g].mean()) for g, name in enumerate(names)}
+        standardized = {name: float(draws[:, g].mean()) for g, name in enumerate(names)}
+        self.pooled_results = {
+            "lift_type": lift,
+            "comparison_type": comparisons,
+            "standardized_rate": standardized,
+            "prob_best": prob_best,
+            "expected_loss": expected_loss,
+            "comparisons": compared,
+        }
+        self.heterogeneity_results = None
+
+        def fmt(v: float) -> str | float:
+            return convert_to_tabulate_str(v, lift)
+
+        def fmt_rate(v: float) -> str | float:
+            return convert_to_tabulate_str(v, "absolute")
+
+        level = format_percent(confidence_level)
+        return_string = tabulate_summary(["Metric", "Metric Name"], [lift, self.metric_name])
+        group_rows = []
+        for name in names:
+            star = "*" if prob_best[name] >= confidence_level else ""
+            group_rows.append(
+                [
+                    name,
+                    fmt_rate(standardized[name]),
+                    f"{convert_to_tabulate_str(prob_best[name], 'relative')}{star}",
+                    fmt_rate(expected_loss[name]),
+                ]
+            )
+        return_string += "\n" + tabulate(
+            group_rows,
+            headers=["Variant", "Standardized Rate ****", "Prob Is Best *", "Expected Loss (rate difference) ****"],
+            tablefmt="grid",
+        )
+        rows = []
+        for label, c in compared.items():
+            star = "*" if c["prob_greater"] >= confidence_level else ""
+            # Scaled lifts format as plain numbers, which would print every digit in this text cell.
+            tau_parts = [fmt(c[key]) for key in ("tau_mean", "tau_ci_lower", "tau_ci_upper")]
+            tau_parts = [f"{v:,.2f}" if isinstance(v, float) else v for v in tau_parts]
+            tau = "n/a" if np.isnan(c["tau_mean"]) else f"{tau_parts[0]} ({tau_parts[1]}, {tau_parts[2]})"
+            rows.append(
+                [label]
+                + [fmt(c["lift"]), fmt(c["ci_lower"]), fmt(c["ci_upper"])]
+                + [f"{convert_to_tabulate_str(c['prob_greater'], 'relative')}{star}"]
+                + [fmt_rate(c["expected_loss"]) if lift == "cpa" else fmt(c["expected_loss"])]
+                + ["n/a" if np.isnan(c["prob_rope"]) else convert_to_tabulate_str(c["prob_rope"], "relative")]
+                + [tau]
+            )
+        return_string += "\n" + tabulate(
+            rows,
+            headers=[
+                "Comparison",
+                "Lift",
+                "Cred. Int. Lower **",
+                "Cred. Int. Upper **",
+                "Prob Greater *",
+                "Expected Loss" + (" (rate difference)" if lift == "cpa" else ""),
+                "Probability Lift is in ROPE ***",
+                "Between-stratum tau",
+            ],
+            tablefmt="grid",
+        )
+        return_string += f"\n* next to a probability means it exceeds our confidence level at {level}% level"
+        return_string += f"\n** {level}% Credible Interval"
+        return_string += "\n*** Region of Practical Equivalence"
+        return_string += (
+            "\n**** Each group's rate standardized to the overall stratum mix; loss is E[best rate - its rate],"
+            " from one joint posterior draw across all groups"
+        )
+        if lift in ("incremental", "roas", "revenue", "cpa"):
+            return_string += f"\nScaled lifts are per {n_scale:,.0f} units (the largest group) for every comparison"
+        return return_string
 
     def _format_analyze(self, lift: str, confidence_level: float) -> str:
         assert self.pooled_results is not None
@@ -495,7 +699,7 @@ class BayesianStratifiedContingencyTable:
             and P(T > C).
         """
         lift = self._validate_lift(lift)
-        successes, trials, alphas, betas, strata_names = self._build_arrays()
+        successes, trials, alphas, betas, strata_names = self._build_arrays(two_groups=True)
 
         stratum_samples = self._draw_stratum_samples(successes, trials, alphas, betas, lift, n_samples)
 
@@ -614,7 +818,7 @@ class BayesianStratifiedContingencyTable:
     ) -> go.Figure:
         """Build the forest plot for a single lift (see :meth:`plot`)."""
         lift = self._validate_lift(lift)
-        successes, trials, alphas, betas, strata_names = self._build_arrays()
+        successes, trials, alphas, betas, strata_names = self._build_arrays(two_groups=True)
 
         stratum_samples = self._draw_stratum_samples(successes, trials, alphas, betas, lift, n_samples)
         pooled_samples = self._pool_samples(stratum_samples, trials, lift)

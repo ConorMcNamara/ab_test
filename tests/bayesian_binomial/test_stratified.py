@@ -18,12 +18,12 @@ def _make_two_strata(spend=None, msrp=None):
 
 class TestBayesianStratifiedValidation:
     @staticmethod
-    def test_third_group_raises():
+    def test_third_group_accepted():
         st = BayesianStratifiedContingencyTable("Test", "converted")
         st.add("Control", 10, 100, 1, 1, stratum="s1")
         st.add("Treatment", 15, 100, 1, 1, stratum="s1")
-        with pytest.raises(ValueError, match="Only 2 groups"):
-            st.add("Variant2", 20, 100, 1, 1, stratum="s1")
+        st.add("Variant2", 20, 100, 1, 1, stratum="s1")
+        assert st._cell_names == ["Control", "Treatment", "Variant2"]
 
     @staticmethod
     def test_duplicate_cell_in_stratum_raises():
@@ -45,7 +45,7 @@ class TestBayesianStratifiedValidation:
     def test_single_group_raises():
         st = BayesianStratifiedContingencyTable("Test", "converted")
         st.add("Control", 10, 100, 1, 1, stratum="s1")
-        with pytest.raises(ValueError, match="exactly 2 groups"):
+        with pytest.raises(ValueError, match="at least 2 groups"):
             st.analyze()
 
     @staticmethod
@@ -561,3 +561,102 @@ class TestBayesianStratifiedCpa:
         for result in table.stratum_results.values():
             assert result["effect"] == np.inf
             assert result["ci_lower"] <= result["effect"] <= result["ci_upper"]
+
+
+_THREE_GROUP_DATA = (("S1", 0.08, 1000), ("S2", 0.15, 3000))
+_MULTIPLIERS = (("A", 1.0, 1), ("B", 1.2, 1), ("C", 1.3, 2))
+
+
+def _three_group_table(spend=None, cells=("A", "B", "C")):
+    table = BayesianStratifiedContingencyTable("x", "conv", spend=spend)
+    for stratum, base, n in _THREE_GROUP_DATA:
+        for cell, mult, size in _MULTIPLIERS:
+            if cell in cells:
+                table.add(cell, int(base * mult * size * n), size * n, 1, 1, stratum=stratum)
+    return table
+
+
+class TestBayesianStratifiedMultiArm:
+    @staticmethod
+    def test_prob_best_and_expected_loss():
+        table = _three_group_table()
+        np.random.seed(0)
+        table.analyze(n_samples=200_000)
+        results = table.pooled_results
+        # Independent draw: each stratum's posterior weighted by its share of all trials.
+        rng = np.random.default_rng(1)
+        weights = np.array([3000 + 3000 + 2000, 9000 + 9000 + 6000]) / 32000
+        draws = np.zeros((400_000, 3))
+        for g, (_, mult, size) in enumerate(_MULTIPLIERS):
+            for s, (_, base, n) in enumerate(_THREE_GROUP_DATA):
+                trials = size * n
+                successes = int(base * mult * trials)
+                draws[:, g] += weights[s] * rng.beta(1 + successes, 1 + trials - successes, 400_000)
+        best = np.argmax(draws, axis=1)
+        regret = draws.max(axis=1, keepdims=True) - draws
+        assert sum(results["prob_best"].values()) == pytest.approx(1.0)
+        for g, name in enumerate("ABC"):
+            assert results["prob_best"][name] == pytest.approx(np.mean(best == g), abs=0.005)
+            assert results["expected_loss"][name] == pytest.approx(regret[:, g].mean(), abs=5e-4)
+            assert results["standardized_rate"][name] == pytest.approx(draws[:, g].mean(), abs=5e-4)
+
+    @staticmethod
+    def test_comparisons_match_two_group_tables():
+        table = _three_group_table()
+        np.random.seed(0)
+        table.analyze(lift="relative", comparisons="all", n_samples=200_000)
+        comparisons = table.pooled_results["comparisons"]
+        assert list(comparisons) == ["B vs A", "C vs A", "C vs B"]
+        assert table.heterogeneity_results is None
+        pair = _three_group_table(cells=("B", "C"))
+        np.random.seed(1)
+        pair.analyze(lift="relative", n_samples=200_000)
+        comparison = comparisons["C vs B"]
+        # Posterior means of the rates are deterministic; lift and probabilities come from separate draws.
+        assert comparison["B"] == pytest.approx(pair.pooled_results["p_control"])
+        assert comparison["C"] == pytest.approx(pair.pooled_results["p_treatment"])
+        assert comparison["lift"] == pytest.approx(pair.pooled_results["lift"], abs=0.005)
+        assert comparison["prob_greater"] == pytest.approx(pair.pooled_results["prob_t_gt_c"], abs=0.005)
+        # Relative ROPE is scale-free: +/-10% of the reference group's rate is +/-0.1.
+        assert comparison["prob_rope"] == pytest.approx(pair.pooled_results["prob_rope"], abs=0.005)
+        assert comparison["tau_mean"] == pytest.approx(pair.heterogeneity_results["tau_mean"], rel=0.05)
+
+    @staticmethod
+    def test_scaled_lifts_use_one_scale():
+        table = _three_group_table(spend=5000)
+        np.random.seed(0)
+        output = table.analyze(lift="incremental", comparisons="all", n_samples=100_000)
+        comparisons = table.pooled_results["comparisons"]
+        # With one scale the lifts add up: (C - B) = (C - A) - (B - A).
+        assert comparisons["C vs B"]["lift"] == pytest.approx(
+            comparisons["C vs A"]["lift"] - comparisons["B vs A"]["lift"], rel=0.05
+        )
+        # A two-group B vs A table scales by its own 4,000 units; the common scale is C's 8,000.
+        pair = _three_group_table(spend=5000, cells=("A", "B"))
+        np.random.seed(1)
+        pair.analyze(lift="incremental", n_samples=100_000)
+        assert comparisons["B vs A"]["lift"] == pytest.approx(2 * pair.pooled_results["lift"], rel=0.03)
+        assert "Scaled lifts are per 8,000 units (the largest group) for every comparison" in output
+
+    @staticmethod
+    def test_options_and_errors():
+        table = _three_group_table()
+        np.random.seed(0)
+        output = table.analyze(n_samples=5000)
+        assert "C vs B" not in output and "| C vs A" in output
+        assert table.pooled_results["comparison_type"] == "control"
+        with pytest.raises(ValueError, match="comparisons must be"):
+            table.analyze(comparisons="pairs")
+        with pytest.raises(ValueError, match="compare two groups"):
+            table.analyze_by_stratum()
+        with pytest.raises(ValueError, match="compare two groups"):
+            table.plot()
+
+    @staticmethod
+    def test_two_groups_ignore_comparisons():
+        table = _three_group_table(cells=("A", "B"))
+        np.random.seed(0)
+        default = table.analyze(n_samples=5000)
+        np.random.seed(0)
+        assert table.analyze(comparisons="all", n_samples=5000) == default
+        assert "comparisons" not in table.pooled_results
