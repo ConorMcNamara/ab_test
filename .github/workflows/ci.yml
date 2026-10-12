@@ -3,8 +3,17 @@ name: CI
 on:
   push:
     branches: [main, master]
+    # Skip runs where every changed file is documentation: the Sphinx sources
+    # under docs/ and Markdown files are never imported, tested or packaged.
+    # A change that also touches code or config still runs CI.
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
   pull_request:
     branches: [main, master]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
 
 jobs:
   setup:
