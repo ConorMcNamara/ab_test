@@ -649,5 +649,17 @@ class TestZeroControlRateRelative:
         assert lb > 0 and ub == np.inf
 
 
+class TestJeffreysBoundaries:
+    @staticmethod
+    @pytest.mark.parametrize("n", [10, 100, 1000])
+    def test_boundary_fix(n):
+        # Brown, Cai & DasGupta (2001): the bound at a boundary is the boundary itself.
+        # The raw Beta quantile gave a lower bound of 4.9e-6 at s = 0 for n = 100.
+        assert jeffrey_interval(0, n)[0] == 0.0
+        assert jeffrey_interval(n, n)[1] == 1.0
+        assert 0 < jeffrey_interval(0, n)[1] < 1
+        assert 0 < jeffrey_interval(n, n)[0] < 1
+
+
 if __name__ == "__main__":
     pytest.main()

@@ -113,9 +113,10 @@ def convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[A
     value : float or list
         The value(s) to format.
     lift : str
-        The lift type, which determines the unit: ``"revenue"``/``"roas"`` render
-        as dollar amounts, ``"absolute"``/``"relative"`` as percentages, and
-        ``"incremental"`` is returned unchanged.
+        The lift type, which determines the unit: ``"revenue"``/``"cpa"`` render
+        as dollar amounts, ``"roas"`` (incremental conversions per dollar) as a
+        unitless number to 4 significant figures, ``"absolute"``/``"relative"``
+        as percentages, and ``"incremental"`` is returned unchanged.
 
     Returns
     -------
@@ -134,7 +135,10 @@ def convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[A
     def _format_one(val: float) -> str | float:
         if math.isinf(val):
             return _format_infinity(val)
-        if lift in ["revenue", "roas", "cpa"]:
+        if lift == "roas":
+            # Conversions per dollar, not dollars; often well below 0.01.
+            return f"{val:,.4g}"
+        if lift in ["revenue", "cpa"]:
             return f"${round(val, 2):,}"
         if lift in ["absolute", "relative"]:
             return f"{round(val * 100.0, 2)}%"
@@ -199,7 +203,10 @@ def _lift_axis_format(lift_type: str) -> dict[str, str]:
         return {"tickformat": ",.0%"}
     if lift_type == "revenue":
         return {"tickprefix": "$", "tickformat": "~s"}
-    if lift_type in ("roas", "cpa"):
+    if lift_type == "roas":
+        # Conversions per dollar: unitless, with significant figures for small values.
+        return {"tickformat": ".3~g"}
+    if lift_type == "cpa":
         return {"tickprefix": "$", "tickformat": "0.2"}
     return {"tickformat": "~s"}
 

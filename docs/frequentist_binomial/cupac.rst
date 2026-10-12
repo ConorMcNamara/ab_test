@@ -14,7 +14,14 @@ per-user covariate data:
 Both methods adjust outcomes via the CUPED framework (``theta = Cov(y, y_hat) /
 Var(y_hat)``) and estimate the treatment effect with HC2 robust standard
 errors. Variance is reduced by a factor of ``(1 - R^2)``, which translates
-directly to higher statistical power and smaller required sample sizes.
+directly to higher statistical power and smaller required sample sizes;
+``variance_reduction`` (the ``R^2``) approximates ``1 - (SE / SE_unadjusted)^2``.
+
+The final regression also includes the covariates. So with ``method="cupac"``
+or ``"lin"``, whose prediction is linear in the covariates, the prediction step
+is absorbed, and the estimates equal plain regression adjustment: ANCOVA for
+``"cupac"`` and Lin's (2013) interacted regression for ``"lin"``. The
+prediction step matters for MLRATE, whose model can be nonlinear.
 
 Unlike :class:`~ab_test.frequentist_binomial.contingency.ContingencyTable`,
 which works with aggregate counts (successes and trials),
@@ -134,7 +141,12 @@ flexible model (random forest, gradient boosting) trained on all data and
 predicting on the same data would memorise outcomes, making the CUPED
 adjustment over-correct and biasing the treatment effect toward zero.
 
-MLRATE avoids this via K-fold cross-fitting (Guo et al., 2021):
+MLRATE avoids this via K-fold cross-fitting, in the spirit of Guo et al.
+(2021). It is not their exact estimator, which regresses the outcome on
+``[1, T, g(X) - mean(g), T * (g(X) - mean(g))]``; here the cross-fitted
+prediction drives a CUPED adjustment followed by regression adjustment on the
+covariates. It is consistent, and in simulation its estimates and standard
+errors are nearly identical to Guo et al.'s:
 
 1. Shuffle all users and split into K folds (default K = 5).
 2. For each fold, train the estimator on the other K − 1 folds and predict

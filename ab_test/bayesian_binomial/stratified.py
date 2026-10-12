@@ -581,9 +581,14 @@ class BayesianStratifiedContingencyTable:
         rows = []
         for label, c in compared.items():
             star = "*" if c["prob_greater"] >= confidence_level else ""
-            # Scaled lifts format as plain numbers, which would print every digit in this text cell.
-            tau_parts = [fmt(c[key]) for key in ("tau_mean", "tau_ci_lower", "tau_ci_upper")]
-            tau_parts = [f"{v:,.2f}" if isinstance(v, float) else v for v in tau_parts]
+            tau_parts: list[str | float | int]
+            if lift == "relative":
+                # Relative tau is on the log risk-ratio scale, not a percentage (as in the two-group line).
+                tau_parts = [f"{c[key]:.4f}" for key in ("tau_mean", "tau_ci_lower", "tau_ci_upper")]
+            else:
+                # Scaled lifts format as plain numbers, which would print every digit in this text cell.
+                tau_parts = [fmt(c[key]) for key in ("tau_mean", "tau_ci_lower", "tau_ci_upper")]
+                tau_parts = [f"{v:,.2f}" if isinstance(v, float) else v for v in tau_parts]
             tau = "n/a" if np.isnan(c["tau_mean"]) else f"{tau_parts[0]} ({tau_parts[1]}, {tau_parts[2]})"
             rows.append(
                 [label]
@@ -603,7 +608,7 @@ class BayesianStratifiedContingencyTable:
                 "Prob Greater *",
                 "Expected Loss" + (" (rate difference)" if lift == "cpa" else ""),
                 "Probability Lift is in ROPE ***",
-                "Between-stratum tau",
+                "Between-stratum tau" + (" (log RR)" if lift == "relative" else ""),
             ],
             tablefmt="grid",
         )
@@ -661,6 +666,12 @@ class BayesianStratifiedContingencyTable:
         het = self.heterogeneity_results
         if np.isnan(het["tau_mean"]):
             return_string += "\nBetween-stratum tau: n/a"
+        elif lift == "relative":
+            # Relative-lift tau is on the log risk-ratio scale, so it is not a percent.
+            return_string += (
+                f"\nBetween-stratum tau (log RR): {het['tau_mean']:.4f} "
+                f"({het['tau_ci_lower']:.4f}, {het['tau_ci_upper']:.4f})"
+            )
         else:
             return_string += (
                 f"\nBetween-stratum tau: {fmt(het['tau_mean'])} "
@@ -911,7 +922,7 @@ class BayesianStratifiedContingencyTable:
             "absolute": ",.1%",
             "relative": ",.1%",
             "incremental": ",",
-            "roas": "$,",
+            "roas": ".3~g",
             "revenue": "$,",
             "cpa": "$,",
         }

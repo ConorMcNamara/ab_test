@@ -15,8 +15,15 @@ lift, which keeps confidence sequences informative for rare events. ``tau``
 must not shrink with the sample size (for
 example, by tying it to the standard error), or the test loses its
 always-valid guarantee. For best power, set ``tau`` (in absolute-rate units)
-to the effect sizes typical of past experiments. The always-valid
-p-value is ``min(1, 1 / Lambda_n)`` where ``Lambda_n`` is the likelihood ratio.
+to the effect sizes typical of past experiments.
+
+The reported p-value is ``min(1, 1 / Lambda_n)``, where ``Lambda_n`` is the
+likelihood ratio at the current look. Johari et al.'s always-valid p-value is
+the running minimum of this over all looks so far. The per-look value is never
+below it, so it is valid but conservative, and it can rise between looks; take
+the minimum over looks to get the always-valid p-value. Likewise,
+:func:`~ab_test.frequentist_binomial.msprt.plot_msprt_over_time` draws each
+look's interval without intersecting them across looks.
 
 The module also includes
 :func:`~ab_test.frequentist_binomial.msprt.plot_msprt_over_time` for
@@ -32,7 +39,7 @@ Usage
 
    from ab_test.frequentist_binomial.msprt import msprt_test
 
-   # Standalone always-valid p-value
+   # Standalone p-value at the current look
    p_value = msprt_test([1000, 1000], [100, 130])
 
    # Through ContingencyTable

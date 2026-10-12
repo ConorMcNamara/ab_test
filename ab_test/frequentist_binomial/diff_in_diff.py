@@ -405,7 +405,13 @@ class DiffInDiff:
         )
 
         assert self.pairwise_results is not None
-        did_header = "DiD (risk difference)" if lift in _SCALED_LIFTS else "DiD"
+        if lift in _SCALED_LIFTS:
+            did_header = "DiD (risk difference)"
+        elif lift == "relative":
+            # exp(log RR_i - log RR_j) - 1: a ratio of risk ratios, not a difference of lifts.
+            did_header = "DiD (ratio of risk ratios - 1)"
+        else:
+            did_header = "DiD"
         fmt_did = fmt_rate if lift in _SCALED_LIFTS else fmt
         pw_headers = ["Comparison", did_header, "CI Lower **", "CI Upper **", "p-value", f"Adj. p ({correction})"]
         pw_rows = []
@@ -540,7 +546,7 @@ class DiffInDiff:
             "absolute": ",.1%",
             "relative": ",.1%",
             "incremental": ",",
-            "roas": "$,",
+            "roas": ".3~g",
             "revenue": "$,",
         }
         lift_label = lift_labels[lift]

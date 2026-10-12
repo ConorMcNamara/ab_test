@@ -331,7 +331,12 @@ class BayesianDiffInDiff:
         )
 
         assert self.pairwise_results is not None
-        did_header = "DiD (risk difference)" if scaled else "DiD"
+        if scaled:
+            did_header = "DiD (risk difference)"
+        elif lift == "relative":
+            did_header = "DiD (difference in relative lifts)"
+        else:
+            did_header = "DiD"
         pw_headers = ["Comparison", did_header, "CI Lower **", "CI Upper **", "P(i > j)"]
         pw_rows = []
         for pw in self.pairwise_results:
@@ -492,7 +497,7 @@ class BayesianDiffInDiff:
             "absolute": ",.1%",
             "relative": ",.1%",
             "incremental": ",",
-            "roas": "$,",
+            "roas": ".3~g",
             "revenue": "$,",
         }
         lift_label = lift_labels[lift]

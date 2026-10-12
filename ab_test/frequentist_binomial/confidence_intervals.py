@@ -381,6 +381,11 @@ def jeffrey_interval(s: int, n: int, alpha: float = 0.05) -> tuple[Any, ...]:
     """
     lb = ss.beta.ppf(alpha / 2, s + 1 / 2, n - s + 1 / 2)  # type: ignore[no-untyped-call]
     ub = ss.beta.ppf(1 - alpha / 2, s + 1 / 2, n - s + 1 / 2)  # type: ignore[no-untyped-call]
+    # Brown, Cai & DasGupta (2001): at the boundaries the bound is the boundary itself.
+    if s == 0:
+        lb = 0.0
+    if s == n:
+        ub = 1.0
     return lb, ub
 
 

@@ -305,3 +305,49 @@ class TestMultiArmForestPlot:
         table.plot(is_individual=False, color="ibm")
         colors = [trace.marker.color for trace in shown[-1].data]
         assert len(set(colors)) == 2
+
+
+class TestReviewLabels:
+    @staticmethod
+    def test_roas_is_unitless():
+        # ROAS is conversions per dollar: 0.008 used to print as "$0.01".
+        from ab_test._display import _lift_axis_format, convert_to_tabulate_str
+
+        assert convert_to_tabulate_str(0.008, "roas") == "0.008"
+        assert convert_to_tabulate_str(0.0123456, "roas") == "0.01235"
+        assert "$" not in convert_to_tabulate_str(1234.5, "roas")
+        assert convert_to_tabulate_str(12.5, "cpa") == "$12.5"
+        assert "tickprefix" not in _lift_axis_format("roas")
+
+    @staticmethod
+    def test_cpa_sensitivity_axis_says_maximum():
+        from ab_test.frequentist_binomial.power_calculations import plot_sensitivity_curve
+
+        fig = plot_sensitivity_curve(0.10, lift="cpa", spend=5000.0, sample_sizes=[1000, 2000], n_points=2)
+        assert fig.layout.yaxis.title.text == "Maximum detectable CPA"
+
+    @staticmethod
+    def _segments(table_cls, **add_kwargs):
+        tables = []
+        for name, (control, treatment) in {"A": (100, 120), "B": (100, 140)}.items():
+            table = table_cls(name, "conversion")
+            table.add("Control", control, 1000, **add_kwargs).add("Treatment", treatment, 1000, **add_kwargs)
+            tables.append(table)
+        return tables
+
+    def test_relative_did_headers(self):
+        frequentist = DiffInDiff(*self._segments(ContingencyTable)).analyze(lift="relative")
+        assert "DiD (ratio of risk ratios - 1)" in frequentist
+        bayesian = BayesianDiffInDiff(*self._segments(BayesianContingencyTable, alpha=1, beta=1)).analyze(
+            lift="relative", n_samples=5000
+        )
+        assert "DiD (difference in relative lifts)" in bayesian
+
+    @staticmethod
+    def test_stratified_relative_tau_is_log_rr():
+        table = BayesianStratifiedContingencyTable("x", "conversion")
+        for stratum, (control, treatment) in {"S1": (100, 120), "S2": (200, 260)}.items():
+            table.add("Control", control, 1000, alpha=1, beta=1, stratum=stratum)
+            table.add("Treatment", treatment, 1000, alpha=1, beta=1, stratum=stratum)
+        tau_line = next(line for line in table.analyze(lift="relative", n_samples=5000).splitlines() if "tau" in line)
+        assert "(log RR)" in tau_line and "%" not in tau_line
