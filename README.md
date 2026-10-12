@@ -13,19 +13,19 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 
 | Category | Highlights | Docs |
 |---|---|---|
-| **Contingency tables** | Chainable builder; A/B/n tests (frequentist omnibus test with Holm-adjusted comparisons; Bayesian probability each variant is best); DataFrame export, serialization, plotting | [frequentist](docs/frequentist_binomial/contingency.rst) · [bayesian](docs/bayesian_binomial/contingency.rst) |
-| **Statistical tests** | Score, LRT, Z, Fisher, Barnard, Boschloo, power-divergence variants | [docs](docs/frequentist_binomial/stats_tests.rst) |
+| **Contingency tables** | Chainable builder; A/B/n tests (frequentist omnibus test with Holm-adjusted comparisons; Bayesian probability each variant is best); DataFrame export, serialization; forest plots with dark mode and absolute and relative lift side by side (`lift="both"`) | [frequentist](docs/frequentist_binomial/contingency.rst) · [bayesian](docs/bayesian_binomial/contingency.rst) |
+| **Statistical tests** | Score, LRT, Z, Wald, Fisher, Barnard, Boschloo, power-divergence variants, randomization | [docs](docs/frequentist_binomial/stats_tests.rst) |
 | **Confidence / credible intervals** | Wilson, Agresti-Coull, Jeffreys, Clopper-Pearson, HDI, binary-search inversion | [frequentist](docs/frequentist_binomial/confidence_intervals.rst) · [bayesian](docs/bayesian_binomial/credible_intervals.rst) |
-| **Power & sample size** | Power, MDL, required n — frequentist and Bayesian (P(B>A) or expected loss) | [frequentist](docs/frequentist_binomial/power_calculations.rst) · [bayesian](docs/bayesian_binomial/power_calculations.rst) |
-| **Sequential testing** | mSPRT always-valid p-values and confidence sequences; an exact Bernoulli e-test; group sequential designs with O'Brien-Fleming, Pocock and power-family alpha spending | [mSPRT](docs/frequentist_binomial/msprt.rst) · [e-test](docs/frequentist_binomial/e_test.rst) · [group sequential](docs/frequentist_binomial/gst.rst) |
-| **Variance reduction** | CUPAC (OLS), Lin (treatment-by-covariate interactions), and MLRATE (any sklearn estimator, K-fold cross-fitting) | [docs](docs/frequentist_binomial/cupac.rst) |
+| **Power & sample size** | Power, MDL, required n — frequentist (including A/B/n designs, `comparisons="control"`/`"all"`) and Bayesian (P(B>A) or expected loss, reproducible with `seed`) | [frequentist](docs/frequentist_binomial/power_calculations.rst) · [bayesian](docs/bayesian_binomial/power_calculations.rst) |
+| **Sequential testing** | mSPRT p-values and confidence sequences valid under continuous monitoring; an exact Bernoulli e-test; group sequential designs with O'Brien-Fleming, Pocock and power-family alpha spending | [mSPRT](docs/frequentist_binomial/msprt.rst) · [e-test](docs/frequentist_binomial/e_test.rst) · [group sequential](docs/frequentist_binomial/gst.rst) |
+| **Variance reduction** | CUPAC (OLS), Lin (treatment-by-covariate interactions), and MLRATE (any sklearn estimator, K-fold cross-fitting that keeps clusters together) | [docs](docs/frequentist_binomial/cupac.rst) |
 | **Stratified analysis** | CMH test, Breslow-Day, MH odds ratio, Bayesian inverse-variance pooling; three or more variants via the generalized CMH test with Holm-adjusted comparisons | [frequentist](docs/frequentist_binomial/stratified.rst) · [bayesian](docs/bayesian_binomial/stratified.rst) |
-| **Diff-in-diff** | Multi-period heterogeneity testing, pairwise comparisons, Cochran's Q | [frequentist](docs/frequentist_binomial/diff_in_diff.rst) · [bayesian](docs/bayesian_binomial/diff_in_diff.rst) |
+| **Diff-in-diff** | Treatment-effect heterogeneity across segments (one control and one treatment per segment), pairwise comparisons, Cochran's Q | [frequentist](docs/frequentist_binomial/diff_in_diff.rst) · [bayesian](docs/bayesian_binomial/diff_in_diff.rst) |
 | **Bayesian inference** | P(B > A), expected loss, ROPE analysis, lift probability thresholds | [docs](docs/bayesian_binomial/stats_tests.rst) |
 | **Equivalence testing** | TOST (two one-sided tests) and Bayesian ROPE equivalence | [frequentist](docs/frequentist_binomial/equivalence.rst) · [bayesian](docs/bayesian_binomial/equivalence.rst) |
 | **Randomization inference** | Assumption-free permutation p-values, individual- and cluster-level, with parallel Monte Carlo | [docs](docs/frequentist_binomial/randomization_inference.rst) |
-| **Multiple testing** | Bonferroni, Sidak, Holm (FWER), Benjamini-Hochberg (FDR) | [docs](docs/corrections.rst) |
-| **Cluster-randomized trials** | Frequentist cluster-summary Welch test with ICC and design effect; Bayesian beta-binomial hierarchical model (posterior integrates over the ICC) and simulation-based assurance | [frequentist](docs/frequentist_binomial/cluster.rst) · [bayesian](docs/bayesian_binomial/cluster.rst) |
+| **Multiple testing** | Bonferroni, Sidak, Holm, Holm-Sidak (FWER), Benjamini-Hochberg (FDR) | [docs](docs/corrections.rst) |
+| **Cluster-randomized trials** | Frequentist cluster-summary Welch test with ICC and design effect; Bayesian beta-binomial hierarchical model (posterior integrates over the ICC) and simulation-based assurance; three or more groups via Welch's ANOVA with Holm-adjusted comparisons | [frequentist](docs/frequentist_binomial/cluster.rst) · [bayesian](docs/bayesian_binomial/cluster.rst) |
 | **Diagnostics** | Sample ratio mismatch (SRM), time-trend (novelty/primacy) detection, and placebo tests | [docs](docs/diagnostics.rst) |
 | **Lift types** | Relative, absolute, incremental, ROAS, CPA, and revenue (CPA is not available for ROPE, equivalence, or difference-in-differences) | — |
 
@@ -34,13 +34,15 @@ A Python library for designing, running, and analyzing A/B tests on binomial met
 Requires Python >= 3.11.
 
 ```bash
-pip install git+https://github.com/ConorMcNamara/ab_test.git
+pip install git+https://github.com/ConorMcNamara/ab_test.git@v0.13.0
 ```
+
+The package isn't on PyPI yet, so install from GitHub. Pin a [release tag](https://github.com/ConorMcNamara/ab_test/releases) as above: installing `main` picks up unreleased changes, which can change reported results (power and sample sizes, for example) without notice.
 
 Optional extras:
 
 ```bash
-pip install "abtest-analysis[sklearn] @ git+https://github.com/ConorMcNamara/ab_test.git"   # MLRATE variance reduction (scikit-learn)
+pip install "abtest-analysis[sklearn] @ git+https://github.com/ConorMcNamara/ab_test.git@v0.13.0"   # MLRATE variance reduction (scikit-learn)
 ```
 
 Other extras: `pyspark`, `modin`, `ibis`, and `narwhals` for DataFrame export.
@@ -120,7 +122,7 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 
 ### `test_method`
 
-`"score"`, `"likelihood"`, `"z"`, `"wald"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`, `"msprt"`
+`"score"`, `"likelihood"`, `"z"`, `"wald"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`, `"msprt"`, `"randomization"`
 
 ### `conf_int_method`
 
