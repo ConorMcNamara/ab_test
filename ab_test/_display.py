@@ -236,9 +236,10 @@ def combine_lift_panels(figures: list[go.Figure], title: str, panel_titles: list
     """Place single-lift forest plots side by side, sharing the y-axis.
 
     Each figure becomes one panel: its traces, vertical reference lines and
-    x-axis tick format are copied over, and its legend entries are kept only
-    for the first panel. Layout taken from the first figure: template, legend
-    visibility, y-axis title and a reversed y-axis.
+    x-axis tick format are copied over, and its legend entries form a legend
+    section titled with the panel's title (clicking an entry hides that trace,
+    clicking the title hides the panel). Layout taken from the first figure:
+    template, legend visibility, y-axis title and a reversed y-axis.
 
     Parameters
     ----------
@@ -259,8 +260,9 @@ def combine_lift_panels(figures: list[go.Figure], title: str, panel_titles: list
         layout: Any = panel.layout
         traces: Any = panel.data
         for trace in traces:
-            if col > 1:
-                trace.showlegend = False
+            # One legend section per panel, titled with its lift, rather than legend
+            # entries for the first panel only.
+            trace.update(legendgroup=f"panel{col}", legendgrouptitle_text=panel_title)
             combined.add_trace(trace, row=1, col=col)
         for shape in layout.shapes:
             if shape.type == "line" and shape.x0 == shape.x1:
@@ -271,7 +273,11 @@ def combine_lift_panels(figures: list[go.Figure], title: str, panel_titles: list
         )
     first: Any = figures[0].layout
     combined.update_layout(
-        title_text=title, template=first.template, showlegend=first.showlegend, yaxis_title=first.yaxis.title.text
+        title_text=title,
+        template=first.template,
+        showlegend=first.showlegend,
+        yaxis_title=first.yaxis.title.text,
+        legend_groupclick="toggleitem",
     )
     if first.yaxis.autorange == "reversed":
         combined.update_yaxes(autorange="reversed")
@@ -433,6 +439,13 @@ def render_forest_plot(
                     showlegend=col == 1,
                 )
                 if len(panels) > 1:
+                    # Each panel gets its own legend section, titled with its lift, so every
+                    # point has an entry and the title toggles the whole panel.
+                    trace.update(
+                        showlegend=True,
+                        legendgroup=f"panel{col}",
+                        legendgrouptitle_text=_LIFT_LABELS.get(result["lift_type"], "Lift"),
+                    )
                     fig.add_trace(trace, row=1, col=col)
                 else:
                     fig.add_trace(trace)
@@ -443,6 +456,9 @@ def render_forest_plot(
                 )
             else:
                 fig.update_xaxes(**axis_format)
+        if len(panels) > 1:
+            # Clicking an entry hides that point only; clicking a section title hides the panel.
+            fig.update_layout(legend_groupclick="toggleitem")
 
     subtitle = " - ".join(part for part in (experiment_name, metric_name) if part)
     if is_individual:

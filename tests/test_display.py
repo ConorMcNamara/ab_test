@@ -101,7 +101,11 @@ class TestForestPlotBothLifts:
         assert fig.layout.xaxis.title.text == "Absolute Lift"
         assert fig.layout.xaxis2.title.text == "Relative Lift"
         assert fig.layout.xaxis.tickformat == fig.layout.xaxis2.tickformat == ",.0%"
-        assert [trace.showlegend for trace in fig.data] == [True, False]
+        # One legend section per lift, so relative lift has an entry too.
+        assert [trace.showlegend for trace in fig.data] == [True, True]
+        assert [trace.legendgroup for trace in fig.data] == ["panel1", "panel2"]
+        assert [trace.legendgrouptitle.text for trace in fig.data] == ["Absolute Lift", "Relative Lift"]
+        assert fig.layout.legend.groupclick == "toggleitem"
 
     @staticmethod
     def test_stored_results_unchanged():
@@ -225,11 +229,15 @@ class TestSegmentPlotsBothLifts:
 
 class TestCombineLiftPanels:
     @staticmethod
-    def test_legend_only_on_first_panel_and_formats_copied():
+    def test_legend_section_per_panel_and_formats_copied():
         left = go.Figure(go.Scatter(x=[0.1], y=["a"], name="a")).update_layout(xaxis_tickformat=",.1%", showlegend=True)
         right = go.Figure(go.Scatter(x=[0.2], y=["a"], name="a")).update_layout(xaxis_tickformat="$,")
         fig = combine_lift_panels([left, right], "Title", ["Left", "Right"])
-        assert [trace.showlegend for trace in fig.data] == [None, False]
+        # Both panels keep their legend entries, each under a section titled with the panel.
+        assert [trace.showlegend for trace in fig.data] == [None, None]
+        assert [trace.legendgroup for trace in fig.data] == ["panel1", "panel2"]
+        assert [trace.legendgrouptitle.text for trace in fig.data] == ["Left", "Right"]
+        assert fig.layout.legend.groupclick == "toggleitem"
         assert (fig.layout.xaxis.tickformat, fig.layout.xaxis2.tickformat) == (",.1%", "$,")
         assert fig.layout.title.text == "Title"
         assert fig.layout.showlegend is True
@@ -296,7 +304,12 @@ class TestMultiArmForestPlot:
         table.plot(is_individual=False, lift="both")
         fig = shown[-1]
         assert len(fig.data) == 6
-        assert sum(trace.showlegend for trace in fig.data) == 3
+        assert all(trace.showlegend for trace in fig.data)
+        sections = {trace.legendgrouptitle.text: [] for trace in fig.data}
+        for trace in fig.data:
+            sections[trace.legendgrouptitle.text].append(trace.name)
+        comparisons = ["B vs A", "C vs A", "C vs B"]
+        assert sections == {"Absolute Lift": comparisons, "Relative Lift": comparisons}
         assert table.incremental_results["comparison_type"] == "all"
 
     def test_palette_colours_each_comparison(self, shown):
