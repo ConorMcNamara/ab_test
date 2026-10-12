@@ -4,12 +4,15 @@ import numpy as np
 import pytest
 import scipy.stats as ss
 
+from ab_test._display import convert_to_tabulate_str
+from ab_test.corrections import holm
 from ab_test.frequentist_binomial.stratified import (
     StratifiedContingencyTable,
     _mh_risk_difference,
     _mh_risk_ratio,
     breslow_day_test,
     cmh_test,
+    generalized_cmh_test,
     stratified_power,
 )
 
@@ -119,12 +122,12 @@ class TestStratifiedContingencyTable:
         )
         assert len(st._cell_names) == 2
 
-    def test_add_third_group_raises(self):
+    def test_add_third_group(self):
         st = StratifiedContingencyTable("Test", "metric")
         st.add("A", 10, 100, stratum="s1")
         st.add("B", 20, 100, stratum="s1")
-        with pytest.raises(ValueError, match="Only 2 groups"):
-            st.add("C", 30, 100, stratum="s1")
+        st.add("C", 30, 100, stratum="s1")
+        assert st._cell_names == ["A", "B", "C"]
 
     def test_add_duplicate_raises(self):
         st = StratifiedContingencyTable("Test", "metric")
@@ -143,7 +146,7 @@ class TestStratifiedContingencyTable:
     def test_analyze_one_group_raises(self):
         st = StratifiedContingencyTable("Test", "metric")
         st.add("Control", 10, 100, stratum="s1")
-        with pytest.raises(ValueError, match="exactly 2 groups"):
+        with pytest.raises(ValueError, match="at least 2 groups"):
             st.analyze()
 
     def test_analyze_invalid_lift_raises(self):
@@ -588,3 +591,153 @@ class TestCmhUninformativeStrata:
         assert "nan" not in output.casefold()
         expected_p = cmh_test([[100, 130]], [[1000, 1000]])[1]
         assert f"{expected_p:.4f}*" in output
+
+
+class TestGeneralizedCmhTest:
+    @staticmethod
+    def test_two_groups_equal_cmh_test():
+        rng = np.random.default_rng(0)
+        for _ in range(50):
+            trials = rng.integers(2, 400, (int(rng.integers(1, 6)), 2))
+            successes = rng.binomial(trials, rng.uniform(0.05, 0.6, trials.shape))
+            statistic, pvalue = cmh_test(successes, trials)
+            if np.isfinite(statistic):
+                generalized = generalized_cmh_test(successes, trials)
+                assert generalized[0] == pytest.approx(statistic, rel=1e-10, abs=1e-12)
+                assert generalized[2] == pytest.approx(pvalue, rel=1e-10, abs=1e-12)
+
+    @staticmethod
+    def test_single_stratum_matches_pearson():
+        # With one stratum the statistic is (N - 1) / N times Pearson's chi-squared.
+        successes = np.array([[30, 45, 62]])
+        trials = np.array([[400, 410, 390]])
+        table = np.column_stack([successes[0], trials[0] - successes[0]])
+        pearson = ss.chi2_contingency(table, correction=False).statistic
+        statistic, df, _ = generalized_cmh_test(successes, trials)
+        assert statistic == pytest.approx((trials.sum() - 1) / trials.sum() * pearson)
+        assert df == 2
+
+    @staticmethod
+    def test_matches_full_vector_form():
+        # The same statistic from all k deviations and the singular k x k covariance.
+        rng = np.random.default_rng(1)
+        trials = rng.integers(20, 300, (4, 4))
+        successes = rng.binomial(trials, rng.uniform(0.05, 0.5, trials.shape))
+        d = np.zeros(4)
+        v = np.zeros((4, 4))
+        for x, n in zip(successes.astype(float), trials.astype(float)):
+            total, s = n.sum(), x.sum()
+            d += x - n * s / total
+            p = n / total
+            v += s * (total - s) / (total - 1) * (np.diag(p) - np.outer(p, p))
+        assert generalized_cmh_test(successes, trials)[0] == pytest.approx(d @ np.linalg.pinv(v) @ d)
+
+    @staticmethod
+    def test_no_informative_strata():
+        assert generalized_cmh_test([[0, 0, 0]], [[50, 60, 70]]) == (0.0, 0, 1.0)
+
+    @staticmethod
+    @pytest.mark.slow
+    def test_type_i_error():
+        rng = np.random.default_rng(2)
+        rates = np.array([0.03, 0.08, 0.15, 0.30])[:, None]
+        sizes = np.array([[200, 220, 180], [500, 480, 520], [150, 160, 140], [800, 760, 820]])
+        reps = 10_000
+        rejections = sum(generalized_cmh_test(rng.binomial(sizes, rates), sizes)[2] < 0.05 for _ in range(reps))
+        # Monte Carlo SE is about 0.0022.
+        assert rejections / reps == pytest.approx(0.05, abs=0.007)
+
+
+def _three_group_table(spend=None):
+    table = StratifiedContingencyTable("x", "conv", spend=spend)
+    for stratum, base, n in (("S1", 0.08, 1000), ("S2", 0.15, 3000)):
+        for cell, mult, size in (("A", 1.0, n), ("B", 1.2, n), ("C", 1.3, 2 * n)):
+            table.add(cell, int(base * mult * size), size, stratum=stratum)
+    return table
+
+
+def _pair_table(table, first, second, spend=None):
+    pair = StratifiedContingencyTable("x", "conv", spend=spend)
+    for stratum, cells in table._strata.items():
+        for cell in (first, second):
+            pair.add(cell, cells[cell]["successes"], cells[cell]["trials"], stratum=stratum)
+    return pair
+
+
+class TestStratifiedMultiArm:
+    @staticmethod
+    def test_omnibus_is_the_generalized_cmh():
+        table = _three_group_table()
+        output = table.analyze()
+        successes, trials, _ = table._build_arrays()
+        statistic, df, pvalue = generalized_cmh_test(successes, trials)
+        omnibus = table.comparison_results["omnibus"]
+        assert omnibus["statistic"] == pytest.approx(statistic)
+        assert omnibus["df"] == df == 2
+        assert omnibus["p_value"] == pytest.approx(pvalue)
+        assert "Generalized CMH test that all 3 groups share one rate across strata, df=2" in output
+
+    @staticmethod
+    def test_comparisons_match_two_group_analyses():
+        table = _three_group_table()
+        table.analyze(lift="absolute", comparisons="all")
+        comparisons = table.comparison_results["comparisons"]
+        assert list(comparisons) == ["B vs A", "C vs A", "C vs B"]
+        successes, trials, _ = table._build_arrays()
+        raw = []
+        for label, (i, j) in zip(comparisons, [(0, 1), (0, 2), (1, 2)]):
+            pair_s, pair_t = successes[:, [i, j]], trials[:, [i, j]]
+            raw.append(cmh_test(pair_s, pair_t)[1])
+            assert comparisons[label]["raw_p_value"] == pytest.approx(raw[-1])
+            assert comparisons[label]["breslow_day_p_value"] == pytest.approx(breslow_day_test(pair_s, pair_t)[1])
+        assert [c["p_value"] for c in comparisons.values()] == pytest.approx(holm(raw))
+
+    @staticmethod
+    def test_bonferroni_intervals_match_a_pair_table():
+        # Two comparisons: each interval is the two-group interval at alpha / 2.
+        table = _three_group_table()
+        table.analyze(lift="relative")
+        output = _pair_table(table, "A", "C").analyze(lift="relative", alpha=0.025)
+        comparison = table.comparison_results["comparisons"]["C vs A"]
+        for key in ("ci_lower", "ci_upper"):
+            assert f"| {convert_to_tabulate_str(comparison[key], 'relative')} " in output
+
+    @staticmethod
+    def test_scaled_lifts_use_one_scale():
+        # C has twice A's and B's traffic. Per pair, B vs A would be scaled by 4,000 units and
+        # C vs A by 8,000, so the C vs B lift would not be the difference of the other two.
+        table = _three_group_table(spend=5000)
+        output = table.analyze(lift="incremental", comparisons="all")
+        comparisons = table.comparison_results["comparisons"]
+        assert comparisons["C vs B"]["lift"] == pytest.approx(
+            comparisons["C vs A"]["lift"] - comparisons["B vs A"]["lift"], rel=0.02
+        )
+        rate_a, rate_b = comparisons["B vs A"]["A"], comparisons["B vs A"]["B"]
+        assert comparisons["B vs A"]["lift"] == pytest.approx((rate_b - rate_a) * 8000, rel=0.02)
+        assert "Scaled lifts are per 8,000 units (the largest group) for every comparison" in output
+
+    @staticmethod
+    def test_correction_and_comparison_options():
+        table = _three_group_table()
+        table.analyze(comparisons="all", correction="bonferroni")
+        for comparison in table.comparison_results["comparisons"].values():
+            assert comparison["p_value"] == pytest.approx(min(1.0, 3 * comparison["raw_p_value"]))
+        with pytest.raises(ValueError, match="comparisons must be"):
+            table.analyze(comparisons="pairs")
+        with pytest.raises(ValueError, match="Unknown method"):
+            table.analyze(correction="nope")
+
+    @staticmethod
+    def test_per_stratum_output_is_two_group_only():
+        table = _three_group_table()
+        with pytest.raises(ValueError, match="compare two groups"):
+            table.analyze_by_stratum()
+        with pytest.raises(ValueError, match="compare two groups"):
+            table.plot()
+
+    @staticmethod
+    def test_two_groups_ignore_the_new_options():
+        table = _pair_table(_three_group_table(), "A", "B")
+        default = table.analyze()
+        assert table.analyze(comparisons="all", correction="bonferroni") == default
+        assert table.comparison_results is None
