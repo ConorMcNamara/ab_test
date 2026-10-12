@@ -45,6 +45,21 @@ Pass ``seed`` to any power, search or plot function for reproducible results. Ea
 cluster has its own random stream, so a search over the number of clusters compares
 nested designs and returns the same answer every time.
 
+Three or More Groups
+--------------------
+
+With three or more groups (the first group added is the control),
+``analyze()`` reports each group's **probability of being best** and its
+**expected loss**, E[best rate - its rate] (a difference in rates), from one
+joint draw of the arm-level posteriors, then the **pairwise comparisons**
+(``comparisons="control"`` or ``"all"``), each reported as a two-group
+analysis would be: lift, credible interval, probability of being greater,
+expected loss in the lift's units, and the ROPE probability with its default
+scaled to that comparison's reference group. Posterior probabilities need no
+multiple-comparison correction, but stopping as soon as one crosses a
+threshold still inflates false wins. ``plot()`` and ``plot_pdf()`` show
+every group. With two groups the output is unchanged.
+
 API Reference
 -------------
 
