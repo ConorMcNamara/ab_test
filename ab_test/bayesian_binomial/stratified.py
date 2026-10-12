@@ -581,9 +581,14 @@ class BayesianStratifiedContingencyTable:
         rows = []
         for label, c in compared.items():
             star = "*" if c["prob_greater"] >= confidence_level else ""
-            # Scaled lifts format as plain numbers, which would print every digit in this text cell.
-            tau_parts = [fmt(c[key]) for key in ("tau_mean", "tau_ci_lower", "tau_ci_upper")]
-            tau_parts = [f"{v:,.2f}" if isinstance(v, float) else v for v in tau_parts]
+            tau_parts: list[str | float | int]
+            if lift == "relative":
+                # Relative tau is on the log risk-ratio scale, not a percentage (as in the two-group line).
+                tau_parts = [f"{c[key]:.4f}" for key in ("tau_mean", "tau_ci_lower", "tau_ci_upper")]
+            else:
+                # Scaled lifts format as plain numbers, which would print every digit in this text cell.
+                tau_parts = [fmt(c[key]) for key in ("tau_mean", "tau_ci_lower", "tau_ci_upper")]
+                tau_parts = [f"{v:,.2f}" if isinstance(v, float) else v for v in tau_parts]
             tau = "n/a" if np.isnan(c["tau_mean"]) else f"{tau_parts[0]} ({tau_parts[1]}, {tau_parts[2]})"
             rows.append(
                 [label]
@@ -603,7 +608,7 @@ class BayesianStratifiedContingencyTable:
                 "Prob Greater *",
                 "Expected Loss" + (" (rate difference)" if lift == "cpa" else ""),
                 "Probability Lift is in ROPE ***",
-                "Between-stratum tau",
+                "Between-stratum tau" + (" (log RR)" if lift == "relative" else ""),
             ],
             tablefmt="grid",
         )

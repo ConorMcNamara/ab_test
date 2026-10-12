@@ -662,3 +662,19 @@ class TestBayesianStratifiedMultiArm:
         np.random.seed(0)
         assert table.analyze(comparisons="all", n_samples=5000) == default
         assert "comparisons" not in table.pooled_results
+
+
+class TestMultiGroupTauLabel:
+    @staticmethod
+    def test_relative_tau_is_on_the_log_rr_scale():
+        # The two-group line says "(log RR)" without a percent; the k >= 3 table printed 11.27%.
+        table = BayesianStratifiedContingencyTable("x", "c")
+        for stratum, base in (("S1", 100), ("S2", 150)):
+            for group, extra in (("A", 0), ("B", 20), ("C", 30)):
+                table.add(group, base + extra, 1000, 1, 1, stratum=stratum)
+        np.random.seed(0)
+        output = table.analyze(lift="relative", n_samples=4000)
+        header = next(line for line in output.splitlines() if "Between-stratum tau" in line)
+        assert "Between-stratum tau (log RR)" in header
+        row = next(line for line in output.splitlines() if line.startswith("| B vs A"))
+        assert row.rstrip(" |").split("|")[-1].count("%") == 0
