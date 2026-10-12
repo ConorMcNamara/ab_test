@@ -528,8 +528,10 @@ class StratifiedContingencyTable:
     def _build_arrays(self, two_groups: bool = False) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any], list[str]]:
         """Return ``(successes, trials)`` arrays of shape ``(K, k)`` and stratum names.
 
-        ``two_groups=True`` is for callers that only report a single
-        comparison, so three or more groups raise.
+        Pass ``two_groups=True`` from methods that report a single comparison
+        (``analyze_by_stratum()`` and ``plot()``): with three or more groups
+        they then raise a ``ValueError`` instead of silently using the first
+        two.
         """
         k = len(self._cell_names)
         if k < 2:

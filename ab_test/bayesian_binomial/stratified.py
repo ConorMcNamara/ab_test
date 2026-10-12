@@ -149,8 +149,10 @@ class BayesianStratifiedContingencyTable:
     ]:
         """Return per-stratum arrays and stratum names.
 
-        ``two_groups=True`` is for callers that only report a single
-        comparison, so three or more groups raise.
+        Pass ``two_groups=True`` from methods that report a single comparison
+        (``analyze_by_stratum()`` and ``plot()``): with three or more groups
+        they then raise a ``ValueError`` instead of silently using the first
+        two.
 
         Returns
         -------
