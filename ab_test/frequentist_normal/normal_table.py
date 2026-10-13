@@ -239,7 +239,16 @@ class NormalTable(BaseContinuousTable):
             ]
         else:
             table_list = [[lift, self.metric_name] + cell_values + [test_lift, lb, ub] + [str_pvalue]]
-        return_string: str = tabulate(table_list, headers=table_headers, tablefmt="grid", floatfmt=".2f", intfmt=",")
+        # ROAS is formatted as a bare number; reparsing a string like "2" as an int
+        # would apply intfmt to it.
+        return_string: str = tabulate(
+            table_list,
+            headers=table_headers,
+            tablefmt="grid",
+            floatfmt=".2f",
+            intfmt=",",
+            disable_numparse=lift == "roas",
+        )
         return_string += (
             f"\n* next to the p-value means it's statistically significant at the {round(alpha * 100)}% level"
         )
