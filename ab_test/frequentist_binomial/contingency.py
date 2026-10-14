@@ -3,6 +3,7 @@
 import functools
 import itertools
 import math
+from collections.abc import Iterable
 from typing import Any, ClassVar, Literal
 
 import numpy as np
@@ -147,6 +148,39 @@ class ContingencyTable(BaseContingencyTable):
         -------
         ContingencyTable, to be chained with other methods
         """
+        cell_dict = {"successes": successes, "trials": trials}
+        self.cells["table"][cell_name] = cell_dict
+        self.names.append(cell_name)
+        self.successes.append(successes)
+        self.trials.append(trials)
+        return self
+
+    def add_data(self, cell_name: str, data: Iterable[int | bool]) -> "ContingencyTable":
+        """Add a cell from raw 0/1 outcomes, counting successes and trials automatically.
+
+        Parameters
+        ----------
+        cell_name : str
+            The name of our cell.
+        data : iterable of int or bool
+            One outcome per trial: 1 (or True) for a success, 0 (or False) otherwise.
+            Any iterable works, including lists, tuples, numpy arrays and generators.
+
+        Returns
+        -------
+        ContingencyTable, to be chained with other methods
+
+        Raises
+        ------
+        ValueError
+            If any outcome is not 0 or 1.
+        """
+        # Read the data once: a generator has no len() and can only be iterated once.
+        values = np.ravel(data) if isinstance(data, np.ndarray) else np.fromiter(data, dtype=float)
+        if not np.isin(values, (0, 1)).all():
+            raise ValueError("add_data expects 0/1 (or boolean) outcomes")
+        successes = int(values.sum())
+        trials = int(values.size)
         cell_dict = {"successes": successes, "trials": trials}
         self.cells["table"][cell_name] = cell_dict
         self.names.append(cell_name)

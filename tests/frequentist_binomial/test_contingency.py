@@ -552,5 +552,66 @@ class TestMultiArm:
         assert table.incremental_results["comparisons"]["C vs A"]["lift"] == pytest.approx(0.007)
 
 
+class TestAddData:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "data",
+        [
+            [1, 0, 1, 1, 0],
+            (1, 0, 1, 1, 0),
+            np.array([1, 0, 1, 1, 0]),
+            [True, False, True, True, False],
+            np.array([True, False, True, True, False]),
+            [1.0, 0.0, 1.0, 1.0, 0.0],
+            pd.Series([1, 0, 1, 1, 0]),
+            (x for x in [1, 0, 1, 1, 0]),
+            iter([1, 0, 1, 1, 0]),
+        ],
+        ids=["list", "tuple", "array", "bools", "bool-array", "floats", "series", "generator", "iterator"],
+    )
+    def test_counts_successes_and_trials(data):
+        ct = ContingencyTable(name="Raw", metric_name="sales").add_data("A", data)
+        assert ct.successes == [3]
+        assert ct.trials == [5]
+        assert ct.cells["table"]["A"] == {"successes": 3, "trials": 5}
+
+    @staticmethod
+    def test_counts_are_python_ints():
+        ct = ContingencyTable(name="Raw", metric_name="sales").add_data("A", np.array([1, 0, 1]))
+        assert type(ct.successes[0]) is int
+        assert type(ct.trials[0]) is int
+
+    @staticmethod
+    def test_counts_every_observation_in_2d_input():
+        ct = ContingencyTable(name="Raw", metric_name="sales").add_data("A", np.array([[1, 0, 1], [1, 1, 0]]))
+        assert ct.successes == [4]
+        assert ct.trials == [6]
+
+    @staticmethod
+    def test_empty_data():
+        ct = ContingencyTable(name="Raw", metric_name="sales").add_data("A", [])
+        assert ct.successes == [0]
+        assert ct.trials == [0]
+
+    @staticmethod
+    @pytest.mark.parametrize("data", [[1, 0, 2], [0.5, 1.0], [-1, 0, 1], np.array([1, 0, 2])])
+    def test_non_binary_outcomes_raise(data):
+        with pytest.raises(ValueError, match="0/1"):
+            ContingencyTable(name="Raw", metric_name="sales").add_data("A", data)
+
+    @staticmethod
+    def test_matches_add_and_chains():
+        from_data = (
+            ContingencyTable(name="Raw", metric_name="sales")
+            .add_data("Holdout", [1] * 100 + [0] * 900)
+            .add_data("Test", [1] * 110 + [0] * 890)
+        )
+        from_counts = (
+            ContingencyTable(name="Raw", metric_name="sales").add("Holdout", 100, 1_000).add("Test", 110, 1_000)
+        )
+        assert from_data.to_list(include_total=True) == from_counts.to_list(include_total=True)
+        assert from_data.analyze() == from_counts.analyze()
+
+
 if __name__ == "__main__":
     pytest.main()

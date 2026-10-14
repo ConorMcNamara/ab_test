@@ -118,8 +118,8 @@ class TestScorePower:
     def test_required_sample_size_relative_lift():
         baseline = 0.10
         alt_lift = 0.50
-        # 10% -> 15%: Fleiss' textbook formula gives 1,371 in total.
-        expected = 1375
+        # 10% -> 15%: 686 per group, as statsmodels' samplesize_proportions_2indep_onetail.
+        expected = 1372
 
         actual = required_sample_size(baseline, alt_lift, lift="relative")
         assert actual == pytest.approx(expected)
@@ -129,10 +129,45 @@ class TestScorePower:
         baseline = 0.10
         alt_lift = 0.05
         # The same 10% -> 15% effect as the relative test above, so the same answer.
-        expected = 1375
+        expected = 1372
 
         actual = required_sample_size(baseline, alt_lift, lift="absolute")
         assert actual == pytest.approx(expected)
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "p_a,p_b,expected",
+        [
+            (0.02, 0.025, 27618),
+            (0.05, 0.055, 62468),
+            (0.10, 0.15, 1372),
+            (0.30, 0.60, 84),
+            (0.50, 0.55, 3130),
+            (0.01, 0.02, 4638),
+        ],
+    )
+    def test_required_sample_size_matches_statsmodels(p_a, p_b, expected):
+        # 2 * ceil(samplesize_proportions_2indep_onetail(p_b - p_a, p_a, 0.8, alternative="two-sided")),
+        # which is also what R's power.prop.test(p1=p_a, p2=p_b, power=0.8) gives.
+        assert required_sample_size(p_a, p_b - p_a, lift="absolute") == expected
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "p_a,p_b,group_proportions,reference,expected",
+        [
+            # reference is samplesize_proportions_2indep_onetail with ratio = control / treatment,
+            # as [control, treatment]: nobs1 is the treatment and nobs2 = ratio * nobs1 the control.
+            (0.10, 0.15, [2 / 3, 1 / 3], [1003.79, 501.90], [1004, 502]),
+            (0.10, 0.15, [1 / 3, 2 / 3], [525.33, 1050.66], [526, 1052]),
+            (0.10, 0.15, [3 / 4, 1 / 4], [1320.80, 440.27], [1323, 441]),
+        ],
+    )
+    def test_required_sample_size_uneven_split_matches_statsmodels(p_a, p_b, group_proportions, reference, expected):
+        # Each group is at least the reference size, rounded up as little as the fixed split allows.
+        n = required_sample_size(p_a, p_b - p_a, lift="absolute", group_proportions=group_proportions)
+        groups = [int(n * g) for g in group_proportions]
+        assert groups == expected
+        assert all(group >= ref for group, ref in zip(groups, reference))
 
     @staticmethod
     @pytest.mark.parametrize(
@@ -396,8 +431,8 @@ class TestMultiArmPower:
             proportions = [1 / k] * k
             n = required_sample_size(0.10, 0.30, group_proportions=proportions)
             assert abtest_power([int(n * g) for g in proportions], 0.10, 0.30) >= 0.8
-            # The search stops within a 1% relative tolerance.
-            assert abtest_power([int(0.99 * n * g) for g in proportions], 0.10, 0.30) < 0.8
+            # The answer is exact: one fewer unit loses the target power.
+            assert abtest_power([int((n - 1) * g) for g in proportions], 0.10, 0.30) < 0.8
 
     @staticmethod
     def test_required_sample_size_grows_with_arms():
