@@ -10,6 +10,7 @@ from tabulate import tabulate
 
 from ab_test._continuous_table import BaseContinuousTable
 from ab_test._display import convert_to_tabulate_str
+from ab_test._lift import to_absolute
 from ab_test.frequentist_normal.stats_tests import score_test, welch_test
 from ab_test.frequentist_normal.confidence_intervals import confidence_interval
 from ab_test.frequentist_normal.utils import observed_lift
@@ -143,7 +144,7 @@ class NormalTable(BaseContinuousTable):
         alpha : float, default = 0.05
             The alpha level of our experiment, to be used to craft confidence intervals.
         null_lift : float
-            Lift associated with null hypothesis. Defaults to 0.0.
+            Lift associated with null hypothesis, in the units of ``lift``. Defaults to 0.0.
         equal_var : bool, default=True
             Whether the score test assumes both groups share a common variance.
             Only used when ``test_method='score'``; Welch's test always allows
@@ -165,10 +166,17 @@ class NormalTable(BaseContinuousTable):
         else:
             raise NotImplementedError(f"No support for {test_method} test method")
         if lift in ["incremental", "roas", "revenue", "cpa"]:
+            # The tests work on the per-unit difference in means, so test the null on
+            # the same absolute scale that the interval is built on.
             ci_lift = "absolute"
+            if lift == "cpa" and null_lift == 0:
+                test_null = 0.0
+            else:
+                test_null = to_absolute(null_lift, lift, max(n_a, n_b), self.spend, self.msrp)
         else:
             ci_lift = lift
-        p_value = test(self.means, self.variances, self.trials, null_lift, ci_lift)
+            test_null = null_lift
+        p_value = test(self.means, self.variances, self.trials, test_null, ci_lift)
         lb, ub = confidence_interval(
             self.means, self.variances, self.trials, test=test, method=conf_int_method, alpha=alpha, lift=ci_lift
         )

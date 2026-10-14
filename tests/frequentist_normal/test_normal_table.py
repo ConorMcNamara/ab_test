@@ -291,6 +291,26 @@ class TestNormalTable:
             nt.analyze(lift="revenue")
 
     @staticmethod
+    @pytest.mark.parametrize("test_method", ["welch", "score"])
+    @pytest.mark.parametrize(
+        "lift, null_lift",
+        # Each null is an absolute difference in means of 0.1, over 1,000 units,
+        # with spend=2000 and msrp=50.
+        [("incremental", 100.0), ("roas", 0.05), ("revenue", 5000.0), ("cpa", 20.0)],
+    )
+    def test_analyze_scaled_null_lift_matches_absolute(test_method, lift, null_lift):
+        def p_value(lift, null_lift):
+            nt = NormalTable(name="Scaled Null", metric_name="revenue", spend=2000.0, msrp=50.0)
+            nt.add("Holdout", 2.0, 4.0, 1000)
+            nt.add("Test", 2.2, 5.0, 1000)
+            nt.analyze(lift=lift, test_method=test_method, null_lift=null_lift)
+            return nt.incremental_results["p_value"]
+
+        expected = p_value("absolute", 0.1)
+        assert 0.01 < expected < 0.99
+        assert p_value(lift, null_lift) == pytest.approx(expected)
+
+    @staticmethod
     def test_analyze_returns_string():
         nt = NormalTable(name="Test", metric_name="metric")
         nt.add("A", 10.0, 4.0, 1000)
