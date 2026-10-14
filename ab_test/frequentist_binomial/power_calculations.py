@@ -431,6 +431,8 @@ def required_sample_size(
         while shortfall(ss_upper) < 0:
             ss_lower = ss_upper
             ss_upper *= 2
+    # scipy types brentq as returning the root or, with full_output=True, a
+    # (root, RootResults) tuple. full_output is False here, so it is a float.
     root: float = brentq(shortfall, ss_lower, ss_upper, xtol=1e-6)  # type: ignore[assignment]
 
     # Callers split the total with int(ss * g), so step up from the continuous root
