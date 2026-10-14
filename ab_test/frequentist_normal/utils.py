@@ -7,6 +7,7 @@ import numpy as np
 
 __all__ = [
     "validate_two_group",
+    "validate_many_groups",
     "observed_lift",
     "mle_under_null",
     "mle_under_alternative",
@@ -46,6 +47,29 @@ def validate_two_group(
         raise NotImplementedError("Only supports a 2x2 continuous table")
     if not allow_relative_null and lift == "relative" and null_lift != 0.0:
         raise NotImplementedError("Only supports relative lift with a null of 0%")
+
+
+def validate_many_groups(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+) -> None:
+    """Validate the inputs shared by every test across two or more groups.
+
+    Parameters
+    ----------
+    means, variances, trials : array_like
+        Per-group means, variances and trial counts.
+
+    Raises
+    ------
+    ValueError
+        If the inputs differ in length, or fewer than two groups are supplied.
+    """
+    if not len(means) == len(variances) == len(trials):
+        raise ValueError("means, variances and trials must have the same length")
+    if len(means) < 2:
+        raise ValueError(f"Need at least 2 groups, got {len(means)}")
 
 
 def observed_lift(
@@ -291,6 +315,7 @@ def mle_under_equal_means(
     and the best one is kept. With two groups this is `mle_under_null` with
     an absolute null of 0.
     """
+    validate_many_groups(means, variances, trials)
     means_f = [float(m) for m in means]
     if not equal_var:
         ml_vars = [(n - 1) / n * float(v) for n, v in zip(trials, variances)]

@@ -8,6 +8,7 @@ from ab_test.frequentist_normal.utils import (
     mle_under_equal_means,
     mle_under_null,
     observed_lift,
+    validate_many_groups,
     validate_two_group,
 )
 
@@ -55,6 +56,39 @@ class TestObservedLift:
         trials = [1000, 1000]
         with pytest.raises(ZeroDivisionError):
             observed_lift(means, trials)
+
+
+class TestValidateManyGroups:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "means, variances, trials",
+        [
+            ([1, 2], [4, 5], [100, 200]),
+            ([1, 2, 3], [4, 5, 6], [100, 200, 300]),
+            (np.array([1.0, 2.0, 3.0, 4.0]), np.array([4.0, 5.0, 6.0, 7.0]), np.array([10, 20, 30, 40])),
+        ],
+    )
+    def test_valid_groups_pass(means, variances, trials):
+        validate_many_groups(means, variances, trials)
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "means, variances, trials",
+        [
+            ([1, 2, 3], [4, 5], [100, 200, 300]),
+            ([1, 2], [4, 5, 6], [100, 200, 300]),
+            ([1, 2, 3], [4, 5, 6], [100, 200]),
+        ],
+    )
+    def test_mismatched_lengths_raise(means, variances, trials):
+        with pytest.raises(ValueError, match="same length"):
+            validate_many_groups(means, variances, trials)
+
+    @staticmethod
+    @pytest.mark.parametrize("k", [0, 1])
+    def test_fewer_than_two_groups_raise(k):
+        with pytest.raises(ValueError, match="at least 2 groups"):
+            validate_many_groups([1.0] * k, [1.0] * k, [10] * k)
 
 
 class TestValidateTwoGroup:
@@ -253,6 +287,14 @@ class TestMleUnderEqualMeans:
         mu, sigma2 = mle_under_equal_means([3.0, 2.0, 4.0], [0.0, 1.0, 1.0], [10, 10, 10], equal_var=False)
         assert mu == pytest.approx(3.0)
         assert sigma2[0] == pytest.approx(0.0)
+
+    @staticmethod
+    @pytest.mark.parametrize("equal_var", [True, False])
+    def test_invalid_groups_raise(equal_var):
+        with pytest.raises(ValueError, match="same length"):
+            mle_under_equal_means([1.0, 2.0, 3.0], [1.0, 1.0], [10, 10, 10], equal_var=equal_var)
+        with pytest.raises(ValueError, match="at least 2 groups"):
+            mle_under_equal_means([1.0], [1.0], [10], equal_var=equal_var)
 
 
 if __name__ == "__main__":

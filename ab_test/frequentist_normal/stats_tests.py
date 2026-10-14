@@ -8,7 +8,12 @@ from typing import Any
 import numpy as np
 import scipy.stats as ss
 
-from ab_test.frequentist_normal.utils import mle_under_equal_means, mle_under_null, validate_two_group
+from ab_test.frequentist_normal.utils import (
+    mle_under_equal_means,
+    mle_under_null,
+    validate_many_groups,
+    validate_two_group,
+)
 
 __all__ = ["welch_test", "score_test", "likelihood_ratio_test", "welch_anova", "score_omnibus_test"]
 
@@ -198,17 +203,6 @@ def likelihood_ratio_test(
     ...
 
 
-def _validate_many_groups(
-    means: np.ndarray[Any, Any] | list[Any],
-    variances: np.ndarray[Any, Any] | list[Any],
-    trials: np.ndarray[Any, Any] | list[Any],
-) -> None:
-    if not len(means) == len(variances) == len(trials):
-        raise ValueError("means, variances and trials must have the same length")
-    if len(means) < 2:
-        raise ValueError(f"An omnibus test needs at least 2 groups, got {len(means)}")
-
-
 def welch_anova(
     means: np.ndarray[Any, Any] | list[Any],
     variances: np.ndarray[Any, Any] | list[Any],
@@ -248,7 +242,7 @@ def welch_anova(
     Welch, B. L. (1951). "On the comparison of several mean values: an
     alternative approach." Biometrika, 38(3/4), 330-336.
     """
-    _validate_many_groups(means, variances, trials)
+    validate_many_groups(means, variances, trials)
     if any(v <= 0 for v in variances):
         raise ValueError("Welch's ANOVA needs a positive variance in every group")
     k = len(means)
@@ -299,7 +293,7 @@ def score_omnibus_test(
     compared against a chi-squared distribution with ``k - 1`` degrees of
     freedom. With two groups it equals `score_test` with a null lift of 0.
     """
-    _validate_many_groups(means, variances, trials)
+    validate_many_groups(means, variances, trials)
     mu, sigma2 = mle_under_equal_means(means, variances, trials, equal_var=equal_var)
     sigma2_by_group = sigma2 if isinstance(sigma2, list) else [sigma2] * len(means)
     # As in score_test, a group whose null variance is zero contributes nothing.
