@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import plotly.graph_objects as go
 import scipy.stats as ss
+from scipy.optimize import brentq
 
 from ab_test._display import apply_dark_mode
 from ab_test._lift import _SCALED_LIFTS, from_absolute, to_absolute
@@ -382,10 +383,17 @@ def required_sample_size(
 
     Notes
     -----
-    Uses binary search to compute the smallest sample size with
-    adequate power. Only "relative" and "absolute" lifts are supported;
-    scaled lifts (incremental, roas, revenue, cpa) depend on the group
-    sizes which are the unknown being solved for.
+    Solves for the continuous sample size with adequate power using
+    Brent's method, then rounds up so that each group, sized as
+    ``int(sample_size * group_proportion)``, keeps that power. With an even
+    split this matches statsmodels' ``samplesize_proportions_2indep_onetail``
+    and R's ``power.prop.test`` (per-group n, rounded up). It does not match
+    ``pwr::pwr.2p.test``, which uses Cohen's arcsine effect size ``h`` and
+    gives smaller sample sizes at low base rates (about 3% smaller for
+    1% -> 2%); the two agree near a base rate of 50%.
+    Only "relative" and "absolute" lifts are supported; scaled lifts
+    (incremental, roas, revenue, cpa) depend on the group sizes which are
+    the unknown being solved for.
     """
     if lift in _SCALED_LIFTS:
         raise ValueError(
@@ -394,34 +402,13 @@ def required_sample_size(
             f"for. Convert to 'relative' or 'absolute' lift first."
         )
 
-    tol = 0.01
-
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
+    target = 1 - beta
 
-    def sample_size_to_group_sizes(ss: int) -> list[int]:
-        return [int(ss * g) for g in group_proportions]
-
-    # Find an upper bound on the required sample size
-    ss_lower = 0
-    ss_upper = 1000
-
-    pwr = abtest_power(
-        sample_size_to_group_sizes(ss_upper),
-        baseline,
-        alt_lift,
-        alpha=alpha,
-        null_lift=null_lift,
-        power=power,
-        lift=lift,
-        comparisons=comparisons,
-    )
-
-    while pwr < 1 - beta:
-        ss_lower = ss_upper
-        ss_upper *= 2
-        pwr = abtest_power(
-            sample_size_to_group_sizes(ss_upper),
+    def power_at(group_sizes: list[float] | list[int]) -> float:
+        return abtest_power(
+            group_sizes,
             baseline,
             alt_lift,
             alpha=alpha,
@@ -431,28 +418,28 @@ def required_sample_size(
             comparisons=comparisons,
         )
 
-    # Stop at a gap of one: below 100 the relative tolerance is under 1, and the
-    # integer midpoint would then equal ss_lower forever.
-    while ss_upper - ss_lower > max(1, tol * ss_lower):
-        ss = int(0.5 * (ss_lower + ss_upper))
-        pwr = abtest_power(
-            sample_size_to_group_sizes(ss),
-            baseline,
-            alt_lift,
-            alpha=alpha,
-            null_lift=null_lift,
-            power=power,
-            lift=lift,
-            comparisons=comparisons,
-        )
-        if pwr < 1 - beta:
-            # Inadequate power, increase ss
-            ss_lower = ss
-        else:
-            # Adequate power, decrease ss
-            ss_upper = ss
+    def shortfall(ss: float) -> float:
+        return power_at([ss * g for g in group_proportions]) - target
 
-    return ss_upper
+    # Bracket the continuous root, then solve it exactly rather than to a tolerance.
+    ss_lower = ss_upper = 1000.0
+    if shortfall(ss_upper) >= 0:
+        while ss_lower > 1 and shortfall(ss_lower) >= 0:
+            ss_lower /= 2
+        ss_upper = 2 * ss_lower
+    else:
+        while shortfall(ss_upper) < 0:
+            ss_lower = ss_upper
+            ss_upper *= 2
+    root: float = brentq(shortfall, ss_lower, ss_upper, xtol=1e-6)  # type: ignore[assignment]
+
+    # Callers split the total with int(ss * g), so step up from the continuous root
+    # until every group, once floored, is at least as large as it needs to be. With
+    # an even split this gives k * ceil(root / k), i.e. per-group n rounded up.
+    ss = math.ceil(root - 1e-6)
+    while power_at([int(ss * g) for g in group_proportions]) < target:
+        ss += 1
+    return ss
 
 
 def plot_power_curve(
