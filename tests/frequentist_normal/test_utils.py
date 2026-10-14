@@ -5,6 +5,7 @@ import pytest
 
 from ab_test.frequentist_normal.utils import (
     mle_under_alternative,
+    mle_under_equal_means,
     mle_under_null,
     observed_lift,
     validate_two_group,
@@ -214,6 +215,44 @@ class TestMleUnequalVariance:
         assert mle_under_alternative(*args, alt_lift=0.5, lift="absolute", equal_var=False) == mle_under_null(
             *args, null_lift=0.5, lift="absolute", equal_var=False
         )
+
+
+class TestMleUnderEqualMeans:
+    @staticmethod
+    @pytest.mark.parametrize("equal_var", [True, False])
+    def test_two_groups_matches_mle_under_null(equal_var):
+        args = ([2.0, 2.3], [4.0, 9.0], [50, 80])
+        mu, sigma2 = mle_under_equal_means(*args, equal_var=equal_var)
+        expected_mu, expected_sigma2 = mle_under_null(*args, null_lift=0.0, lift="absolute", equal_var=equal_var)
+        assert mu == pytest.approx(expected_mu[0])
+        assert sigma2 == pytest.approx(expected_sigma2)
+
+    @staticmethod
+    def test_equal_var_is_pooled_mean():
+        mu, sigma2 = mle_under_equal_means([1.0, 2.0, 4.0], [1.0, 1.0, 1.0], [10, 20, 10])
+        assert mu == pytest.approx(2.25)
+        within = (9 + 19 + 9) * 1.0
+        between = 10 * 1.25**2 + 20 * 0.25**2 + 10 * 1.75**2
+        assert sigma2 == pytest.approx((within + between) / 40)
+
+    @staticmethod
+    def test_unequal_var_maximizes_profile_likelihood():
+        means, variances, trials = [2.0, 2.3, 1.7], [4.0, 9.0, 0.5], [50, 80, 30]
+        ml_vars = [(n - 1) / n * v for n, v in zip(trials, variances)]
+
+        def profile_ll(mu):
+            return sum(-0.5 * n * np.log(v + (m - mu) ** 2) for n, m, v in zip(trials, means, ml_vars))
+
+        mu, sigma2 = mle_under_equal_means(means, variances, trials, equal_var=False)
+        grid = np.linspace(min(means) - 1, max(means) + 1, 20001)
+        assert profile_ll(mu) >= max(profile_ll(g) for g in grid) - 1e-9
+        assert sigma2 == pytest.approx([v + (m - mu) ** 2 for m, v in zip(means, ml_vars)])
+
+    @staticmethod
+    def test_unequal_var_zero_variance_group_pins_the_mean():
+        mu, sigma2 = mle_under_equal_means([3.0, 2.0, 4.0], [0.0, 1.0, 1.0], [10, 10, 10], equal_var=False)
+        assert mu == pytest.approx(3.0)
+        assert sigma2[0] == pytest.approx(0.0)
 
 
 if __name__ == "__main__":

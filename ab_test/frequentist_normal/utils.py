@@ -10,6 +10,7 @@ __all__ = [
     "observed_lift",
     "mle_under_null",
     "mle_under_alternative",
+    "mle_under_equal_means",
 ]
 
 
@@ -247,3 +248,76 @@ def mle_under_alternative(
         sum_sq = (trials[0] - 1) * variances[0] + (trials[1] - 1) * variances[1]
         return mu, float(sum_sq / (trials[0] + trials[1]))
     return mle_under_null(means, variances, trials, null_lift=alt_lift, lift=lift, equal_var=equal_var)
+
+
+def mle_under_equal_means(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+    equal_var: bool = True,
+) -> tuple[float, float | list[float]]:
+    """Maximum Likelihood Estimation when every group shares one mean.
+
+    Parameters
+    ----------
+    means : array_like
+        The average for each of two or more groups.
+    variances : array_like
+        The sample variances (``ddof=1``) for each group.
+    trials : array_like
+        Number of trials in each group.
+    equal_var : bool, default=True
+        Whether every group shares a common variance.
+
+    Returns
+    -------
+    mu : float
+        The MLE of the common mean.
+    sigma2 : float or list of float
+        The MLE of the common variance if ``equal_var`` is True, otherwise one
+        variance per group.
+
+    Notes
+    -----
+    With a common variance, ``mu`` is the trial-weighted mean of the group
+    means, and ``sigma2`` is the within-group sum of squares plus each group's
+    squared deviation from ``mu``, divided by the total number of trials.
+
+    With separate variances, each group's variance is its within-group sum of
+    squares divided by its trials, plus its squared deviation from ``mu``.
+    Profiling out those variances leaves a one-dimensional likelihood in
+    ``mu`` whose stationary points are the real roots of a polynomial of
+    degree ``2k - 1``. As in `mle_under_null`, every real root is evaluated
+    and the best one is kept. With two groups this is `mle_under_null` with
+    an absolute null of 0.
+    """
+    means_f = [float(m) for m in means]
+    if not equal_var:
+        ml_vars = [(n - 1) / n * float(v) for n, v in zip(trials, variances)]
+        x = np.polynomial.Polynomial([0.0, 1.0])
+        terms = [ml_var + (mean - x) ** 2 for mean, ml_var in zip(means_f, ml_vars)]
+        # sum_i n_i * r_i / (v_i + r_i**2) = 0, multiplied through by every denominator.
+        stationary = np.polynomial.Polynomial([0.0])
+        for i, (n, mean) in enumerate(zip(trials, means_f)):
+            term = n * (mean - x)
+            for j, other in enumerate(terms):
+                if j != i:
+                    term = term * other
+            stationary = stationary + term
+        stationary = stationary.trim()
+        # Near-repeated roots come back slightly complex, so keep every root's real
+        # part; the group means cover groups with zero variance.
+        candidates = [float(r.real) for r in stationary.roots()] + means_f
+
+        def profile_ll(mu: float) -> float:
+            group_vars = [ml_var + (mean - mu) ** 2 for mean, ml_var in zip(means_f, ml_vars)]
+            if any(v <= 0 for v in group_vars):
+                return math.inf
+            return float(sum(-0.5 * n * math.log(v) for n, v in zip(trials, group_vars)))
+
+        mu = max(candidates, key=profile_ll)
+        return float(mu), [float(ml_var + (mean - mu) ** 2) for mean, ml_var in zip(means_f, ml_vars)]
+    total = sum(trials)
+    mu = sum(n * mean for n, mean in zip(trials, means_f)) / total
+    sum_sq = sum((n - 1) * float(v) + n * (mean - mu) ** 2 for n, v, mean in zip(trials, variances, means_f))
+    return float(mu), float(sum_sq / total)

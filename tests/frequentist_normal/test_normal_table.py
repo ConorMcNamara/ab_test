@@ -2,12 +2,14 @@
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
+from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_normal.normal_table import NormalTable
-from ab_test.frequentist_normal.stats_tests import score_test
+from ab_test.frequentist_normal.stats_tests import score_omnibus_test, score_test, welch_anova
 
 
 class TestNormalTable:
@@ -178,7 +180,7 @@ class TestNormalTable:
     def test_analyze_requires_two_variants():
         nt = NormalTable(name="Test", metric_name="metric")
         nt.add("A", 10.0, 4.0, 1000)
-        with pytest.raises(ValueError, match="analyze requires exactly 2 variants"):
+        with pytest.raises(ValueError, match="analyze requires at least 2 variants"):
             nt.analyze()
 
     @pytest.mark.parametrize(
@@ -384,6 +386,171 @@ class TestNormalTable:
         nt.add("B", 11.0, 5.0, 1000)
         with pytest.raises(NotImplementedError):
             nt.analyze(test_method="fisher")
+
+
+def _three_arm_table(**kwargs):
+    nt = NormalTable(name="Three Arms", metric_name="order value", **kwargs)
+    nt.add("Control", 52.0, 144.0, 1000).add("T1", 54.5, 150.0, 1000).add("T2", 53.0, 160.0, 900)
+    return nt
+
+
+def _pair_table(names, means, variances, trials, **kwargs):
+    nt = NormalTable(name="Pair", metric_name="order value", **kwargs)
+    for name, mean, variance, n in zip(names, means, variances, trials):
+        nt.add(name, mean, variance, n)
+    return nt
+
+
+class TestNormalTableMultiGroup:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "comparisons, expected",
+        [("control", ["T1 vs Control", "T2 vs Control"]), ("all", ["T1 vs Control", "T2 vs Control", "T2 vs T1"])],
+    )
+    def test_comparison_labels(comparisons, expected):
+        nt = _three_arm_table()
+        nt.analyze(lift="absolute", comparisons=comparisons)
+        assert list(nt.incremental_results["comparisons"]) == expected
+        assert nt.incremental_results["comparison_type"] == comparisons
+
+    @staticmethod
+    @pytest.mark.parametrize("test_method", ["welch", "score"])
+    @pytest.mark.parametrize("lift", ["absolute", "relative"])
+    def test_comparisons_match_two_variant_tables(test_method, lift):
+        # Each comparison is a two-variant analysis at the Bonferroni level alpha / m.
+        nt = _three_arm_table()
+        nt.analyze(lift=lift, test_method=test_method, comparisons="all", alpha=0.06)
+        for label, (i, j) in {"T1 vs Control": (0, 1), "T2 vs Control": (0, 2), "T2 vs T1": (1, 2)}.items():
+            pair = _pair_table(
+                [nt.names[i], nt.names[j]],
+                [nt.means[i], nt.means[j]],
+                [nt.variances[i], nt.variances[j]],
+                [nt.trials[i], nt.trials[j]],
+            )
+            pair.analyze(lift=lift, test_method=test_method, alpha=0.02)
+            comparison = nt.incremental_results["comparisons"][label]
+            for key in ["lift", "ci_lower", "ci_upper"]:
+                assert comparison[key] == pytest.approx(pair.incremental_results[key])
+            assert comparison["raw_p_value"] == pytest.approx(pair.incremental_results["p_value"])
+
+    @staticmethod
+    @pytest.mark.parametrize("correction", ["holm", "bonferroni", "bh"])
+    def test_p_values_are_adjusted(correction):
+        nt = _three_arm_table()
+        nt.analyze(lift="absolute", comparisons="all", correction=correction)
+        comparisons = nt.incremental_results["comparisons"].values()
+        raw = [c["raw_p_value"] for c in comparisons]
+        assert [c["p_value"] for c in comparisons] == pytest.approx(adjust_pvalues(raw, method=correction))
+        assert nt.incremental_results["correction"] == correction
+
+    @staticmethod
+    def test_welch_omnibus():
+        nt = _three_arm_table()
+        nt.analyze(lift="absolute")
+        statistic, df_num, df_denom, pval = welch_anova(nt.means, nt.variances, nt.trials)
+        assert nt.incremental_results["omnibus"] == {
+            "test": "Welch's ANOVA",
+            "statistic": pytest.approx(statistic),
+            "df": df_num,
+            "df_denom": pytest.approx(df_denom),
+            "p_value": pytest.approx(pval),
+        }
+
+    @staticmethod
+    @pytest.mark.parametrize("equal_var", [True, False])
+    def test_score_omnibus(equal_var):
+        nt = _three_arm_table()
+        nt.analyze(lift="absolute", test_method="score", equal_var=equal_var)
+        statistic, df, pval = score_omnibus_test(nt.means, nt.variances, nt.trials, equal_var=equal_var)
+        assert nt.incremental_results["omnibus"] == {
+            "test": "Score",
+            "statistic": pytest.approx(statistic),
+            "df": df,
+            "p_value": pytest.approx(pval),
+        }
+
+    @staticmethod
+    def test_omnibus_ignores_null_lift():
+        nt = _three_arm_table()
+        nt.analyze(lift="absolute")
+        omnibus = nt.incremental_results["omnibus"]
+        nt.analyze(lift="absolute", null_lift=1.0)
+        assert nt.incremental_results["omnibus"] == omnibus
+
+    @staticmethod
+    def test_scaled_lifts_use_the_largest_arm():
+        # T2 vs T1 has at most 900 trials, but is scaled to the table's 1,000 like the other comparisons.
+        def table():
+            nt = NormalTable(name="Uneven Arms", metric_name="order value")
+            return nt.add("Control", 52.0, 144.0, 1000).add("T1", 54.5, 150.0, 800).add("T2", 53.0, 160.0, 900)
+
+        nt = table()
+        nt.analyze(lift="incremental", comparisons="all")
+        nt_abs = table()
+        nt_abs.analyze(lift="absolute", comparisons="all")
+        for label, comparison in nt.incremental_results["comparisons"].items():
+            expected = nt_abs.incremental_results["comparisons"][label]
+            for key in ["lift", "ci_lower", "ci_upper"]:
+                assert comparison[key] == pytest.approx(expected[key] * 1000)
+        assert nt.incremental_results["comparisons"]["T2 vs T1"]["T1"] == pytest.approx(54.5 * 1000)
+
+    @staticmethod
+    def test_scaled_null_lift_uses_the_largest_arm():
+        def table():
+            nt = NormalTable(name="Uneven Arms", metric_name="order value")
+            return nt.add("Control", 52.0, 144.0, 1000).add("T1", 54.5, 150.0, 800).add("T2", 53.0, 160.0, 900)
+
+        nt = table()
+        nt.analyze(lift="incremental", null_lift=1000.0, comparisons="all")
+        nt_abs = table()
+        nt_abs.analyze(lift="absolute", null_lift=1.0, comparisons="all")
+        for label, comparison in nt.incremental_results["comparisons"].items():
+            expected = nt_abs.incremental_results["comparisons"][label]["raw_p_value"]
+            assert comparison["raw_p_value"] == pytest.approx(expected)
+
+    @staticmethod
+    def test_relative_lift_with_zero_base_mean_raises():
+        nt = NormalTable(name="Zero", metric_name="metric")
+        nt.add("A", 1.0, 1.0, 100).add("B", 0.0, 1.0, 100).add("C", 2.0, 1.0, 100)
+        with pytest.raises(ValueError, match="Relative lift of C vs B is undefined"):
+            nt.analyze(lift="relative", comparisons="all")
+
+    @staticmethod
+    def test_invalid_comparisons_raises():
+        with pytest.raises(ValueError, match="comparisons must be"):
+            _three_arm_table().analyze(comparisons="pairs")
+
+    @staticmethod
+    def test_invalid_correction_raises():
+        with pytest.raises(ValueError):
+            _three_arm_table().analyze(correction="not-a-correction")
+
+    @staticmethod
+    def test_output():
+        result = _three_arm_table().analyze(lift="absolute", comparisons="all")
+        assert "Omnibus p-value ***" in result
+        assert "T2 vs T1" in result
+        assert "Adj. p (holm)" in result
+        assert "(holm-adjusted for 3 comparisons)" in result
+        assert "Bonferroni: each at 98.33%" in result
+        assert "*** Welch's ANOVA test that all 3 variants share one mean, df=(2, " in result
+
+    @staticmethod
+    @pytest.mark.parametrize("lift", ["absolute", "incremental", "relative", "roas", "revenue", "cpa"])
+    def test_output_formats_every_lift(lift):
+        result = _three_arm_table(spend=5000.0, msrp=2.0).analyze(lift=lift)
+        assert "T2 vs Control" in result
+        if lift in ["incremental", "roas", "revenue", "cpa"]:
+            assert "Scaled lifts are per 1,000 units" in result
+
+    @staticmethod
+    def test_plot_has_one_row_per_comparison(monkeypatch):
+        figures = []
+        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+        nt = _three_arm_table()
+        nt.analyze(lift="absolute", comparisons="all")
+        nt.plot(is_individual=False)
+        assert [trace.name for trace in figures[0].data] == ["T1 vs Control", "T2 vs Control", "T2 vs T1"]
 
 
 if __name__ == "__main__":

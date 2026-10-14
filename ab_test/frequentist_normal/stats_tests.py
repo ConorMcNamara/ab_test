@@ -8,9 +8,9 @@ from typing import Any
 import numpy as np
 import scipy.stats as ss
 
-from ab_test.frequentist_normal.utils import mle_under_null, validate_two_group
+from ab_test.frequentist_normal.utils import mle_under_equal_means, mle_under_null, validate_two_group
 
-__all__ = ["welch_test", "score_test", "likelihood_ratio_test"]
+__all__ = ["welch_test", "score_test", "likelihood_ratio_test", "welch_anova", "score_omnibus_test"]
 
 
 def welch_test(
@@ -196,3 +196,114 @@ def likelihood_ratio_test(
     Only supports two experiment groups at this time.
     """
     ...
+
+
+def _validate_many_groups(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+) -> None:
+    if not len(means) == len(variances) == len(trials):
+        raise ValueError("means, variances and trials must have the same length")
+    if len(means) < 2:
+        raise ValueError(f"An omnibus test needs at least 2 groups, got {len(means)}")
+
+
+def welch_anova(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+) -> tuple[float, float, float, float]:
+    """Welch's one-way ANOVA that two or more groups share one mean.
+
+    Parameters
+    ----------
+    means : array_like
+        The average for each group.
+    variances : array_like
+        The sample variances (``ddof=1``) for each group.
+    trials : array_like
+        Number of trials in each group.
+
+    Returns
+    -------
+    statistic : float
+        Welch's F statistic.
+    df_num, df_denom : float
+        Numerator (``k - 1``) and approximate denominator degrees of freedom.
+    pval : float
+        P-value.
+
+    Raises
+    ------
+    ValueError
+        If a group has zero variance, which leaves its weight undefined.
+
+    Notes
+    -----
+    Like `welch_test`, this does not assume the groups share a variance. With
+    two groups the statistic is the square of `welch_test`'s and the p-values
+    agree.
+
+    Welch, B. L. (1951). "On the comparison of several mean values: an
+    alternative approach." Biometrika, 38(3/4), 330-336.
+    """
+    _validate_many_groups(means, variances, trials)
+    if any(v <= 0 for v in variances):
+        raise ValueError("Welch's ANOVA needs a positive variance in every group")
+    k = len(means)
+    weights = [n / v for n, v in zip(trials, variances)]
+    total_weight = sum(weights)
+    weighted_mean = sum(w * m for w, m in zip(weights, means)) / total_weight
+    between = sum(w * (m - weighted_mean) ** 2 for w, m in zip(weights, means)) / (k - 1)
+    tmp = sum((1 - w / total_weight) ** 2 / (n - 1) for w, n in zip(weights, trials))
+    statistic = between / (1 + 2 * (k - 2) / (k * k - 1) * tmp)
+    df_denom = (k * k - 1) / (3 * tmp)
+    pval = ss.f.sf(statistic, k - 1, df_denom)  # type: ignore[no-untyped-call]
+    return float(statistic), float(k - 1), float(df_denom), float(pval)
+
+
+def score_omnibus_test(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+    equal_var: bool = True,
+) -> tuple[float, int, float]:
+    """Rao's score test that two or more groups share one mean.
+
+    Parameters
+    ----------
+    means : array_like
+        The average for each group.
+    variances : array_like
+        The sample variances (``ddof=1``) for each group.
+    trials : array_like
+        Number of trials in each group.
+    equal_var : bool, default=True
+        If True, assume every group shares a common variance. If False, give
+        each group its own variance.
+
+    Returns
+    -------
+    statistic : float
+        The score statistic.
+    df : int
+        Degrees of freedom, ``k - 1``.
+    pval : float
+        P-value.
+
+    Notes
+    -----
+    The statistic is ``sum(n_i * (mean_i - mu)**2 / sigma2_i)``, where ``mu``
+    and ``sigma2_i`` are the MLEs under H0 from `mle_under_equal_means`,
+    compared against a chi-squared distribution with ``k - 1`` degrees of
+    freedom. With two groups it equals `score_test` with a null lift of 0.
+    """
+    _validate_many_groups(means, variances, trials)
+    mu, sigma2 = mle_under_equal_means(means, variances, trials, equal_var=equal_var)
+    sigma2_by_group = sigma2 if isinstance(sigma2, list) else [sigma2] * len(means)
+    # As in score_test, a group whose null variance is zero contributes nothing.
+    statistic = sum(n * (m - mu) ** 2 / s2 for n, m, s2 in zip(trials, means, sigma2_by_group) if s2 > 1e-12)
+    df = len(means) - 1
+    pval = ss.chi2.sf(statistic, df=df)  # type: ignore[no-untyped-call]
+    return float(statistic), df, float(pval)
