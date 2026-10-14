@@ -44,8 +44,9 @@ def confidence_interval(
         `welch_test` or `score_test`. Ignored by the other methods.
     method : {'welch', 'z', 'binary_search', 'delta'}
         How we want to calculate the confidence interval.
-        ``'welch'`` constructs individual t-intervals per group and
-        combines them.  ``'z'`` does the same with z-intervals (large
+        ``'welch'`` is a t-interval on the combined standard error with
+        Welch-Satterthwaite degrees of freedom.  ``'z'`` constructs
+        individual z-intervals per group and combines them (large
         sample).  ``'binary_search'`` inverts ``test``.
         ``'delta'`` uses the delta method directly.
     alpha : float
@@ -77,16 +78,12 @@ def confidence_interval(
         )
         lb = lb_found if lb_found is not None else -1.0
         ub = ub_found if ub_found is not None else math.inf
-    elif method in ["welch", "z"]:
-        if method == "welch":
-            t_crit_a = float(ss.t.ppf(1 - alpha / 2, trials[0] - 1))  # type: ignore[no-untyped-call]
-            t_crit_b = float(ss.t.ppf(1 - alpha / 2, trials[1] - 1))  # type: ignore[no-untyped-call]
-            lower1, upper1 = welch_interval(means[0], variances[0], trials[0], alpha, t_crit_a)
-            lower2, upper2 = welch_interval(means[1], variances[1], trials[1], alpha, t_crit_b)
-        else:
-            z_crit = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
-            lower1, upper1 = z_interval(means[0], variances[0], trials[0], alpha, z_crit)
-            lower2, upper2 = z_interval(means[1], variances[1], trials[1], alpha, z_crit)
+    elif method == "welch":
+        lb, ub = _welch_satterthwaite_interval(means, variances, trials, alpha, lift)
+    elif method == "z":
+        z_crit = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
+        lower1, upper1 = z_interval(means[0], variances[0], trials[0], alpha, z_crit)
+        lower2, upper2 = z_interval(means[1], variances[1], trials[1], alpha, z_crit)
         var_mean_a = ((upper1 - lower1) / 2) ** 2
         var_mean_b = ((upper2 - lower2) / 2) ** 2
         if lift == "relative":
@@ -259,3 +256,35 @@ def delta_interval(
     lb = diff - z * se_g
     ub = diff + z * se_g
     return lb, ub
+
+
+def _welch_satterthwaite_interval(
+    means: np.ndarray[Any, Any] | list[Any],
+    variances: np.ndarray[Any, Any] | list[Any],
+    trials: np.ndarray[Any, Any] | list[Any],
+    alpha: float = 0.05,
+    lift: str = "relative",
+) -> tuple[float, float]:
+    """Welch t-interval for the difference or ratio of two means.
+
+    The standard error combines both groups, and a single t critical value
+    is taken at the Welch-Satterthwaite degrees of freedom. For absolute lift
+    this is the interval that inverts `welch_test`. For relative lift the
+    standard error comes from the delta method, and the degrees of freedom
+    from the same Satterthwaite approximation applied to its two terms.
+    """
+    mean_a, mean_b = means[0], means[1]
+    s_a = variances[0] / trials[0]
+    s_b = variances[1] / trials[1]
+    if lift == "relative":
+        diff = (mean_b - mean_a) / mean_a
+        term_a = mean_b**2 * s_a / mean_a**4
+        term_b = s_b / mean_a**2
+    else:
+        diff = mean_b - mean_a
+        term_a, term_b = s_a, s_b
+    var_g = term_a + term_b
+    df = var_g**2 / (term_a**2 / (trials[0] - 1) + term_b**2 / (trials[1] - 1))
+    t_crit = float(ss.t.isf(alpha / 2, df))  # type: ignore[no-untyped-call]
+    half_width = t_crit * math.sqrt(var_g)
+    return float(diff - half_width), float(diff + half_width)

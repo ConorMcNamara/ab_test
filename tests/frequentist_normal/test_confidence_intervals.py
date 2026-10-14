@@ -1,6 +1,8 @@
 """Testing confidence intervals for normal data."""
 
+import numpy as np
 import pytest
+import scipy.stats as ss
 
 from ab_test.frequentist_normal.confidence_intervals import (
     confidence_interval,
@@ -9,7 +11,7 @@ from ab_test.frequentist_normal.confidence_intervals import (
     z_interval,
     delta_interval,
 )
-from ab_test.frequentist_normal.stats_tests import score_test
+from ab_test.frequentist_normal.stats_tests import score_test, welch_test
 
 
 class TestConfidenceIntervalComparison:
@@ -18,8 +20,8 @@ class TestConfidenceIntervalComparison:
         means = [10.0, 11.0]
         variances = [4.0, 5.0]
         trials = [1000, 1000]
-        expected_low = 0.8138359430750653
-        expected_high = 1.1861640569249348
+        expected_low = 0.8139473915818949
+        expected_high = 1.1860526084181051
         actual_low, actual_high = confidence_interval(
             means,
             variances,
@@ -35,8 +37,8 @@ class TestConfidenceIntervalComparison:
         means = [10.0, 11.0]
         variances = [4.0, 5.0]
         trials = [1000, 1000]
-        expected_low = 0.0805342057292233
-        expected_high = 0.1194657942707767
+        expected_low = 0.08054600153509416
+        expected_high = 0.11945399846490586
         actual_low, actual_high = confidence_interval(
             means,
             variances,
@@ -225,6 +227,72 @@ class TestConfidenceIntervalComparison:
     def test_unsupported_method_raises():
         with pytest.raises(NotImplementedError):
             confidence_interval([10.0, 11.0], [4.0, 5.0], [1000, 1000], method="wilson")
+
+
+class TestWelchSatterthwaiteInterval:
+    @staticmethod
+    def _sample(mean, var, n, seed):
+        """Draw a sample whose mean and variance (ddof=1) are exactly ``mean`` and ``var``."""
+        x = np.random.default_rng(seed).normal(size=n)
+        x = (x - x.mean()) / x.std(ddof=1)
+        return mean + np.sqrt(var) * x
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "means, variances, trials, alpha",
+        [
+            ([10.0, 11.0], [4.0, 25.0], [8, 30], 0.05),
+            ([10.0, 11.0], [4.0, 5.0], [1000, 1000], 0.05),
+            ([5.0, 4.2], [9.0, 1.0], [12, 5], 0.10),
+            ([0.0, 0.3], [1.0, 2.0], [20, 40], 0.01),
+        ],
+    )
+    def test_absolute_matches_scipy(means, variances, trials, alpha):
+        a = TestWelchSatterthwaiteInterval._sample(means[0], variances[0], trials[0], seed=1)
+        b = TestWelchSatterthwaiteInterval._sample(means[1], variances[1], trials[1], seed=2)
+        expected = ss.ttest_ind(b, a, equal_var=False).confidence_interval(1 - alpha)
+        lb, ub = confidence_interval(means, variances, trials, method="welch", alpha=alpha, lift="absolute")
+        assert lb == pytest.approx(expected.low)
+        assert ub == pytest.approx(expected.high)
+
+    @staticmethod
+    @pytest.mark.parametrize("trials", [[8, 30], [1000, 1000], [12, 5]])
+    def test_absolute_inverts_welch_test(trials):
+        means, variances = [10.0, 11.0], [4.0, 25.0]
+        lb, ub = confidence_interval(means, variances, trials, method="welch", lift="absolute")
+        bs_lb, bs_ub = confidence_interval(
+            means, variances, trials, test=welch_test, method="binary_search", lift="absolute", tol=1e-10
+        )
+        assert lb == pytest.approx(bs_lb, abs=1e-8)
+        assert ub == pytest.approx(bs_ub, abs=1e-8)
+
+    @staticmethod
+    def test_small_unequal_groups_use_satterthwaite_df():
+        """Combining per-group t-intervals at n_i - 1 df gives a different, wrong width."""
+        means, variances, trials = [10.0, 11.0], [4.0, 25.0], [8, 30]
+        lb, ub = confidence_interval(means, variances, trials, method="welch", lift="absolute")
+        s_a, s_b = variances[0] / trials[0], variances[1] / trials[1]
+        df = (s_a + s_b) ** 2 / (s_a**2 / (trials[0] - 1) + s_b**2 / (trials[1] - 1))
+        assert (ub - lb) / 2 == pytest.approx(ss.t.isf(0.025, df) * np.sqrt(s_a + s_b))
+
+    @staticmethod
+    def test_relative_uses_delta_se_with_satterthwaite_df():
+        means, variances, trials = [10.0, 11.0], [4.0, 25.0], [8, 30]
+        lb, ub = confidence_interval(means, variances, trials, method="welch", lift="relative")
+        term_a = means[1] ** 2 * variances[0] / trials[0] / means[0] ** 4
+        term_b = variances[1] / trials[1] / means[0] ** 2
+        df = (term_a + term_b) ** 2 / (term_a**2 / (trials[0] - 1) + term_b**2 / (trials[1] - 1))
+        half_width = ss.t.isf(0.025, df) * np.sqrt(term_a + term_b)
+        assert lb == pytest.approx(0.1 - half_width)
+        assert ub == pytest.approx(0.1 + half_width)
+
+    @staticmethod
+    def test_wider_than_delta_for_small_samples():
+        means, variances, trials = [10.0, 11.0], [4.0, 25.0], [8, 30]
+        welch_lb, welch_ub = confidence_interval(means, variances, trials, method="welch", lift="relative")
+        delta_lb, delta_ub = confidence_interval(means, variances, trials, method="delta", lift="relative")
+        assert welch_lb < delta_lb
+        assert welch_ub > delta_ub
 
 
 class TestIndividualConfidenceInterval:
