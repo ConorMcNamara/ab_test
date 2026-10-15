@@ -107,6 +107,21 @@ group's clusters and mean. With two groups the output is unchanged.
    crt.summary()["omnibus"]["p_value"]
    crt.summary()["comparisons"]["C vs A"]["p_value"]   # Holm-adjusted
 
+The planners take the same ``comparisons`` argument:
+``cluster_required_sample_size``, ``cluster_minimum_detectable_lift`` and the
+two cluster plots size the least-powered comparison (the control against its
+smallest variant) at the Bonferroni level ``alpha / m``, a safe bound for the
+Holm adjustment ``analyze()`` applies. ``cluster_required_clusters`` also takes
+``n_groups``:
+
+.. code-block:: python
+
+   cluster_required_clusters(0.10, 0.20, icc=0.02, cluster_size=50)               # 154 per arm
+   cluster_required_clusters(0.10, 0.20, icc=0.02, cluster_size=50, n_groups=3)   # 186 per arm
+   cluster_required_clusters(
+       0.10, 0.20, icc=0.02, cluster_size=50, n_groups=3, comparisons="all"
+   )                                                                              # 205 per arm
+
 When to Use This vs CupacExperiment
 ------------------------------------
 

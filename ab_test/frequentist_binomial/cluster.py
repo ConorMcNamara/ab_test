@@ -307,6 +307,8 @@ def cluster_required_sample_size(
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     null_lift: float = 0.0,
     lift: str = "relative",
+    *,
+    comparisons: str = "control",
 ) -> int:
     """Calculate the required sample size accounting for clustering.
 
@@ -330,6 +332,14 @@ def cluster_required_sample_size(
         Lift under the null hypothesis. Defaults to 0.0.
     lift : str
         ``"relative"`` or ``"absolute"``.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``), as in
+        :meth:`ClusterRandomizedTrial.analyze`. Results are for the
+        least-powered comparison at the Bonferroni level ``alpha / m`` (see
+        :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`),
+        with t degrees of freedom from the clusters in that comparison's two
+        arms. Ignored with two groups.
 
     Returns
     -------
@@ -345,6 +355,7 @@ def cluster_required_sample_size(
         null_lift=null_lift,
         power=cluster_adjusted_power(icc, avg_cluster_size),
         lift=lift,
+        comparisons=comparisons,
     )
 
 
@@ -357,6 +368,9 @@ def cluster_required_clusters(
     beta: float = 0.2,
     null_lift: float = 0.0,
     lift: str = "relative",
+    *,
+    n_groups: int = 2,
+    comparisons: str = "control",
 ) -> int:
     """Calculate the number of clusters per arm needed for desired power.
 
@@ -378,12 +392,30 @@ def cluster_required_clusters(
         Lift under the null hypothesis. Defaults to 0.0.
     lift : str
         ``"relative"`` or ``"absolute"``.
+    n_groups : int, optional
+        Number of arms, control included, each with the same number of
+        clusters. Defaults to 2.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``), as in
+        :meth:`ClusterRandomizedTrial.analyze`. Results are for the
+        least-powered comparison at the Bonferroni level ``alpha / m`` (see
+        :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`),
+        with t degrees of freedom from the clusters in that comparison's two
+        arms. Ignored with two groups.
 
     Returns
     -------
     int
         Minimum number of clusters per arm.
+
+    Raises
+    ------
+    ValueError
+        If ``n_groups`` is less than 2.
     """
+    if n_groups < 2:
+        raise ValueError(f"n_groups must be at least 2, got {n_groups}")
     total_n = cluster_required_sample_size(
         baseline,
         alt_lift,
@@ -391,10 +423,12 @@ def cluster_required_clusters(
         float(cluster_size),
         alpha=alpha,
         beta=beta,
+        group_proportions=[1 / n_groups] * n_groups,
         null_lift=null_lift,
         lift=lift,
+        comparisons=comparisons,
     )
-    return math.ceil(total_n / (2 * cluster_size))
+    return math.ceil(total_n / (n_groups * cluster_size))
 
 
 def cluster_minimum_detectable_lift(
@@ -407,6 +441,8 @@ def cluster_minimum_detectable_lift(
     null_lift: float = 0.0,
     drop: bool = False,
     lift: str = "relative",
+    *,
+    comparisons: str = "control",
 ) -> float:
     """Minimum detectable lift accounting for clustering.
 
@@ -430,6 +466,14 @@ def cluster_minimum_detectable_lift(
         If True, return the minimum detectable drop. Defaults to False.
     lift : str
         ``"relative"`` or ``"absolute"``.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``), as in
+        :meth:`ClusterRandomizedTrial.analyze`. Results are for the
+        least-powered comparison at the Bonferroni level ``alpha / m`` (see
+        :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`),
+        with t degrees of freedom from the clusters in that comparison's two
+        arms. Ignored with two groups.
 
     Returns
     -------
@@ -445,6 +489,7 @@ def cluster_minimum_detectable_lift(
         power=cluster_adjusted_power(icc, avg_cluster_size),
         drop=drop,
         lift=lift,
+        comparisons=comparisons,
     )
 
 
@@ -1061,6 +1106,7 @@ def plot_cluster_power_curve(
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
     *,
+    comparisons: str = "control",
     dark_mode: bool = False,
 ) -> go.Figure:
     """Plot statistical power with and without cluster adjustment.
@@ -1087,6 +1133,14 @@ def plot_cluster_power_curve(
         Fraction of units in each group. Defaults to 50/50.
     n_points : int
         Number of points when auto-ranging. Defaults to 100.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``), as in
+        :meth:`ClusterRandomizedTrial.analyze`. Results are for the
+        least-powered comparison at the Bonferroni level ``alpha / m`` (see
+        :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`),
+        with t degrees of freedom from the clusters in that comparison's two
+        arms. Ignored with two groups.
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
@@ -1112,6 +1166,7 @@ def plot_cluster_power_curve(
             group_proportions=group_proportions,
             null_lift=null_lift,
             lift=lift,
+            comparisons=comparisons,
         )
         max_ss = int(target_ss * 2)
         sample_sizes = np.linspace(max(20, max_ss // n_points), max_ss, n_points, dtype=int)
@@ -1125,6 +1180,7 @@ def plot_cluster_power_curve(
             null_lift=null_lift,
             power=adjusted_power,
             lift=lift,
+            comparisons=comparisons,
         )
         for ss in sample_sizes
     ]
@@ -1137,6 +1193,7 @@ def plot_cluster_power_curve(
             null_lift=null_lift,
             power=score_power,
             lift=lift,
+            comparisons=comparisons,
         )
         for ss in sample_sizes
     ]
@@ -1194,6 +1251,7 @@ def plot_cluster_sensitivity_curve(
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
     *,
+    comparisons: str = "control",
     dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift with and without cluster adjustment.
@@ -1220,6 +1278,14 @@ def plot_cluster_sensitivity_curve(
         Fraction of units in each group. Defaults to 50/50.
     n_points : int
         Number of points when auto-ranging. Defaults to 100.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``), as in
+        :meth:`ClusterRandomizedTrial.analyze`. Results are for the
+        least-powered comparison at the Bonferroni level ``alpha / m`` (see
+        :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`),
+        with t degrees of freedom from the clusters in that comparison's two
+        arms. Ignored with two groups.
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
@@ -1246,6 +1312,7 @@ def plot_cluster_sensitivity_curve(
             group_proportions=group_proportions,
             null_lift=null_lift,
             lift=lift,
+            comparisons=comparisons,
         )
         min_ss = max(20, target_ss // 10)
         max_ss = target_ss * 5
@@ -1260,6 +1327,7 @@ def plot_cluster_sensitivity_curve(
             null_lift=null_lift,
             power=adj_power,
             lift=lift,
+            comparisons=comparisons,
         )
         for ss in sample_sizes
     ]
@@ -1272,6 +1340,7 @@ def plot_cluster_sensitivity_curve(
             null_lift=null_lift,
             power=score_power,
             lift=lift,
+            comparisons=comparisons,
         )
         for ss in sample_sizes
     ]
