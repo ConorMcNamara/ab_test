@@ -1,4 +1,4 @@
-.PHONY: install test lint format typecheck coverage check clean
+.PHONY: install test test-fast test-parallel lint format typecheck coverage check clean
 
 # Install all dependencies including dev tools
 install:
@@ -7,6 +7,11 @@ install:
 # Run the full test suite
 test:
 	uv run pytest tests/ -v
+
+# Run the full test suite across all CPUs with pytest-xdist (print output and
+# pdb are awkward under workers, so debug with `make test` instead)
+test-parallel:
+	uv run pytest tests/ -n auto
 
 # Run tests, skipping the slow simulation tests
 test-fast:

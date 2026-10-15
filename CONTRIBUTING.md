@@ -73,7 +73,7 @@ The key rules enforced are:
 ### Tests
 
 - Tests live under `tests/` and mirror the source layout (`tests/frequentist_binomial/`, `tests/bayesian_binomial/`).
-- Use `pytest`. Run with `make test`, or `make test-fast` to skip the slow simulation tests.
+- Use `pytest`. Run with `make test`, or `make test-fast` to skip the slow simulation tests. `make test-parallel` runs the full suite across all CPUs with pytest-xdist (about 5× faster on a 10-core machine); use `make test` when debugging, since print output and `pdb` are awkward under workers.
 - Every new public function or method needs at least one test.
 - Avoid adding new slow simulation tests without good reason.
 

@@ -41,6 +41,7 @@ sklearn = ["scikit-learn>=1.0"]
 dev = [
     "pytest>=8.4.2,<9.0.0",
     "pytest-cov>=6.0.0",
+    "pytest-xdist>=3.6",
     "zuban>=0.1.0",
     "ruff>=0.15,<0.16",
     "types-tabulate",
