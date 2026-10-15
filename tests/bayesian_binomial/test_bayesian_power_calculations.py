@@ -3,6 +3,7 @@ import pytest
 
 from ab_test.bayesian_binomial.power_calculations import (
     _search_min_sample_size,
+    _weakest_comparison,
     bayes_minimum_detectable_lift,
     bayes_minimum_detectable_lift_loss,
     bayes_minimum_sample_size,
@@ -607,6 +608,61 @@ class TestMinimumDetectableLiftRateBound:
         np.random.seed(0)
         with pytest.raises(ValueError, match="keeps the treatment rate below 1"):
             bayes_minimum_detectable_lift_loss(3, [1, 1], [1, 1], 0.3, lift="relative", n_samples=300, mc_samples=100)
+
+
+class TestWeakestComparison:
+    @staticmethod
+    def test_two_groups_unchanged():
+        assert _weakest_comparison([100, 200], [1.0, 2.0], [3.0, 4.0]) == ([100, 200], [1.0, 2.0], [3.0, 4.0])
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "group_sizes, expected",
+        [
+            ([10_000, 500, 600], [10_000, 500]),
+            ([10_000, 600, 500], [10_000, 500]),
+            ([300, 1000, 1000, 800], [300, 800]),
+            (np.array([500, 400, 400]), [500, 400]),
+        ],
+    )
+    def test_keeps_control_and_smallest_variant(group_sizes, expected):
+        sizes, _, _ = _weakest_comparison(group_sizes, [1.0] * len(group_sizes), [1.0] * len(group_sizes))
+        assert sizes == expected
+
+    @staticmethod
+    def test_per_group_priors_follow_the_groups():
+        _, alphas, betas = _weakest_comparison([10_000, 600, 500], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0])
+        assert alphas == [1.0, 3.0]
+        assert betas == [4.0, 6.0]
+
+    @staticmethod
+    def test_two_element_priors_kept():
+        _, alphas, betas = _weakest_comparison([10_000, 600, 500], [1.0, 2.0], [4.0, 5.0])
+        assert alphas == [1.0, 2.0]
+        assert betas == [4.0, 5.0]
+
+
+class TestMultiArmPower:
+    COMMON = {"baseline": 0.10, "alt_lift": 0.20, "n_samples": 4_000, "mc_samples": 300, "seed": 11}
+
+    @pytest.mark.parametrize("power_fn", [bayes_power_lift, bayes_power_loss])
+    def test_matches_control_vs_smallest_variant(self, power_fn):
+        three = power_fn([20_000, 2_000, 3_000], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0], **self.COMMON)
+        pair = power_fn([20_000, 2_000], [1.0, 1.0], [1.0, 1.0], **self.COMMON)
+        assert three == pair
+
+    def test_does_not_compare_two_variants(self):
+        # A large control with two small variants: the two smallest groups are
+        # both variants, which have no effect between them under the alternative.
+        three = bayes_power_lift([20_000, 2_000, 3_000], [1.0] * 3, [1.0] * 3, **self.COMMON)
+        variants_only = bayes_power_lift([2_000, 3_000], [1.0] * 2, [1.0] * 2, **self.COMMON)
+        assert three > variants_only
+
+    def test_priors_follow_the_selected_groups(self):
+        alphas, betas = [1.0, 50.0, 2.0], [1.0, 50.0, 18.0]
+        three = bayes_power_lift([20_000, 3_000, 2_000], alphas, betas, **self.COMMON)
+        pair = bayes_power_lift([20_000, 2_000], [1.0, 2.0], [1.0, 18.0], **self.COMMON)
+        assert three == pair
 
 
 class TestSearchMinSampleSize:

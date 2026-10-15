@@ -74,4 +74,4 @@ API Reference
 
 .. automodule:: ab_test.bayesian_binomial.power_calculations
    :members:
-   :exclude-members: _resolve_alt_rate, _two_smallest_group_sizes, _search_min_sample_size, _search_min_lift
+   :exclude-members: _resolve_alt_rate, _weakest_comparison, _search_min_sample_size, _search_min_lift

@@ -65,12 +65,29 @@ def _resolve_alt_rate(
     raise NotImplementedError(f"lift '{lift}' not implemented")
 
 
-def _two_smallest_group_sizes(group_sizes: np.ndarray[Any, Any] | list[Any]) -> np.ndarray[Any, Any] | list[Any]:
-    """Return the two smallest group sizes, which govern overall power."""
-    if len(group_sizes) > 2:
-        a, b, *_ = np.partition(group_sizes, 1)
-        return [a, b]
-    return group_sizes
+def _weakest_comparison(
+    group_sizes: np.ndarray[Any, Any] | list[Any],
+    alphas: np.ndarray[Any, Any] | list[Any],
+    betas: np.ndarray[Any, Any] | list[Any],
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Group sizes and priors of the control and its smallest variant.
+
+    The first group is the control. Under the alternative every variant has the
+    same rate, so comparisons between variants have no effect, and the
+    least-powered comparison is the control against its smallest variant.
+    Priors given per group are reduced to the same two groups; a two-element
+    prior is taken as (control, treatment) and kept as is.
+    """
+    sizes = list(group_sizes)
+    if len(sizes) <= 2:
+        return sizes, list(alphas), list(betas)
+    variant = 1 + int(np.argmin(sizes[1:]))
+    pair = [0, variant]
+    if len(alphas) == len(sizes):
+        alphas = [alphas[i] for i in pair]
+    if len(betas) == len(sizes):
+        betas = [betas[i] for i in pair]
+    return [sizes[i] for i in pair], list(alphas), list(betas)
 
 
 # Posterior draws per arm held in memory at once. Simulations run in blocks of
@@ -300,8 +317,9 @@ def bayes_power_lift(
     Parameters
     ----------
     group_sizes : np.ndarray or list
-        Trial counts for each variant. When more than two are provided the two
-        smallest are used, as they govern overall power.
+        Trial counts for each variant, control first. With three or more, the
+        control and its smallest variant are used, the least-powered comparison
+        when every variant has the same rate.
     alphas : np.ndarray or list
         Alpha parameters of the Beta prior for each variant.
     betas : np.ndarray or list
@@ -348,7 +366,7 @@ def bayes_power_lift(
     NotImplementedError
         If ``alt_lift`` is provided but ``lift`` is not supported.
     """
-    group_sizes = _two_smallest_group_sizes(group_sizes)
+    group_sizes, alphas, betas = _weakest_comparison(group_sizes, alphas, betas)
     if alt_rate is None and alt_lift is not None and lift in _SCALED_LIFTS:
         scale = max(group_sizes)
         alt_lift = to_absolute(alt_lift, lift, scale, spend, msrp)
@@ -393,8 +411,9 @@ def bayes_power_loss(
     Parameters
     ----------
     group_sizes : np.ndarray or list
-        Trial counts for each variant. When more than two are provided the two
-        smallest are used, as they govern overall power.
+        Trial counts for each variant, control first. With three or more, the
+        control and its smallest variant are used, the least-powered comparison
+        when every variant has the same rate.
     alphas : np.ndarray or list
         Alpha parameters of the Beta prior for each variant.
     betas : np.ndarray or list
@@ -441,7 +460,7 @@ def bayes_power_loss(
     NotImplementedError
         If ``alt_lift`` is provided but ``lift`` is not supported.
     """
-    group_sizes = _two_smallest_group_sizes(group_sizes)
+    group_sizes, alphas, betas = _weakest_comparison(group_sizes, alphas, betas)
     if alt_rate is None and alt_lift is not None and lift in _SCALED_LIFTS:
         scale = max(group_sizes)
         alt_lift = to_absolute(alt_lift, lift, scale, spend, msrp)
