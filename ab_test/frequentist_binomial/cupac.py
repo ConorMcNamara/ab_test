@@ -778,6 +778,8 @@ def cupac_minimum_detectable_lift(
     null_lift: float = 0.0,
     drop: bool = False,
     lift: str = "relative",
+    *,
+    comparisons: str = "control",
 ) -> float:
     """Minimum detectable lift accounting for CUPAC variance reduction.
 
@@ -799,6 +801,12 @@ def cupac_minimum_detectable_lift(
         If True, return the minimum detectable drop. Defaults to False.
     lift : str
         ``"relative"`` or ``"absolute"``.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``). Results
+        are for the least-powered comparison at the Bonferroni level
+        ``alpha / m`` (see :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`).
+        Ignored with two groups.
 
     Returns
     -------
@@ -814,6 +822,7 @@ def cupac_minimum_detectable_lift(
         power=cupac_adjusted_power(r_squared),
         drop=drop,
         lift=lift,
+        comparisons=comparisons,
     )
 
 
@@ -826,6 +835,8 @@ def cupac_required_sample_size(
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     null_lift: float = 0.0,
     lift: str = "relative",
+    *,
+    comparisons: str = "control",
 ) -> int:
     """Calculate the required sample size accounting for CUPAC variance reduction.
 
@@ -847,6 +858,12 @@ def cupac_required_sample_size(
         Lift under the null hypothesis. Defaults to 0.0.
     lift : str
         ``"relative"`` or ``"absolute"``.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``). Results
+        are for the least-powered comparison at the Bonferroni level
+        ``alpha / m`` (see :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`).
+        Ignored with two groups.
 
     Returns
     -------
@@ -862,6 +879,7 @@ def cupac_required_sample_size(
         null_lift=null_lift,
         power=cupac_adjusted_power(r_squared),
         lift=lift,
+        comparisons=comparisons,
     )
 
 
@@ -876,6 +894,7 @@ def plot_cupac_power_curve(
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
     *,
+    comparisons: str = "control",
     dark_mode: bool = False,
 ) -> go.Figure:
     """Plot statistical power as a function of total sample size with CUPAC adjustment.
@@ -906,6 +925,12 @@ def plot_cupac_power_curve(
     n_points : int, optional
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 100.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``). Results
+        are for the least-powered comparison at the Bonferroni level
+        ``alpha / m`` (see :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`).
+        Ignored with two groups.
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
@@ -931,6 +956,7 @@ def plot_cupac_power_curve(
             group_proportions=group_proportions,
             null_lift=null_lift,
             lift=lift,
+            comparisons=comparisons,
         )
         max_ss = int(target_ss * 2)
         sample_sizes = np.linspace(max(20, max_ss // n_points), max_ss, n_points, dtype=int)
@@ -944,6 +970,7 @@ def plot_cupac_power_curve(
             null_lift=null_lift,
             power=adjusted_power,
             lift=lift,
+            comparisons=comparisons,
         )
         for ss in sample_sizes
     ]
@@ -956,6 +983,7 @@ def plot_cupac_power_curve(
             null_lift=null_lift,
             power=score_power,
             lift=lift,
+            comparisons=comparisons,
         )
         for ss in sample_sizes
     ]
@@ -1012,6 +1040,7 @@ def plot_cupac_sensitivity_curve(
     group_proportions: np.ndarray[Any, Any] | list[Any] | None = None,
     n_points: int = 100,
     *,
+    comparisons: str = "control",
     dark_mode: bool = False,
 ) -> go.Figure:
     """Plot minimum detectable lift as a function of total sample size with CUPAC adjustment.
@@ -1042,6 +1071,12 @@ def plot_cupac_sensitivity_curve(
     n_points : int, optional
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 100.
+    comparisons : {"control", "all"}, optional
+        With three or more groups, whether each variant is compared against the
+        first group (``"control"``, default) or every pair (``"all"``). Results
+        are for the least-powered comparison at the Bonferroni level
+        ``alpha / m`` (see :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`).
+        Ignored with two groups.
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
@@ -1068,6 +1103,7 @@ def plot_cupac_sensitivity_curve(
             group_proportions=group_proportions,
             null_lift=null_lift,
             lift=lift,
+            comparisons=comparisons,
         )
         min_ss = max(20, target_ss // 10)
         max_ss = target_ss * 5
@@ -1082,6 +1118,7 @@ def plot_cupac_sensitivity_curve(
             null_lift=null_lift,
             power=adjusted_power,
             lift=lift,
+            comparisons=comparisons,
         )
         for ss in sample_sizes
     ]
@@ -1094,6 +1131,7 @@ def plot_cupac_sensitivity_curve(
             null_lift=null_lift,
             power=score_power,
             lift=lift,
+            comparisons=comparisons,
         )
         for ss in sample_sizes
     ]

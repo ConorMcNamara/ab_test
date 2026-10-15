@@ -286,6 +286,110 @@ class TestCupacPowerCalculations:
             cupac_adjusted_power(-0.1)
 
 
+class TestCupacMultiArmPlanning:
+    THREE = [1 / 3, 1 / 3, 1 / 3]
+    FOUR = [0.4, 0.2, 0.2, 0.2]
+
+    @pytest.mark.parametrize("comparisons", ["control", "all"])
+    @pytest.mark.parametrize("group_proportions", [THREE, FOUR])
+    def test_sample_size_matches_required_sample_size(self, comparisons, group_proportions):
+        expected = required_sample_size(
+            0.10,
+            0.20,
+            group_proportions=group_proportions,
+            power=cupac_adjusted_power(0.3),
+            comparisons=comparisons,
+        )
+        actual = cupac_required_sample_size(
+            0.10, 0.20, r_squared=0.3, group_proportions=group_proportions, comparisons=comparisons
+        )
+        assert actual == expected
+
+    @pytest.mark.parametrize("comparisons", ["control", "all"])
+    @pytest.mark.parametrize("group_sizes", [[3000, 3000, 3000], [4000, 2000, 2000, 2000]])
+    def test_mdl_matches_minimum_detectable_lift(self, comparisons, group_sizes):
+        expected = minimum_detectable_lift(group_sizes, 0.10, power=cupac_adjusted_power(0.3), comparisons=comparisons)
+        actual = cupac_minimum_detectable_lift(group_sizes, 0.10, r_squared=0.3, comparisons=comparisons)
+        assert actual == pytest.approx(expected)
+
+    def test_all_pairs_needs_more_sample(self):
+        control = cupac_required_sample_size(0.10, 0.20, r_squared=0.3, group_proportions=self.THREE)
+        all_pairs = cupac_required_sample_size(
+            0.10, 0.20, r_squared=0.3, group_proportions=self.THREE, comparisons="all"
+        )
+        assert all_pairs > control
+
+    def test_all_pairs_has_larger_mdl(self):
+        control = cupac_minimum_detectable_lift([3000, 3000, 3000], 0.10, r_squared=0.3)
+        all_pairs = cupac_minimum_detectable_lift([3000, 3000, 3000], 0.10, r_squared=0.3, comparisons="all")
+        assert all_pairs > control
+
+    @staticmethod
+    def test_two_groups_ignore_comparisons():
+        control = cupac_required_sample_size(0.10, 0.20, r_squared=0.3)
+        all_pairs = cupac_required_sample_size(0.10, 0.20, r_squared=0.3, comparisons="all")
+        assert all_pairs == control
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda: cupac_required_sample_size(
+                0.10, 0.20, r_squared=0.3, group_proportions=[0.4, 0.3, 0.3], comparisons="pairs"
+            ),
+            lambda: cupac_minimum_detectable_lift([3000, 3000, 3000], 0.10, r_squared=0.3, comparisons="pairs"),
+        ],
+    )
+    def test_invalid_comparisons_raises(call):
+        with pytest.raises(ValueError, match="comparisons"):
+            call()
+
+    def test_power_curve_uses_comparisons(self):
+        sizes = [3000, 6000, 12000]
+        fig = plot_cupac_power_curve(
+            baseline=0.10,
+            alt_lift=0.20,
+            r_squared=0.3,
+            sample_sizes=sizes,
+            group_proportions=self.THREE,
+            comparisons="all",
+        )
+        for trace, power in zip(fig.data, [cupac_adjusted_power(0.3), None]):
+            kwargs = {} if power is None else {"power": power}
+            expected = [
+                abtest_power([int(n * g) for g in self.THREE], 0.10, 0.20, comparisons="all", **kwargs) for n in sizes
+            ]
+            assert list(trace.y) == pytest.approx(expected)
+        control = plot_cupac_power_curve(
+            baseline=0.10, alt_lift=0.20, r_squared=0.3, sample_sizes=sizes, group_proportions=self.THREE
+        )
+        assert all(a < c for a, c in zip(fig.data[0].y, control.data[0].y))
+
+    def test_sensitivity_curve_uses_comparisons(self):
+        sizes = [3000, 6000, 12000]
+        fig = plot_cupac_sensitivity_curve(
+            baseline=0.10, r_squared=0.3, sample_sizes=sizes, group_proportions=self.THREE, comparisons="all"
+        )
+        for trace, power in zip(fig.data, [cupac_adjusted_power(0.3), None]):
+            kwargs = {} if power is None else {"power": power}
+            expected = [
+                minimum_detectable_lift([int(n * g) for g in self.THREE], 0.10, comparisons="all", **kwargs)
+                for n in sizes
+            ]
+            assert list(trace.y) == pytest.approx(expected)
+        control = plot_cupac_sensitivity_curve(
+            baseline=0.10, r_squared=0.3, sample_sizes=sizes, group_proportions=self.THREE
+        )
+        assert all(a > c for a, c in zip(fig.data[0].y, control.data[0].y))
+
+    def test_default_curve_range_uses_comparisons(self):
+        fig = plot_cupac_power_curve(
+            baseline=0.10, alt_lift=0.20, r_squared=0.3, group_proportions=self.THREE, comparisons="all"
+        )
+        target = cupac_required_sample_size(0.10, 0.20, r_squared=0.3, group_proportions=self.THREE, comparisons="all")
+        assert fig.data[0].x[-1] == int(target * 2)
+
+
 @pytest.mark.slow
 class TestCupacPowerMatchesSimulation:
     @staticmethod

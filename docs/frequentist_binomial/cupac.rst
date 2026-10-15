@@ -35,7 +35,12 @@ continuous and will impose a spurious ordinal relationship on label-encoded
 categories.
 
 The module also provides power calculation wrappers that account for the
-expected variance reduction from either method.
+expected variance reduction from either method. Like the unadjusted planners,
+they take ``comparisons="control"`` (the default) or ``"all"`` for three or
+more groups, and size the least-powered comparison at ``alpha / m`` (see
+:doc:`power_calculations`). ``CupacExperiment`` itself compares two groups, so
+an A/B/n test is analyzed one comparison at a time, with the p-values adjusted
+for the ``m`` comparisons.
 
 CUPAC Usage
 -----------
