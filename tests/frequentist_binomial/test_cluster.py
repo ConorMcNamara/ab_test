@@ -19,6 +19,7 @@ from ab_test.frequentist_binomial.cluster import (
     plot_cluster_sensitivity_curve,
 )
 from ab_test.frequentist_binomial.power_calculations import (
+    abtest_power,
     minimum_detectable_lift,
     required_sample_size,
     score_power,
@@ -275,6 +276,137 @@ class TestClusterMinimumDetectableLift:
 # ---------------------------------------------------------------------------
 # ClusterRandomizedTrial
 # ---------------------------------------------------------------------------
+
+
+class TestClusterMultiArmPlanning:
+    ICC, M = 0.05, 20.0
+    THREE = [1 / 3, 1 / 3, 1 / 3]
+    FOUR = [0.4, 0.2, 0.2, 0.2]
+
+    def _power(self):
+        return cluster_adjusted_power(self.ICC, self.M)
+
+    @pytest.mark.parametrize("comparisons", ["control", "all"])
+    @pytest.mark.parametrize("group_proportions", [THREE, FOUR])
+    def test_sample_size_matches_required_sample_size(self, comparisons, group_proportions):
+        expected = required_sample_size(
+            0.10, 0.20, group_proportions=group_proportions, power=self._power(), comparisons=comparisons
+        )
+        actual = cluster_required_sample_size(
+            0.10, 0.20, self.ICC, self.M, group_proportions=group_proportions, comparisons=comparisons
+        )
+        assert actual == expected
+
+    @pytest.mark.parametrize("comparisons", ["control", "all"])
+    @pytest.mark.parametrize("group_sizes", [[6000, 6000, 6000], [8000, 4000, 4000, 4000]])
+    def test_mdl_matches_minimum_detectable_lift(self, comparisons, group_sizes):
+        expected = minimum_detectable_lift(group_sizes, 0.10, power=self._power(), comparisons=comparisons)
+        actual = cluster_minimum_detectable_lift(group_sizes, 0.10, self.ICC, self.M, comparisons=comparisons)
+        assert actual == pytest.approx(expected)
+
+    def test_df_counts_only_the_compared_arms(self):
+        # Three arms of 300 clusters: the weakest comparison has 600 clusters,
+        # so df = 598, not the 898 of all three arms.
+        sizes = [6000, 6000, 6000]
+        three = abtest_power(sizes, 0.10, 0.20, power=self._power())
+        pair = abtest_power(sizes[:2], 0.10, 0.20, alpha=0.025, power=self._power())
+        assert three == pytest.approx(pair)
+
+    def test_all_pairs_needs_more_sample(self):
+        control = cluster_required_sample_size(0.10, 0.20, self.ICC, self.M, group_proportions=self.THREE)
+        all_pairs = cluster_required_sample_size(
+            0.10, 0.20, self.ICC, self.M, group_proportions=self.THREE, comparisons="all"
+        )
+        assert all_pairs > control
+
+    def test_all_pairs_has_larger_mdl(self):
+        control = cluster_minimum_detectable_lift([6000, 6000, 6000], 0.10, self.ICC, self.M)
+        all_pairs = cluster_minimum_detectable_lift([6000, 6000, 6000], 0.10, self.ICC, self.M, comparisons="all")
+        assert all_pairs > control
+
+    def test_two_groups_ignore_comparisons(self):
+        control = cluster_required_sample_size(0.10, 0.20, self.ICC, self.M)
+        all_pairs = cluster_required_sample_size(0.10, 0.20, self.ICC, self.M, comparisons="all")
+        assert all_pairs == control
+
+    def test_invalid_comparisons_raises(self):
+        with pytest.raises(ValueError, match="comparisons"):
+            cluster_required_sample_size(
+                0.10, 0.20, self.ICC, self.M, group_proportions=self.THREE, comparisons="pairs"
+            )
+        with pytest.raises(ValueError, match="comparisons"):
+            cluster_minimum_detectable_lift([6000, 6000, 6000], 0.10, self.ICC, self.M, comparisons="pairs")
+
+    @pytest.mark.parametrize("comparisons", ["control", "all"])
+    @pytest.mark.parametrize("n_groups", [3, 4])
+    def test_required_clusters_per_arm(self, comparisons, n_groups):
+        total = cluster_required_sample_size(
+            0.10,
+            0.20,
+            self.ICC,
+            self.M,
+            group_proportions=[1 / n_groups] * n_groups,
+            comparisons=comparisons,
+        )
+        clusters = cluster_required_clusters(0.10, 0.20, self.ICC, 20, n_groups=n_groups, comparisons=comparisons)
+        assert clusters == int(np.ceil(total / (n_groups * 20)))
+
+    def test_required_clusters_two_groups_unchanged(self):
+        total = cluster_required_sample_size(0.10, 0.20, self.ICC, self.M)
+        assert cluster_required_clusters(0.10, 0.20, self.ICC, 20) == int(np.ceil(total / 40))
+
+    def test_required_clusters_grow_with_arms_and_comparisons(self):
+        two = cluster_required_clusters(0.10, 0.20, self.ICC, 20)
+        three = cluster_required_clusters(0.10, 0.20, self.ICC, 20, n_groups=3)
+        three_all = cluster_required_clusters(0.10, 0.20, self.ICC, 20, n_groups=3, comparisons="all")
+        four_all = cluster_required_clusters(0.10, 0.20, self.ICC, 20, n_groups=4, comparisons="all")
+        assert two < three
+        assert three <= three_all
+        assert three_all < four_all
+
+    @pytest.mark.parametrize("n_groups", [1, 0])
+    def test_required_clusters_rejects_fewer_than_two_groups(self, n_groups):
+        with pytest.raises(ValueError, match="n_groups"):
+            cluster_required_clusters(0.10, 0.20, self.ICC, 20, n_groups=n_groups)
+
+    def test_power_curve_uses_comparisons(self):
+        sizes = [6000, 12000, 24000]
+        fig = plot_cluster_power_curve(
+            0.10, 0.20, self.ICC, self.M, sample_sizes=sizes, group_proportions=self.THREE, comparisons="all"
+        )
+        for trace, power in zip(fig.data, [self._power(), score_power]):
+            expected = [
+                abtest_power([int(n * g) for g in self.THREE], 0.10, 0.20, power=power, comparisons="all")
+                for n in sizes
+            ]
+            assert list(trace.y) == pytest.approx(expected)
+        control = plot_cluster_power_curve(
+            0.10, 0.20, self.ICC, self.M, sample_sizes=sizes, group_proportions=self.THREE
+        )
+        assert all(a < c for a, c in zip(fig.data[0].y, control.data[0].y))
+
+    def test_sensitivity_curve_uses_comparisons(self):
+        sizes = [6000, 12000, 24000]
+        fig = plot_cluster_sensitivity_curve(
+            0.10, self.ICC, self.M, sample_sizes=sizes, group_proportions=self.THREE, comparisons="all"
+        )
+        for trace, power in zip(fig.data, [self._power(), score_power]):
+            expected = [
+                minimum_detectable_lift([int(n * g) for g in self.THREE], 0.10, power=power, comparisons="all")
+                for n in sizes
+            ]
+            assert list(trace.y) == pytest.approx(expected)
+        control = plot_cluster_sensitivity_curve(
+            0.10, self.ICC, self.M, sample_sizes=sizes, group_proportions=self.THREE
+        )
+        assert all(a > c for a, c in zip(fig.data[0].y, control.data[0].y))
+
+    def test_default_curve_range_uses_comparisons(self):
+        fig = plot_cluster_power_curve(0.10, 0.20, self.ICC, self.M, group_proportions=self.THREE, comparisons="all")
+        target = cluster_required_sample_size(
+            0.10, 0.20, self.ICC, self.M, group_proportions=self.THREE, comparisons="all"
+        )
+        assert fig.data[0].x[-1] == int(target * 2)
 
 
 class TestClusterRandomizedTrial:
