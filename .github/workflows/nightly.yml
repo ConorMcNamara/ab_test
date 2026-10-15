@@ -48,4 +48,4 @@ jobs:
         run: uv pip install --system ".[dev]"
 
       - name: Run all tests including slow
-        run: pytest --cov=ab_test --cov-report=term-missing
+        run: pytest -n auto --cov=ab_test --cov-report=term-missing
