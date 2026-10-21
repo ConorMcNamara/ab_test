@@ -31,14 +31,24 @@ _DARK_CONFIG: dict[str, Any] = {
 }
 
 
+def _vega_format(tickformat: str) -> str:
+    """Give a d3 format with no type a trimmed fixed-point one.
+
+    Plotly reads ``"$,"`` as plain numbers, but Vega's default type turns such
+    axes into exponent notation (``$5e+2``).
+    """
+    return tickformat if tickformat[-1:].isalpha() or tickformat.endswith("%") else f"{tickformat}~f"
+
+
 def _axis(axis_format: AxisFormat, title: str | None) -> alt.Axis:
     """Build an Altair axis with ``axis_format``'s tick labels."""
+    tickformat = _vega_format(axis_format.tickformat) if axis_format.tickformat else None
     if axis_format.tickprefix is not None:
         # Vega has no tick prefix; prepend it in a label expression instead.
-        number = f'format(datum.value, "{axis_format.tickformat}")' if axis_format.tickformat else "datum.label"
+        number = f'format(datum.value, "{tickformat}")' if tickformat else "datum.label"
         return alt.Axis(title=title, labelExpr=f'"{axis_format.tickprefix}" + {number}')
-    if axis_format.tickformat is not None:
-        return alt.Axis(title=title, format=axis_format.tickformat)
+    if tickformat is not None:
+        return alt.Axis(title=title, format=tickformat)
     return alt.Axis(title=title)
 
 
@@ -72,7 +82,9 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
     labels = [point.label for point in points]
     rows = list(dict.fromkeys(labels))
     color = alt.Color(
-        "label:N", scale=_color_scale(labels, [point.color for point in points]), legend=alt.Legend(title=None)
+        "label:N",
+        scale=_color_scale(labels, [point.color for point in points]),
+        legend=alt.Legend(title=None) if spec.show_legend else None,
     )
     # Clicking a legend entry fades every other row, in every panel.
     picked = alt.selection_point(fields=["label"], bind="legend")
@@ -84,6 +96,9 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
                 "estimate": [point.estimate for point in panel.points],
                 "lower": [point.lower for point in panel.points],
                 "upper": [point.upper for point in panel.points],
+                "shape": [point.shape for point in panel.points],
+                # Plotly sizes markers by diameter, Vega by area.
+                "area": [point.size**2 for point in panel.points],
             }
         )
         number = _tooltip_format(panel.x_format)
@@ -95,7 +110,6 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
                 axis=alt.Axis(title=spec.y_title or None) if index == 0 else None,
             ),
             color=color,
-            opacity=alt.condition(picked, alt.value(1.0), alt.value(0.2)),
             tooltip=[
                 alt.Tooltip("label:N", title="Name"),
                 alt.Tooltip("estimate:Q", title="Estimate", format=number),
@@ -103,13 +117,27 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
                 alt.Tooltip("upper:Q", title="Upper", format=number),
             ],
         )
+        if spec.show_legend:
+            base = base.encode(opacity=alt.condition(picked, alt.value(1.0), alt.value(0.2)))
         x_scale = alt.Scale(zero=False)
-        whisker = base.mark_rule(strokeWidth=2).encode(
-            x=alt.X("lower:Q", scale=x_scale, axis=_axis(panel.x_format, panel.x_title)), x2="upper:Q"
-        )
-        dot = base.mark_point(shape="diamond", filled=True, size=150).encode(x=alt.X("estimate:Q", scale=x_scale))
-        layer = alt.layer(whisker, dot)
-        charts.append(layer.add_params(picked) if index == 0 else layer)
+        layers: list[Any] = [
+            base.mark_rule(strokeWidth=2).encode(
+                x=alt.X("lower:Q", scale=x_scale, axis=_axis(panel.x_format, panel.x_title)), x2="upper:Q"
+            ),
+            base.mark_point(filled=True, opacity=1.0).encode(
+                x=alt.X("estimate:Q", scale=x_scale),
+                shape=alt.Shape("shape:N", scale=None),
+                size=alt.Size("area:Q", scale=None),
+            ),
+        ]
+        for vline in panel.vlines:
+            layers.append(
+                alt.Chart(pd.DataFrame({"x": [vline.x]}))
+                .mark_rule(color="gray", strokeDash=[6, 4], opacity=vline.opacity)
+                .encode(x="x:Q")
+            )
+        layer = alt.layer(*layers)
+        charts.append(layer.add_params(picked) if index == 0 and spec.show_legend else layer)
     chart: Any = charts[0] if len(charts) == 1 else alt.hconcat(*charts).resolve_scale(y="shared")
     return _finish(chart, spec.title, spec.dark_mode)  # type: ignore[no-any-return]
 

@@ -9,11 +9,10 @@ import math
 from typing import Any, overload
 
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from tabulate import tabulate
 
 from ab_test._plotting import render, show, validate_backend
-from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec
+from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, VLine
 
 __all__ = [
     "COLORBLIND_PALETTES",
@@ -22,7 +21,7 @@ __all__ = [
     "render_forest_plot",
     "forest_spec",
     "apply_dark_mode",
-    "combine_lift_panels",
+    "effect_panel",
     "tabulate_summary",
     "format_percent",
 ]
@@ -236,56 +235,81 @@ def apply_dark_mode(fig: go.Figure, dark_mode: bool) -> go.Figure:
     return fig
 
 
-def combine_lift_panels(figures: list[go.Figure], title: str, panel_titles: list[str]) -> go.Figure:
-    """Place single-lift forest plots side by side, sharing the y-axis.
+# Axis titles and tick formats of the per-segment/per-stratum forest plots.
+_EFFECT_LABELS = {
+    "absolute": "Risk Difference",
+    "relative": "Relative Lift",
+    "incremental": "Incremental Conversions",
+    "roas": "Return on Ad Spend",
+    "revenue": "Revenue",
+    "cpa": "Cost Per Acquisition",
+}
+_EFFECT_TICK_FORMATS = {
+    "absolute": ",.1%",
+    "relative": ",.1%",
+    "incremental": ",",
+    "roas": ".3~g",
+    "revenue": "$,",
+    "cpa": "$,",
+}
 
-    Each figure becomes one panel: its traces, vertical reference lines and
-    x-axis tick format are copied over, and its legend entries form a legend
-    section titled with the panel's title (clicking an entry hides that trace,
-    clicking the title hides the panel). Layout taken from the first figure:
-    template, legend visibility, y-axis title and a reversed y-axis.
+
+def effect_panel(
+    names: list[str],
+    effects: list[float],
+    ci_lowers: list[float],
+    ci_uppers: list[float],
+    lift: str,
+    color: str | dict[str, Any] | list[Any] | None = None,
+    *,
+    pooled: tuple[float, float, float] | None = None,
+    zero_line_opacity: float = 1.0,
+) -> ForestPanel:
+    """Describe one lift's forest-plot panel of per-segment (or per-stratum) effects.
+
+    Each segment is a circle with its interval; a pooled estimate, if given, is
+    a diamond labelled ``"Overall"`` below them. A dashed line marks zero.
 
     Parameters
     ----------
-    figures : list of plotly.graph_objects.Figure
-        One finished single-lift figure per panel, with the same rows.
-    title : str
-        Title of the combined figure.
-    panel_titles : list of str
-        x-axis title of each panel.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        The combined figure.
+    names : list of str
+        Segment names, in order.
+    effects, ci_lowers, ci_uppers : list of float
+        Each segment's effect and interval.
+    lift : str
+        The lift the effects are on, which sets the axis title and format.
+    color : str, list, dict, or None, default=None
+        Passed to :func:`resolve_plot_color`. A list colors the segments in
+        order (cycling) and then the pooled row; a dict is keyed by segment
+        name, with ``"Overall"`` for the pooled row.
+    pooled : tuple of float or None, default=None
+        The pooled effect and its interval, ``(effect, lower, upper)``.
+    zero_line_opacity : float, default=1.0
+        Opacity of the zero line.
     """
-    combined = make_subplots(rows=1, cols=len(figures), shared_yaxes=True, horizontal_spacing=0.08)
-    for col, (panel, panel_title) in enumerate(zip(figures, panel_titles, strict=True), start=1):
-        layout: Any = panel.layout
-        traces: Any = panel.data
-        for trace in traces:
-            # One legend section per panel, titled with its lift, rather than legend
-            # entries for the first panel only.
-            trace.update(legendgroup=f"panel{col}", legendgrouptitle_text=panel_title)
-            combined.add_trace(trace, row=1, col=col)
-        for shape in layout.shapes:
-            if shape.type == "line" and shape.x0 == shape.x1:
-                combined.add_vline(x=shape.x0, line=shape.line.to_plotly_json(), opacity=shape.opacity, row=1, col=col)
-        axis = layout.xaxis
-        combined.update_xaxes(
-            title_text=panel_title, tickformat=axis.tickformat, tickprefix=axis.tickprefix, row=1, col=col
-        )
-    first: Any = figures[0].layout
-    combined.update_layout(
-        title_text=title,
-        template=first.template,
-        showlegend=first.showlegend,
-        yaxis_title=first.yaxis.title.text,
-        legend_groupclick="toggleitem",
+    plot_color = resolve_plot_color(color)
+
+    def _color(index: int, name: str) -> str | None:
+        if isinstance(plot_color, list):
+            return plot_color[index % len(plot_color)]  # type: ignore[no-any-return]
+        if isinstance(plot_color, dict):
+            return plot_color.get(name)
+        return None
+
+    points = [
+        ForestPoint(name, effects[k], ci_lowers[k], ci_uppers[k], _color(k, name), shape="circle", size=10)
+        for k, name in enumerate(names)
+    ]
+    if pooled is not None:
+        points.append(ForestPoint("Overall", *pooled, _color(len(names), "Overall"), shape="diamond", size=14))
+    label = _EFFECT_LABELS[lift]
+    return ForestPanel(
+        points,
+        x_title=label,
+        x_format=AxisFormat(tickformat=_EFFECT_TICK_FORMATS[lift]),
+        legend_title=label,
+        vlines=[VLine(0.0, opacity=zero_line_opacity)],
     )
-    if first.yaxis.autorange == "reversed":
-        combined.update_yaxes(autorange="reversed")
-    return combined
 
 
 def render_forest_plot(

@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pytest
 
-from ab_test._display import combine_lift_panels, format_percent, render_forest_plot
+from ab_test._display import format_percent, render_forest_plot
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 from ab_test.bayesian_binomial.diff_in_diff import BayesianDiffInDiff
 from ab_test.bayesian_binomial.stratified import BayesianStratifiedContingencyTable
@@ -225,22 +225,6 @@ class TestSegmentPlotsBothLifts:
         fig = shown[-1]
         assert fig.layout.template.layout.paper_bgcolor == DARK_BACKGROUND
         assert fig.layout.yaxis.autorange == "reversed"
-
-
-class TestCombineLiftPanels:
-    @staticmethod
-    def test_legend_section_per_panel_and_formats_copied():
-        left = go.Figure(go.Scatter(x=[0.1], y=["a"], name="a")).update_layout(xaxis_tickformat=",.1%", showlegend=True)
-        right = go.Figure(go.Scatter(x=[0.2], y=["a"], name="a")).update_layout(xaxis_tickformat="$,")
-        fig = combine_lift_panels([left, right], "Title", ["Left", "Right"])
-        # Both panels keep their legend entries, each under a section titled with the panel.
-        assert [trace.showlegend for trace in fig.data] == [None, None]
-        assert [trace.legendgroup for trace in fig.data] == ["panel1", "panel2"]
-        assert [trace.legendgrouptitle.text for trace in fig.data] == ["Left", "Right"]
-        assert fig.layout.legend.groupclick == "toggleitem"
-        assert (fig.layout.xaxis.tickformat, fig.layout.xaxis2.tickformat) == (",.1%", "$,")
-        assert fig.layout.title.text == "Title"
-        assert fig.layout.showlegend is True
 
 
 class TestFormatPercent:

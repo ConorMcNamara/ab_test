@@ -8,7 +8,7 @@ the same plot from it.
 
 from dataclasses import dataclass, field
 
-__all__ = ["AxisFormat", "ForestPoint", "ForestPanel", "ForestSpec", "LineSeries", "HLine", "LineSpec"]
+__all__ = ["AxisFormat", "ForestPoint", "VLine", "ForestPanel", "ForestSpec", "LineSeries", "HLine", "LineSpec"]
 
 
 @dataclass(frozen=True)
@@ -30,13 +30,37 @@ class AxisFormat:
 
 @dataclass(frozen=True)
 class ForestPoint:
-    """One row of a forest plot: a point estimate and its interval."""
+    """One row of a forest plot: a point estimate and its interval.
+
+    Parameters
+    ----------
+    label : str
+        The row's name on the y-axis.
+    estimate, lower, upper : float
+        The point estimate and its interval.
+    color : str or None
+        Color of the row; ``None`` leaves it to the backend's color scheme.
+    shape : {"diamond", "circle"}
+        Marker shape; pooled estimates are drawn as diamonds.
+    size : float
+        Marker diameter in pixels.
+    """
 
     label: str
     estimate: float
     lower: float
     upper: float
     color: str | None = None
+    shape: str = "diamond"
+    size: float = 12.5
+
+
+@dataclass(frozen=True)
+class VLine:
+    """A dashed gray vertical reference line, such as zero (no effect)."""
+
+    x: float
+    opacity: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -53,12 +77,15 @@ class ForestPanel:
         Tick labels of the x-axis.
     legend_title : str or None
         Title of this panel's legend section when there are several panels.
+    vlines : list of VLine
+        Vertical reference lines.
     """
 
     points: list[ForestPoint]
     x_title: str | None = None
     x_format: AxisFormat = field(default_factory=AxisFormat)
     legend_title: str | None = None
+    vlines: list[VLine] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -77,6 +104,11 @@ class ForestSpec:
         Whether the first row is drawn at the top rather than the bottom.
     dark_mode : bool
         Whether to draw on a dark background.
+    show_legend : bool
+        Whether to show a legend of the rows.
+    white_background : bool
+        Whether to draw on a plain white background rather than the backend's
+        default light one; ignored in dark mode.
     """
 
     panels: list[ForestPanel]
@@ -84,6 +116,8 @@ class ForestSpec:
     y_title: str
     reverse: bool = True
     dark_mode: bool = False
+    show_legend: bool = True
+    white_background: bool = False
 
 
 @dataclass(frozen=True)

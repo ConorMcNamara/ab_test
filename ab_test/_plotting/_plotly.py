@@ -27,7 +27,7 @@ def forest(spec: ForestSpec) -> go.Figure:
     )
     for col, panel in enumerate(spec.panels, start=1):
         for point in panel.points:
-            marker: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
+            marker: dict[str, Any] = {"symbol": point.shape, "size": point.size}
             error_x: dict[str, Any] = {
                 "type": "data",
                 "symmetric": False,
@@ -42,10 +42,15 @@ def forest(spec: ForestSpec) -> go.Figure:
             if multi:
                 # Each panel gets its own legend section, titled with its lift, so every
                 # point has an entry and the title toggles the whole panel.
-                trace.update(showlegend=True, legendgroup=f"panel{col}", legendgrouptitle_text=panel.legend_title)
+                trace.update(legendgroup=f"panel{col}", legendgrouptitle_text=panel.legend_title)
+                if spec.show_legend:
+                    trace.update(showlegend=True)
                 fig.add_trace(trace, row=1, col=col)
             else:
                 fig.add_trace(trace)
+        for vline in panel.vlines:
+            subplot = {"row": 1, "col": col} if multi else {}
+            fig.add_vline(x=vline.x, line_dash="dash", line_color="gray", opacity=vline.opacity, **subplot)
         if multi:
             fig.update_xaxes(title_text=panel.x_title, row=1, col=col, **_axis_kwargs(panel.x_format))
         else:
@@ -54,6 +59,10 @@ def forest(spec: ForestSpec) -> go.Figure:
         # Clicking an entry hides that point only; clicking a section title hides the panel.
         fig.update_layout(legend_groupclick="toggleitem")
     fig.update_layout(title_text=spec.title, yaxis_title=spec.y_title)
+    if not spec.show_legend:
+        fig.update_layout(showlegend=False)
+    if spec.white_background:
+        fig.update_layout(template="plotly_white")
     # With several panels each x-axis carries its own title.
     if not multi and spec.panels[0].x_title is not None:
         fig.update_layout(xaxis_title=spec.panels[0].x_title)

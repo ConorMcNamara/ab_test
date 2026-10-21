@@ -5,10 +5,15 @@ import importlib.util
 import plotly.graph_objects as go
 import pytest
 
-from ab_test._display import forest_spec, render_forest_plot
+from ab_test._display import effect_panel, forest_spec, render_forest_plot
 from ab_test._plotting import render, validate_backend
+from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
+from ab_test.bayesian_binomial.diff_in_diff import BayesianDiffInDiff
+from ab_test.bayesian_binomial.stratified import BayesianStratifiedContingencyTable
 from ab_test.frequentist_binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.diff_in_diff import DiffInDiff
 from ab_test.frequentist_binomial.power_calculations import plot_power_curve, plot_sensitivity_curve
+from ab_test.frequentist_binomial.stratified import StratifiedContingencyTable
 
 alt = pytest.importorskip("altair")
 
@@ -39,8 +44,13 @@ def _layers(chart_dict):
 
 
 def _rows(chart_dict, node):
-    """The data rows behind a layer or panel, looked up in the chart's named datasets."""
-    return chart_dict["datasets"][node["data"]["name"]]
+    """The data rows behind a layer or panel, looked up in the chart's named datasets.
+
+    A panel whose layers share their data holds it itself; otherwise its rows
+    are those of its first layer.
+    """
+    data = node["data"] if "data" in node else node["layer"][0]["data"]
+    return chart_dict["datasets"][data["name"]]
 
 
 class TestValidateBackend:
@@ -76,7 +86,8 @@ class TestForestAltair:
         assert whisker["encoding"]["x"]["axis"] == {"format": ",.0%", "title": "Rate"}
         assert whisker["encoding"]["y"]["axis"]["title"] == "Cell"
         assert whisker["encoding"]["color"]["scale"]["range"] == ["#4477aa", "#ee6677", "#228833"]
-        assert dot["mark"]["shape"] == "diamond"
+        assert dot["encoding"]["shape"] == {"field": "shape", "scale": None, "type": "nominal"}
+        assert {row["shape"] for row in _rows(chart, _panels(chart)[0])} == {"diamond"}
 
     @pytest.mark.parametrize(("reverse", "order"), [(True, ["A", "B", "Total"]), (False, ["Total", "B", "A"])])
     def test_reverse_puts_first_row_on_top(self, reverse, order):
@@ -146,6 +157,119 @@ class TestTablePlotAltair:
         table.analyze_individually()
         table.plot()
         assert isinstance(figures[0], go.Figure)
+
+
+def _strata(cls, *prior):
+    table = cls("Checkout", "conversion")
+    for stratum, (control, treatment) in {"desktop": (120, 140), "mobile": (80, 95)}.items():
+        table.add("Control", control, 1000, *prior, stratum=stratum)
+        table.add("Treatment", treatment, 1000, *prior, stratum=stratum)
+    return table
+
+
+def _segments(table_cls, did_cls, *prior):
+    men = table_cls("Men", "converted").add("Control", 100, 1000, *prior).add("Treatment", 130, 1000, *prior)
+    women = table_cls("Women", "converted").add("Control", 120, 1000, *prior).add("Treatment", 125, 1000, *prior)
+    return did_cls(men, women)
+
+
+# Each maker, the extra .plot() arguments, and the rows it draws.
+SEGMENT_PLOTS = {
+    "stratified": (lambda: _strata(StratifiedContingencyTable), {}, ["desktop", "mobile", "Overall"]),
+    "bayes_stratified": (
+        lambda: _strata(BayesianStratifiedContingencyTable, 1, 1),
+        {"n_samples": 2_000},
+        ["desktop", "mobile", "Overall"],
+    ),
+    "diff_in_diff": (lambda: _segments(ContingencyTable, DiffInDiff), {}, ["Men", "Women"]),
+    "bayes_diff_in_diff": (
+        lambda: _segments(BayesianContingencyTable, BayesianDiffInDiff, 1, 1),
+        {"n_samples": 2_000},
+        ["Men", "Women"],
+    ),
+}
+
+
+class TestEffectPanel:
+    @staticmethod
+    def test_segments_are_circles_and_pooled_is_a_diamond():
+        panel = effect_panel(["a", "b"], [0.1, 0.2], [0.0, 0.1], [0.2, 0.3], "absolute", pooled=(0.15, 0.1, 0.2))
+        assert [(p.label, p.shape) for p in panel.points] == [("a", "circle"), ("b", "circle"), ("Overall", "diamond")]
+        assert panel.x_title == "Risk Difference"
+        assert panel.x_format.tickformat == ",.1%"
+        assert [v.x for v in panel.vlines] == [0.0]
+
+    @staticmethod
+    def test_list_palette_colors_segments_then_pooled():
+        panel = effect_panel(["a", "b"], [0.1, 0.2], [0.0, 0.1], [0.2, 0.3], "relative", "ibm", pooled=(0.15, 0.1, 0.2))
+        assert [p.color for p in panel.points] == ["#648fff", "#785ef0", "#dc267f"]
+
+    @staticmethod
+    def test_dict_palette_by_name():
+        colors = {"b": "#000000", "Overall": "#ffffff"}
+        panel = effect_panel(["a", "b"], [0.1, 0.2], [0.0, 0.1], [0.2, 0.3], "revenue", colors, pooled=(0.15, 0.1, 0.2))
+        assert [p.color for p in panel.points] == [None, "#000000", "#ffffff"]
+
+
+class TestSegmentPlots:
+    @pytest.mark.parametrize("name", SEGMENT_PLOTS)
+    def test_plotly_hides_legend_and_marks_zero(self, monkeypatch, name):
+        figures = []
+        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+        make, kwargs, rows = SEGMENT_PLOTS[name]
+        make().plot(**kwargs)
+        (fig,) = figures
+        assert [trace.y[0] for trace in fig.data] == rows
+        assert fig.layout.showlegend is False
+        assert fig.layout.yaxis.autorange == "reversed"
+        assert [shape.x0 for shape in fig.layout.shapes] == [0]
+
+    @pytest.mark.parametrize("name", SEGMENT_PLOTS)
+    def test_altair_single_lift(self, shown, name):
+        make, kwargs, rows = SEGMENT_PLOTS[name]
+        make().plot(lift="relative", backend="altair", **kwargs)
+        chart = shown[-1].to_dict()
+        ((whisker, dot, zero),) = _layers(chart)
+        assert [row["label"] for row in _rows(chart, _panels(chart)[0])] == rows
+        assert whisker["encoding"]["y"]["sort"] == rows
+        assert whisker["encoding"]["x"]["axis"] == {"format": ",.1%", "title": "Relative Lift"}
+        assert whisker["encoding"]["color"]["legend"] is None
+        assert dot["encoding"]["shape"]["scale"] is None
+        assert _rows(chart, zero) == [{"x": 0.0}]
+        assert chart["title"].endswith("(Relative Lift)")
+
+    @pytest.mark.parametrize("name", SEGMENT_PLOTS)
+    def test_altair_both_lifts(self, shown, name):
+        make, kwargs, _ = SEGMENT_PLOTS[name]
+        make().plot(lift="both", backend="altair", dark_mode=True, **kwargs)
+        chart = shown[-1].to_dict()
+        panels = _layers(chart)
+        assert [panel[0]["encoding"]["x"]["axis"]["title"] for panel in panels] == ["Risk Difference", "Relative Lift"]
+        assert chart["title"].endswith("(Risk Difference and Relative Lift)")
+        assert chart["usermeta"]["embedOptions"]["theme"] == "dark"
+
+    @staticmethod
+    def test_pooled_row_is_larger_diamond(shown):
+        _strata(StratifiedContingencyTable).plot(backend="altair")
+        chart = shown[-1].to_dict()
+        data = _rows(chart, _panels(chart)[0])
+        assert [(row["shape"], row["area"]) for row in data] == [("circle", 100), ("circle", 100), ("diamond", 196)]
+
+    @pytest.mark.parametrize(("lift", "axis_format"), [("revenue", "$,~f"), ("incremental", ",~f"), ("roas", ".3~g")])
+    def test_typeless_formats_stay_out_of_exponent_notation(self, shown, lift, axis_format):
+        table = StratifiedContingencyTable("Checkout", "conversion", spend=5000.0, msrp=40.0)
+        for stratum, (control, treatment) in {"desktop": (120, 140), "mobile": (80, 95)}.items():
+            table.add("Control", control, 1000, stratum=stratum).add("Treatment", treatment, 1000, stratum=stratum)
+        table.plot(lift=lift, backend="altair")
+        ((whisker, _, _),) = _layers(shown[-1].to_dict())
+        assert whisker["encoding"]["x"]["axis"]["format"] == axis_format
+
+    @staticmethod
+    def test_bad_backend_fails_before_sampling(monkeypatch):
+        table = _strata(BayesianStratifiedContingencyTable, 1, 1)
+        monkeypatch.setattr(table, "_plot_panel", lambda **kwargs: pytest.fail("sampled before validating"))
+        with pytest.raises(ValueError, match="backend must be one of"):
+            table.plot(backend="seaborn")
 
 
 class TestLineAltair:
