@@ -296,7 +296,6 @@ class TestFisherTest:
         assert fisher_test(trials, successes, crit=0.05) is True
 
 
-@pytest.mark.slow
 class TestFastPValues:
     @staticmethod
     def test_chi2_and_normal_tails_match_scipy():
@@ -311,6 +310,7 @@ class TestFastPValues:
             assert _two_sided_normal_p(-z) == _two_sided_normal_p(z)
 
 
+@pytest.mark.slow
 class TestBarnardTest:
     # Note that this test takes a while to go through all the permutations
     @staticmethod
