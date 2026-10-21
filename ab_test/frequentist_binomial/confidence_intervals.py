@@ -2,6 +2,7 @@
 
 import math
 from collections.abc import Callable
+from math import sqrt
 from typing import Any
 
 import numpy as np
@@ -539,3 +540,74 @@ def wilson_interval(s: int, n: int, alpha: float = 0.05, z: float | None = None)
     # inner_wdth = s * (n - s) / n + z_squared / 4
     # wdth = (z / (n + z_squared)) * math.sqrt(inner_wdth)
     return (ctr - wdth) / denom, (ctr + wdth) / denom
+
+
+import numpy as np
+import scipy.stats as ss
+from typing import Any
+
+def fieller_interval(
+        trials: np.ndarray | list,
+        successes: np.ndarray | list,
+        alpha: float = 0.05,
+        z: float | None = None
+) -> tuple[float, float]:
+    """Compute the confidence interval for Binomial Proportions ratio / relative lift.
+
+    Parameters
+    ----------
+    trials : array_like
+        Number of trials in each group [control, test].
+    successes : array_like
+        Number of successes in each group [control, test].
+    alpha : float
+        The significance level. Defaults to 0.05, corresponding to a 95%
+        confidence interval.
+    z : float, optional
+        Critical z-value. If None, computed from alpha.
+
+    Returns
+    -------
+    lb, ub : float
+        Lower and upper bounds on the relative lift confidence interval.
+    """
+    if z is None:
+        z = float(ss.norm.isf(alpha / 2))
+
+    n_control, n_test = trials[0], trials[1]
+    success_control, success_test = successes[0], successes[1]
+
+    # Compute proportions
+    p_control = success_control / n_control
+    p_test = success_test / n_test
+
+    # Binomial variances of the proportions
+    var_control = (p_control * (1 - p_control)) / n_control
+    var_test = (p_test * (1 - p_test)) / n_test
+
+    # Point estimate for relative lift: (test / control) - 1
+    point_estimate = (p_test / p_control) - 1
+
+    # Fieller / Delta method adjustment factor (g)
+    # g measures the relative uncertainty of the control group mean
+    g = (z**2 * var_control) / (p_control**2)
+
+    # Standard error for the ratio using Delta method / Fieller approximation
+    # SE^2 = (1 / p_c^2) * var_test + (p_t^2 / p_c^4) * var_control
+    rel_variance = (var_test / (p_control**2)) + ((p_test**2 * var_control) / (p_control**4))
+    se = np.sqrt(rel_variance)
+
+    # Fieller-adjusted bounds calculation
+    # When g < 1, the interval is bounded properly.
+    if g < 1:
+        scale = 1 / (1 - g)
+        center_adjustment = scale * (point_estimate + 1) - 1
+        margin = scale * z * se # approximation alignment
+        lb = center_adjustment - margin
+        ub = center_adjustment + margin
+    else:
+        # Fallback to standard Delta method when control denominator is imprecise (g >= 1)
+        lb = point_estimate - z * se
+        ub = point_estimate + z * se
+
+    return float(lb), float(ub)
