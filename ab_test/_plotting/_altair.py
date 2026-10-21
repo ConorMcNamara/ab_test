@@ -16,22 +16,33 @@ __all__ = ["forest", "line"]
 # Vega stroke dashes for the spec's dash names; [1, 0] is solid.
 _DASHES = {None: [1, 0], "dash": [6, 4], "dot": [2, 3]}
 
-# Vega's "dark" theme, written into the chart so it holds in static exports
-# too, not only where vega-embed applies the theme.
-_DARK_BACKGROUND = "#333"
-_DARK_CONFIG: dict[str, Any] = {
-    "view": {"stroke": "#888"},
-    "title": {"color": "#fff"},
-    "axis": {
-        "domainColor": "#fff",
-        "gridColor": "#888",
-        "tickColor": "#fff",
-        "labelColor": "#fff",
-        "titleColor": "#fff",
-    },
-    "legend": {"labelColor": "#fff", "titleColor": "#fff"},
-    "text": {"color": "#fff"},
+# Plotly's default colors, for marks the spec leaves uncolored.
+_PLOTLY_COLORS = [
+    "#636EFA",
+    "#EF553B",
+    "#00CC96",
+    "#AB63FA",
+    "#FFA15A",
+    "#19D3F3",
+    "#FF6692",
+    "#B6E880",
+    "#FF97FF",
+    "#FECB52",
+]
+
+# The look of Plotly's templates: page background, plot area, grid and text colors.
+_TEMPLATES = {
+    "plotly": ("white", "#E5ECF6", "white", "#2a3f5f"),
+    "plotly_white": ("white", "white", "#EBF0F8", "#2a3f5f"),
+    "plotly_dark": ("#111111", "#111111", "#283442", "#f2f5fa"),
 }
+_FONT = '"Open Sans", verdana, arial, sans-serif'
+
+# Altair charts are sized like Plotly's default figures, less their margins.
+_WIDTH = 560
+_HEIGHT = 340
+# Whisker and error bar caps, in pixels across.
+_CAP = 8
 
 
 def _vega_format(tickformat: str) -> str:
@@ -61,37 +72,82 @@ def _tooltip_format(axis_format: AxisFormat) -> str:
 
 
 def _color_scale(labels: list[str], colors: list[str | None]) -> alt.Scale:
-    """Color each label explicitly when every one has a color, else use Vega's default scheme.
+    """Color each label as given, or with Plotly's next default color when it has none.
 
-    The domain is explicit either way, so a legend shared with another channel,
-    such as stroke dash, merges into one.
+    The domain is explicit, so a legend shared with another channel, such as
+    stroke dash, merges into one.
     """
-    domain = list(dict.fromkeys(labels))
-    if any(color is None for color in colors):
-        return alt.Scale(domain=domain)
-    by_label: dict[str, Any] = dict(zip(labels, colors, strict=True))
-    return alt.Scale(domain=domain, range=[by_label[label] for label in domain])
+    by_label: dict[str, str | None] = dict(zip(labels, colors, strict=True))
+    domain = list(by_label)
+    return alt.Scale(
+        domain=domain,
+        range=[by_label[label] or _PLOTLY_COLORS[i % len(_PLOTLY_COLORS)] for i, label in enumerate(domain)],
+    )
 
 
-def _finish(chart: Any, title: str, dark_mode: bool) -> Any:
-    """Add the title and, in dark mode, the dark theme to a top-level chart."""
-    chart = chart.properties(title=title)
-    if dark_mode:
-        chart = chart.properties(usermeta={"embedOptions": {"theme": "dark"}}).configure(
-            background=_DARK_BACKGROUND, **_DARK_CONFIG
-        )
-    return chart
+def _rgba(color: str, alpha: float) -> str:
+    """Turn a ``#rrggbb`` color into a CSS ``rgba()`` with the given alpha."""
+    red, green, blue = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({red}, {green}, {blue}, {alpha})"
+
+
+def _area(shape: str, size: float) -> float:
+    """Convert a Plotly marker size, a diameter, to the Vega symbol area that looks the same.
+
+    Plotly draws its diamonds 1.3 times wider than their nominal size.
+    """
+    return (size * 1.3 if shape == "diamond" else size) ** 2
+
+
+def _is_whole(values: Any) -> bool:
+    """Whether every value is a whole number, so axis ticks between them mean nothing."""
+    return all(float(value).is_integer() for value in values)
+
+
+def _finish(chart: Any, title: str, template: str) -> Any:
+    """Add the title and the look of a Plotly template to a top-level chart.
+
+    The theme is written into the chart, so it holds in static exports too,
+    not only where vega-embed applies a theme.
+    """
+    background, plot, grid, text = _TEMPLATES[template]
+    chart = chart.properties(title=alt.TitleParams(title, anchor="start", fontSize=17, fontWeight="normal"))
+    if template == "plotly_dark":
+        chart = chart.properties(usermeta={"embedOptions": {"theme": "dark"}})
+    return chart.configure(
+        background=background,
+        font=_FONT,
+        view={"fill": plot, "stroke": None},
+        title={"color": text},
+        axis={
+            "domain": False,
+            "ticks": False,
+            "gridColor": grid,
+            "labelColor": text,
+            "labelFontSize": 12,
+            "labelPadding": 6,
+            "titleColor": text,
+            "titleFontSize": 14,
+            "titleFontWeight": "normal",
+        },
+        legend={"labelColor": text, "titleColor": text, "labelFontSize": 12, "titleFontWeight": "normal"},
+        text={"color": text},
+    )
 
 
 def forest(spec: ForestSpec) -> alt.TopLevelMixin:
     """Draw a forest plot, one chart per panel concatenated with a shared y-axis."""
     points = [point for panel in spec.panels for point in panel.points]
     labels = [point.label for point in points]
+    shapes = {point.shape for point in points}
     rows = list(dict.fromkeys(labels))
     color = alt.Color(
         "label:N",
         scale=_color_scale(labels, [point.color for point in points]),
-        legend=alt.Legend(title=None) if spec.show_legend else None,
+        # Legend samples in the marker shape when every row shares one, as Plotly's do.
+        legend=alt.Legend(title=None, symbolType=next(iter(shapes)) if len(shapes) == 1 else "circle")
+        if spec.show_legend
+        else None,
     )
     # Clicking a legend entry fades every other row, in every panel.
     picked = alt.selection_point(fields=["label"], bind="legend")
@@ -104,8 +160,7 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
                 "lower": [point.lower for point in panel.points],
                 "upper": [point.upper for point in panel.points],
                 "shape": [point.shape for point in panel.points],
-                # Plotly sizes markers by diameter, Vega by area.
-                "area": [point.size**2 for point in panel.points],
+                "area": [_area(point.shape, point.size) for point in panel.points],
             }
         )
         number = _tooltip_format(panel.x_format)
@@ -130,8 +185,21 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
         layers: list[Any] = [
             # Rows without an interval, such as observed cluster rates, get no whisker.
             base.mark_rule(strokeWidth=2)
-            .encode(x=alt.X("lower:Q", scale=x_scale, axis=_axis(panel.x_format, panel.x_title)), x2="upper:Q")
+            .encode(
+                # Fewer ticks in narrower side-by-side panels, so their labels don't collide.
+                x=alt.X(
+                    "lower:Q",
+                    scale=x_scale,
+                    axis=_axis(panel.x_format, panel.x_title, tickCount=5 if len(spec.panels) == 1 else 3),
+                ),
+                x2="upper:Q",
+            )
             .transform_filter("isValid(datum.lower)"),
+            # A cap at each end of the whisker, like Plotly's error bars.
+            base.mark_tick(orient="vertical", size=_CAP, thickness=2)
+            .encode(x=alt.X("end:Q", scale=x_scale))
+            .transform_filter("isValid(datum.lower)")
+            .transform_fold(["lower", "upper"], as_=["side", "end"]),
             base.mark_point(filled=True, opacity=1.0).encode(
                 x=alt.X("estimate:Q", scale=x_scale),
                 shape=alt.Shape("shape:N", scale=None),
@@ -144,10 +212,12 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
                 .mark_rule(color="gray", strokeDash=[6, 4], opacity=vline.opacity)
                 .encode(x="x:Q")
             )
-        layer = alt.layer(*layers)
+        # As tall as Plotly's figure, or taller when the rows would crowd.
+        layer = alt.layer(*layers).properties(width=_WIDTH // len(spec.panels), height=max(_HEIGHT, 24 * len(rows)))
         charts.append(layer.add_params(picked) if index == 0 and spec.show_legend else layer)
     chart: Any = charts[0] if len(charts) == 1 else alt.hconcat(*charts).resolve_scale(y="shared")
-    return _finish(chart, spec.title, spec.dark_mode)  # type: ignore[no-any-return]
+    template = "plotly_dark" if spec.dark_mode else "plotly_white" if spec.white_background else "plotly"
+    return _finish(chart, spec.title, template)  # type: ignore[no-any-return]
 
 
 def _only(names: list[str]) -> alt.FieldOneOfPredicate:
@@ -164,23 +234,32 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
             "y": [y for series in spec.series for y in series.y],
             "err": [e for series in spec.series for e in (series.errors or [float("nan")] * len(series.x))],
             "shape": [series.marker_shape for series in spec.series for _ in series.x],
-            # Plotly sizes markers by diameter, Vega by area; Plotly's default diameter is 6.
-            "area": [(series.marker_size or 6) ** 2 for series in spec.series for _ in series.x],
+            # Plotly's default marker diameter is 6.
+            "area": [_area(series.marker_shape, series.marker_size or 6) for series in spec.series for _ in series.x],
         }
     )
-    # Bands share the series' color scale and legend.
-    names = [band.name for band in spec.bands] + [series.name for series in spec.series]
-    colors = [band.color for band in spec.bands] + [series.color for series in spec.series]
+    # Bands share the series' color scale and legend, after the series as in
+    # Plotly's. Their translucency is in the color itself, so the legend shows it.
+    names = [series.name for series in spec.series] + [band.name for band in spec.bands]
+    colors = [series.color for series in spec.series] + [_rgba(band.color, 0.2) for band in spec.bands]
     # Like Plotly, a lone line gets no legend. Above the plot like Plotly's, with
     # line samples that show each dash pattern.
     legend = (
-        alt.Legend(title=None, orient="top", direction="horizontal", symbolType="stroke", symbolStrokeWidth=2)
+        alt.Legend(
+            title=None,
+            orient="top",
+            direction="horizontal",
+            symbolType="stroke",
+            labelLimit=0,
+            symbolStrokeWidth=2,
+            symbolOpacity=1,
+        )
         if len(names) > 1
         else None
     )
     color = alt.Color("series:N", scale=_color_scale(names, colors), legend=legend)
     # Same field and legend as the color, so Vega merges them into one legend.
-    dashes = [_DASHES[None]] * len(spec.bands) + [_DASHES[s.dash] for s in spec.series]
+    dashes = [_DASHES[s.dash] for s in spec.series] + [_DASHES[None]] * len(spec.bands)
     dash = alt.StrokeDash("series:N", scale=alt.Scale(domain=names, range=dashes), legend=legend)
 
     # Categorical x values are labels; keep the order they come in.
@@ -189,17 +268,30 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
         x_axis = alt.Axis(title=spec.x_title, labelAngle=0)
         x_tooltip = alt.Tooltip("x:N", title=spec.x_title)
     else:
-        extra = {"tickMinStep": spec.x_tick_step} if spec.x_tick_step is not None else {}
-        x_axis = _axis(spec.x_format, spec.x_title, **extra)
+        # Whole-number x values, such as analysis or cluster counts, get whole-number ticks.
+        xs = [float(x) for series in spec.series for x in series.x]
+        step = spec.x_tick_step if spec.x_tick_step is not None else 1 if _is_whole(xs) else None
+        extra: dict[str, Any] = {}
+        if step is not None and (max(xs) - min(xs)) / step <= 12:
+            # Vega's tickMinStep alone still puts ticks between few, close values.
+            values = [min(xs) + i * step for i in range(int((max(xs) - min(xs)) / step) + 1)]
+            extra["values"] = values
+            if _is_whole(values) and spec.x_format.tickformat is None:
+                # Vega labels ticks at whole floats 1.0, 2.0; Plotly labels them 1, 2.
+                extra["format"] = "d"
+        elif step is not None:
+            extra["tickMinStep"] = step
+        x_axis = _axis(spec.x_format, spec.x_title, tickCount=6, **extra)
         x_tooltip = alt.Tooltip("x:Q", title=spec.x_title, format=",")
 
     def x_channel(field: str = "x") -> alt.X:
         if spec.x_categorical:
-            return alt.X(f"{field}:N", sort=x_order, axis=x_axis)
-        return alt.X(f"{field}:Q", axis=x_axis, scale=alt.Scale(zero=False))
+            return alt.X(f"{field}:N", sort=x_order, axis=x_axis, scale=alt.Scale(padding=0.25))
+        # Like Plotly, the axis spans the data and no further.
+        return alt.X(f"{field}:Q", axis=x_axis, scale=alt.Scale(zero=False, nice=False))
 
     y_scale = alt.Scale(domain=list(spec.y_range), nice=False) if spec.y_range is not None else alt.Scale(zero=False)
-    y_axis = _axis(spec.y_format, spec.y_title)
+    y_axis = _axis(spec.y_format, spec.y_title, tickCount=6)
     base = alt.Chart(data).encode(x=x_channel(), y=alt.Y("y:Q", scale=y_scale, axis=y_axis), color=color)
 
     layers: list[Any] = []
@@ -214,7 +306,7 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
         )
         layers.append(
             alt.Chart(bands)
-            .mark_area(opacity=0.2)
+            .mark_area()
             .encode(x=x_channel(), y=alt.Y("lower:Q", scale=y_scale, axis=y_axis), y2="upper:Q", color=color)
         )
     lined = [series.name for series in spec.series if series.lines]
@@ -232,11 +324,15 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
             .transform_filter(_only(marked))
         )
     if with_errors:
+        errors = base.transform_filter(_only(with_errors)).transform_calculate(
+            lo="datum.y - datum.err", hi="datum.y + datum.err"
+        )
+        layers.append(errors.mark_rule(strokeWidth=2).encode(y=alt.Y("lo:Q", scale=y_scale, axis=y_axis), y2="hi:Q"))
+        # A cap at each end of the error bar, like Plotly's.
         layers.append(
-            base.mark_rule(strokeWidth=1.5)
-            .encode(y=alt.Y("lo:Q", scale=y_scale, axis=y_axis), y2="hi:Q")
-            .transform_filter(_only(with_errors))
-            .transform_calculate(lo="datum.y - datum.err", hi="datum.y + datum.err")
+            errors.mark_tick(orient="horizontal", size=_CAP, thickness=2)
+            .encode(y=alt.Y("end:Q", scale=y_scale))
+            .transform_fold(["lo", "hi"], as_=["side", "end"])
         )
     # Hovering anywhere marks the nearest x and shows every line's value there.
     nearest = alt.selection_point(nearest=True, on="pointerover", fields=["x"], empty=False)
@@ -285,5 +381,5 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
                     x=alt.value(0), text="label:N"
                 )
             )
-    chart = alt.layer(*layers).properties(width=600, height=400)
-    return _finish(chart, spec.title, spec.dark_mode)  # type: ignore[no-any-return]
+    chart = alt.layer(*layers).properties(width=_WIDTH, height=_HEIGHT)
+    return _finish(chart, spec.title, "plotly_dark" if spec.dark_mode else "plotly_white")  # type: ignore[no-any-return]

@@ -96,10 +96,11 @@ class TestForestAltair:
     def test_individual_rows_colors_and_titles():
         spec = forest_spec(["A", "B"], INDIVIDUAL, None, color="tol_bright", experiment_name="Exp", metric_name="Rate")
         chart = render(spec, "altair").to_dict()
-        assert chart["title"] == "Individual Performance by Cell: Exp - Rate"
-        ((whisker, dot),) = _layers(chart)
+        assert chart["title"]["text"] == "Individual Performance by Cell: Exp - Rate"
+        ((whisker, cap, dot),) = _layers(chart)
         assert [row["label"] for row in _rows(chart, _panels(chart)[0])] == ["A", "B", "Total"]
-        assert whisker["encoding"]["x"]["axis"] == {"format": ",.0%", "title": "Rate"}
+        assert whisker["encoding"]["x"]["axis"] == {"format": ",.0%", "title": "Rate", "tickCount": 5}
+        assert cap["mark"]["type"] == "tick"
         assert whisker["encoding"]["y"]["axis"]["title"] == "Cell"
         assert whisker["encoding"]["color"]["scale"]["range"] == ["#4477aa", "#ee6677", "#228833"]
         assert dot["encoding"]["shape"] == {"field": "shape", "scale": None, "type": "nominal"}
@@ -108,20 +109,20 @@ class TestForestAltair:
     @pytest.mark.parametrize(("reverse", "order"), [(True, ["A", "B", "Total"]), (False, ["Total", "B", "A"])])
     def test_reverse_puts_first_row_on_top(self, reverse, order):
         chart = render(forest_spec(["A", "B"], INDIVIDUAL, None, reverse_plot=reverse), "altair").to_dict()
-        ((whisker, _),) = _layers(chart)
+        ((whisker, _, _),) = _layers(chart)
         assert whisker["encoding"]["y"]["sort"] == order
 
     @staticmethod
-    def test_default_colors_leave_scheme_to_vega():
+    def test_default_colors_are_plotlys():
         chart = render(forest_spec(["A", "B"], INDIVIDUAL, None), "altair").to_dict()
-        ((whisker, _),) = _layers(chart)
-        assert "range" not in whisker["encoding"]["color"].get("scale", {})
+        ((whisker, _, _),) = _layers(chart)
+        assert whisker["encoding"]["color"]["scale"]["range"] == ["#636EFA", "#EF553B", "#00CC96"]
 
     @staticmethod
     def test_both_lifts_are_side_by_side_panels():
         spec = forest_spec(["Control", "Treatment"], {}, [ABSOLUTE, RELATIVE], is_individual=False)
         chart = render(spec, "altair").to_dict()
-        assert chart["title"] == "Absolute Lift and Relative Lift of Control vs. Treatment"
+        assert chart["title"]["text"] == "Absolute Lift and Relative Lift of Control vs. Treatment"
         assert chart["resolve"]["scale"]["y"] == "shared"
         panels = _layers(chart)
         assert [panel[0]["encoding"]["x"]["axis"]["title"] for panel in panels] == ["Absolute Lift", "Relative Lift"]
@@ -134,20 +135,21 @@ class TestForestAltair:
     def test_revenue_axis_gets_dollar_prefix():
         revenue = {"lift": 1200.0, "ci_lower": 100.0, "ci_upper": 2300.0, "lift_type": "revenue"}
         chart = render(forest_spec(["A", "B"], {}, revenue, is_individual=False), "altair").to_dict()
-        ((whisker, _),) = _layers(chart)
+        ((whisker, _, _),) = _layers(chart)
         assert whisker["encoding"]["x"]["axis"]["labelExpr"] == '"$" + format(datum.value, "~s")'
 
     @staticmethod
     def test_dark_mode():
         chart = render(forest_spec(["A", "B"], INDIVIDUAL, None, dark_mode=True), "altair").to_dict()
         assert chart["usermeta"]["embedOptions"]["theme"] == "dark"
-        assert chart["config"]["background"] == "#333"
+        assert chart["config"]["background"] == "#111111"
 
     @staticmethod
-    def test_light_mode_has_no_dark_theme():
+    def test_light_mode_looks_like_plotlys_default_template():
         chart = render(forest_spec(["A", "B"], INDIVIDUAL, None), "altair").to_dict()
         assert "usermeta" not in chart
-        assert "background" not in chart.get("config", {})
+        assert chart["config"]["background"] == "white"
+        assert chart["config"]["view"]["fill"] == "#E5ECF6"
 
     @staticmethod
     def test_missing_results_raise_like_plotly():
@@ -249,14 +251,14 @@ class TestSegmentPlots:
     def test_altair_single_lift(self, name):
         make, kwargs, rows = SEGMENT_PLOTS[name]
         chart = make().plot(lift="relative", backend="altair", **kwargs).to_dict()
-        ((whisker, dot, zero),) = _layers(chart)
+        ((whisker, _, dot, zero),) = _layers(chart)
         assert [row["label"] for row in _rows(chart, _panels(chart)[0])] == rows
         assert whisker["encoding"]["y"]["sort"] == rows
-        assert whisker["encoding"]["x"]["axis"] == {"format": ",.1%", "title": "Relative Lift"}
+        assert whisker["encoding"]["x"]["axis"] == {"format": ",.1%", "title": "Relative Lift", "tickCount": 5}
         assert whisker["encoding"]["color"]["legend"] is None
         assert dot["encoding"]["shape"]["scale"] is None
         assert _rows(chart, zero) == [{"x": 0.0}]
-        assert chart["title"].endswith("(Relative Lift)")
+        assert chart["title"]["text"].endswith("(Relative Lift)")
 
     @pytest.mark.parametrize("name", SEGMENT_PLOTS)
     def test_altair_both_lifts(self, name):
@@ -264,21 +266,26 @@ class TestSegmentPlots:
         chart = make().plot(lift="both", backend="altair", dark_mode=True, **kwargs).to_dict()
         panels = _layers(chart)
         assert [panel[0]["encoding"]["x"]["axis"]["title"] for panel in panels] == ["Risk Difference", "Relative Lift"]
-        assert chart["title"].endswith("(Risk Difference and Relative Lift)")
+        assert chart["title"]["text"].endswith("(Risk Difference and Relative Lift)")
         assert chart["usermeta"]["embedOptions"]["theme"] == "dark"
 
     @staticmethod
     def test_pooled_row_is_larger_diamond():
         chart = _strata(StratifiedContingencyTable).plot(backend="altair").to_dict()
         data = _rows(chart, _panels(chart)[0])
-        assert [(row["shape"], row["area"]) for row in data] == [("circle", 100), ("circle", 100), ("diamond", 196)]
+        # Plotly draws diamonds 1.3 times their nominal size; the pooled one is 14 across.
+        assert [(row["shape"], row["area"]) for row in data] == [
+            ("circle", 100),
+            ("circle", 100),
+            ("diamond", pytest.approx((14 * 1.3) ** 2)),
+        ]
 
     @pytest.mark.parametrize(("lift", "axis_format"), [("revenue", "$,~f"), ("incremental", ",~f"), ("roas", ".3~g")])
     def test_typeless_formats_stay_out_of_exponent_notation(self, lift, axis_format):
         table = StratifiedContingencyTable("Checkout", "conversion", spend=5000.0, msrp=40.0)
         for stratum, (control, treatment) in {"desktop": (120, 140), "mobile": (80, 95)}.items():
             table.add("Control", control, 1000, stratum=stratum).add("Treatment", treatment, 1000, stratum=stratum)
-        ((whisker, _, _),) = _layers(table.plot(lift=lift, backend="altair").to_dict())
+        ((whisker, _, _, _),) = _layers(table.plot(lift=lift, backend="altair").to_dict())
         assert whisker["encoding"]["x"]["axis"]["format"] == axis_format
 
     @staticmethod
@@ -295,10 +302,12 @@ class TestLineAltair:
         chart = plot_power_curve(0.1, 0.2, sample_sizes=[1000, 2000, 4000], backend="altair")
         assert isinstance(chart, alt.LayerChart)
         spec = chart.to_dict()
-        assert spec["title"] == "Power Curve"
+        assert spec["title"]["text"] == "Power Curve"
         line, _, rule, label = spec["layer"]
         assert line["encoding"]["y"]["scale"] == {"domain": [0.0, 1.05], "nice": False}
-        assert line["encoding"]["y"]["axis"] == {"format": ",.0%", "title": "Power"}
+        assert line["encoding"]["y"]["axis"] == {"format": ",.0%", "title": "Power", "tickCount": 6}
+        # Like Plotly, the x-axis spans the sample sizes and no further.
+        assert line["encoding"]["x"]["scale"] == {"nice": False, "zero": False}
         assert [row["x"] for row in _rows(spec, line)] == [1000, 2000, 4000]
         assert _rows(spec, rule) == [{"y": 0.8, "label": "80% power"}]
         assert label["mark"]["type"] == "text"
@@ -314,7 +323,7 @@ class TestLineAltair:
     def test_sensitivity_curve_cpa():
         chart = plot_sensitivity_curve(0.1, lift="cpa", spend=5000.0, sample_sizes=[1000, 2000], backend="altair")
         line = chart.to_dict()["layer"][0]
-        assert line["encoding"]["y"]["axis"] == {"title": "Maximum detectable CPA"}
+        assert line["encoding"]["y"]["axis"] == {"title": "Maximum detectable CPA", "tickCount": 6}
         # A lone line, like in Plotly, has no legend.
         assert line["encoding"]["color"]["legend"] is None
 
@@ -374,7 +383,7 @@ class TestCurvesAltair:
         chart = CURVES[name](backend="altair")
         assert isinstance(chart, alt.LayerChart)
         spec = chart.to_dict()
-        assert spec["title"] == fig.layout.title.text
+        assert spec["title"]["text"] == fig.layout.title.text
         lines = _series(spec)
         assert list(lines) == [trace.name for trace in fig.data]
         for trace in fig.data:
@@ -478,7 +487,9 @@ class TestOtherPlotsAltair:
     def test_msprt_band_and_categorical_checkpoints():
         spec = OTHER_PLOTS["msprt"](backend="altair").to_dict()
         band = spec["layer"][0]
-        assert band["mark"] == {"type": "area", "opacity": 0.2}
+        assert band["mark"] == {"type": "area"}
+        # The band's translucency is in its color, so its legend entry shows it too.
+        assert band["encoding"]["color"]["scale"]["range"] == ["#636EFA", "rgba(99, 110, 250, 0.2)"]
         assert [row["x"] for row in _rows(spec, band)] == ["Day 1", "Day 2"]
         assert spec["layer"][1]["encoding"]["x"]["sort"] == ["Day 1", "Day 2"]
         # Plotly keeps its three traces: the band's two edges and the estimate.
@@ -490,8 +501,10 @@ class TestOtherPlotsAltair:
     def test_time_trend_error_bars():
         result = _trend(backend="altair")
         spec = result["figure"].to_dict()
-        errors = next(layer for layer in spec["layer"] if layer["mark"] == {"type": "rule", "strokeWidth": 1.5})
+        errors = next(layer for layer in spec["layer"] if layer["mark"] == {"type": "rule", "strokeWidth": 2})
         assert errors["transform"][0] == {"filter": {"field": "series", "oneOf": ["Period lift (95% CI)"]}}
+        caps = next(layer for layer in spec["layer"] if layer["mark"]["type"] == "tick")
+        assert caps["transform"][-1] == {"fold": ["lo", "hi"], "as": ["side", "end"]}
         assert result["slope"] == _trend()["slope"]
 
     @staticmethod
@@ -502,7 +515,8 @@ class TestOtherPlotsAltair:
         assert [trace.line.dash for trace in fig.data] == [None, "dash"]
         assert fig.layout.xaxis.dtick == 1
         spec = OTHER_PLOTS["gst_boundaries"](backend="altair").to_dict()
-        assert spec["layer"][0]["encoding"]["x"]["axis"]["tickMinStep"] == 1
+        axis = spec["layer"][0]["encoding"]["x"]["axis"]
+        assert (axis["values"], axis["format"]) == ([1.0, 2.0, 3.0], "d")
 
     @pytest.mark.parametrize("name", ["cluster_plot", "bayes_cluster_plot"])
     def test_clusters_are_dots_without_whiskers(self, name):
