@@ -32,9 +32,11 @@ __all__ = [
 _validate_two_group = validate_two_group
 
 # SciPy's Barnard and Boschloo tests evaluate every possible table, (n1 + 1) * (n2 + 1) of them,
-# at each of 32 nuisance values. At 1,000 trials per arm that already takes about 1 s for Barnard
-# and 6 s for Boschloo; at 10,000 per arm Barnard takes most of a minute and over 7 GB.
-_MAX_EXACT_TABLES = 1_500_000
+# at each of 32 nuisance values. Each limit keeps a test to about half a minute and 1 GB: Barnard
+# takes about 6 s at 3,000 trials per arm, Boschloo, about six times slower, 27 s at 2,000 per arm.
+# At 10,000 per arm Barnard takes most of a minute and over 7 GB.
+_MAX_BARNARD_TABLES = 9_200_000
+_MAX_BOSCHLOO_TABLES = 4_100_000
 
 
 def _contingency_table(
@@ -83,12 +85,12 @@ def _pvalue_decision(pval: Any, crit: float | None) -> float | bool:
     return bool(pval <= crit)
 
 
-def _require_feasible_exact(trials: np.ndarray[Any, Any] | list[Any], test_name: str) -> None:
+def _require_feasible_exact(trials: np.ndarray[Any, Any] | list[Any], test_name: str, max_tables: int) -> None:
     """Reject samples too large for an unconditional exact test to finish in reasonable time."""
     n_tables = (int(trials[0]) + 1) * (int(trials[1]) + 1)
-    if n_tables > _MAX_EXACT_TABLES:
+    if n_tables > max_tables:
         raise ValueError(
-            f"{test_name} would evaluate {n_tables:,} possible tables (at most {_MAX_EXACT_TABLES:,} are "
+            f"{test_name} would evaluate {n_tables:,} possible tables (at most {max_tables:,} are "
             "supported), so it would take minutes and gigabytes of memory. At these sample sizes the score "
             "test gives essentially the same p-value; Fisher's exact test also stays fast at any size."
         )
@@ -527,8 +529,8 @@ def barnard_exact_test(
     Raises
     ------
     ValueError
-        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 1,500,000, roughly
-        1,200 trials per group: the test's cost grows with that product.
+        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 9,200,000, roughly
+        3,000 trials per group: the test's cost grows with that product.
 
     Notes
     -----
@@ -538,7 +540,7 @@ def barnard_exact_test(
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     _require_zero_null(null_lift, "barnard_exact_test")
-    _require_feasible_exact(trials, "barnard_exact_test")
+    _require_feasible_exact(trials, "barnard_exact_test", _MAX_BARNARD_TABLES)
     contingency_table = _contingency_table(trials, successes)
     barnard = ss.barnard_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     return _pvalue_decision(barnard.pvalue, crit)
@@ -561,8 +563,8 @@ def boschloo_exact_test(
     Raises
     ------
     ValueError
-        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 1,500,000, roughly
-        1,200 trials per group: the test's cost grows with that product.
+        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 4,100,000, roughly
+        2,000 trials per group: the test's cost grows with that product.
 
     Notes
     -----
@@ -572,7 +574,7 @@ def boschloo_exact_test(
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     _require_zero_null(null_lift, "boschloo_exact_test")
-    _require_feasible_exact(trials, "boschloo_exact_test")
+    _require_feasible_exact(trials, "boschloo_exact_test", _MAX_BOSCHLOO_TABLES)
     contingency_table = _contingency_table(trials, successes)
     boschloo = ss.boschloo_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     return _pvalue_decision(boschloo.pvalue, crit)

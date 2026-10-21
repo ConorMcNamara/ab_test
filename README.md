@@ -126,7 +126,7 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 
 `"score"`, `"likelihood"`, `"z"`, `"wald"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`, `"msprt"`, `"randomization"`
 
-`"barnard"` and `"boschloo"` evaluate every possible table, so they raise a `ValueError` above roughly 1,200 trials per group. At those sizes `"score"` gives essentially the same p-value, and `"fisher"` stays fast at any size.
+`"barnard"` and `"boschloo"` evaluate every possible table, so they raise a `ValueError` above roughly 3,000 (`"barnard"`) or 2,000 (`"boschloo"`) trials per group. At those sizes `"score"` gives essentially the same p-value, and `"fisher"` stays fast at any size.
 
 ### `conf_int_method`
 

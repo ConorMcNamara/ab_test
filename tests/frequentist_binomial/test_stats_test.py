@@ -347,6 +347,15 @@ class TestBarnardTest:
             test([10_000, 10_000], [1_000, 1_100])
 
     @staticmethod
+    @pytest.mark.parametrize(("test", "n"), [(barnard_exact_test, 3_000), (boschloo_exact_test, 2_000)])
+    def test_samples_within_the_limit_run(test, n, monkeypatch):
+        # Barnard takes about 6 s at 3,000 per arm and Boschloo 27 s at 2,000, so both are allowed.
+        result = type("Result", (), {"pvalue": 0.5})()
+        monkeypatch.setattr(ss, "barnard_exact", lambda *args, **kwargs: result)
+        monkeypatch.setattr(ss, "boschloo_exact", lambda *args, **kwargs: result)
+        assert test([n, n], [n // 10, n // 9]) == 0.5
+
+    @staticmethod
     @pytest.mark.parametrize("test", [fisher_test, barnard_exact_test, boschloo_exact_test])
     @pytest.mark.parametrize("crit", [1.96, 3.84, 0.0])
     def test_exact_tests_reject_non_alpha_crit(test, crit):
