@@ -1244,6 +1244,39 @@ class TestCR2SatterthwaiteDf:
         G = Q.T @ Q
         assert df_val == pytest.approx(np.trace(G) ** 2 / np.sum(G**2))
 
+    @staticmethod
+    def test_matches_per_cluster_eigendecomposition():
+        # The direct CR2 recipe: invert the square root of each cluster's I - H_gg in full.
+        # Uneven clusters, including one smaller than the number of columns and, by being
+        # all control, one where the treatment column is constant.
+        rng = np.random.default_rng(3)
+        sizes = [1, 2, 7, 12, 30, 5, 9, 3, 20, 11]
+        cluster_ids = np.repeat(np.arange(len(sizes)), sizes)[rng.permutation(sum(sizes))]
+        n = len(cluster_ids)
+        treatment = (cluster_ids % 2 == 1).astype(float)
+        X = np.column_stack([np.ones(n), treatment, rng.normal(size=n), rng.normal(size=n)])
+        y = rng.normal(size=n)
+        beta = _ols_fit(X, y)
+        se, df_val = _cr2_standard_errors(X, y, beta, cluster_ids)
+
+        XtX_inv = np.linalg.inv(X.T @ X)
+        residuals = y - X @ beta
+        meat = np.zeros((4, 4))
+        u_sq, s_cols = [], []
+        for g in np.unique(cluster_ids):
+            idx = np.flatnonzero(cluster_ids == g)
+            eigvals, eigvecs = np.linalg.eigh(np.eye(len(idx)) - X[idx] @ XtX_inv @ X[idx].T)
+            A_g = eigvecs @ np.diag(1 / np.sqrt(np.maximum(eigvals, 1e-12))) @ eigvecs.T
+            score = X[idx].T @ A_g @ residuals[idx]
+            meat += np.outer(score, score)
+            u_g = A_g @ X[idx] @ XtX_inv[:, 1]
+            u_sq.append(u_g @ u_g)
+            s_cols.append(X[idx].T @ u_g)
+        S = np.column_stack(s_cols)
+        G = np.diag(u_sq) - S.T @ XtX_inv @ S
+        assert se == pytest.approx(np.sqrt(np.diag(XtX_inv @ meat @ XtX_inv)), rel=1e-9)
+        assert df_val == pytest.approx(np.trace(G) ** 2 / np.sum(G**2), rel=1e-9)
+
 
 @pytest.mark.slow
 class TestCR2TypeIErrorFewClusters:

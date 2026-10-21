@@ -324,6 +324,15 @@ class TestBarnardTest:
         assert barnard_exact_test([30, 30], [5, 12], crit=crit) is expected
 
     @staticmethod
+    @pytest.mark.parametrize("test", [barnard_exact_test, boschloo_exact_test])
+    def test_large_samples_raise_before_running(test, monkeypatch):
+        # 10,000 per arm took Barnard most of a minute and over 7 GB; fail fast instead.
+        monkeypatch.setattr(ss, "barnard_exact", lambda *args, **kwargs: pytest.fail("ran the test"))
+        monkeypatch.setattr(ss, "boschloo_exact", lambda *args, **kwargs: pytest.fail("ran the test"))
+        with pytest.raises(ValueError, match="score test"):
+            test([10_000, 10_000], [1_000, 1_100])
+
+    @staticmethod
     @pytest.mark.parametrize("test", [fisher_test, barnard_exact_test, boschloo_exact_test])
     @pytest.mark.parametrize("crit", [1.96, 3.84, 0.0])
     def test_exact_tests_reject_non_alpha_crit(test, crit):

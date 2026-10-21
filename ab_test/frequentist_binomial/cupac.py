@@ -167,46 +167,62 @@ def _cr2_standard_errors(
         s_g = X_g' u_g, q_g = (I - H)[:, g] u_g gives
         G[g, h] = [g == h] u_g' u_g - s_g' (X'X)^{-1} s_h, so the n x n hat
         matrix is never formed.
+
+    The work grows with the number of rows and clusters, not with the cube
+    of each cluster's size. Within cluster g, the leverage H_gg = X_g (X'X)^{-1} X_g'
+    has rank at most p, so with X_g = Q R (Q orthonormal) and the
+    eigendecomposition R (X'X)^{-1} R' = V diag(lam) V',
+
+    (I - H_gg)^{-1/2} = I + W diag((1 - lam)^{-1/2} - 1) W',  W = Q V,
+
+    and the CR2 adjustment needs only small p x p matrices. Likewise
+    ||G||_F^2 comes from p x p products rather than the G x G matrix:
+    the squared diagonal, plus ||S' M S||_F^2 = tr((M S S')^2) less its
+    diagonal, with M = (X'X)^{-1} and S = [s_1, ..., s_G].
     """
     p = X.shape[1]
     residuals = y - X @ beta
     XtX_inv = np.linalg.inv(X.T @ X)
 
-    clusters = np.unique(cluster_ids)
+    # Group rows by cluster once, instead of scanning every row for each cluster.
+    order = np.argsort(cluster_ids, kind="stable")
+    clusters, starts = np.unique(cluster_ids[order], return_index=True)
     meat = np.zeros((p, p))
 
     c = XtX_inv[:, 1]
-    u_sq: list[float] = []
-    s_cols: list[np.ndarray[Any, Any]] = []
+    u_sq = np.empty(len(clusters))
+    S = np.empty((p, len(clusters)))
 
-    for g in clusters:
-        idx = np.where(cluster_ids == g)[0]
+    for i, idx in enumerate(np.split(order, starts[1:])):
         X_g = X[idx]
         e_g = residuals[idx]
-        n_g = len(idx)
 
-        H_gg = X_g @ XtX_inv @ X_g.T
-        I_g = np.eye(n_g)
-        diff = I_g - H_gg
+        Q, R = np.linalg.qr(X_g)
+        lam, V = np.linalg.eigh(R @ XtX_inv @ R.T)
+        W = Q @ V
+        # Same floor on the eigenvalues of I - H_gg as a full eigendecomposition would use.
+        shrink = 1.0 / np.sqrt(np.maximum(1.0 - lam, 1e-12)) - 1.0
 
-        eigvals, eigvecs = np.linalg.eigh(diff)
-        eigvals = np.maximum(eigvals, 1e-12)
-        A_g = eigvecs @ np.diag(1.0 / np.sqrt(eigvals)) @ eigvecs.T
+        e_g_adj = e_g + W @ (shrink * (W.T @ e_g))
+        score = X_g.T @ e_g_adj
+        meat += np.outer(score, score)
 
-        e_g_adj = A_g @ e_g
-        meat += X_g.T @ np.outer(e_g_adj, e_g_adj) @ X_g
-
-        u_g = A_g @ X_g @ c
-        u_sq.append(float(u_g @ u_g))
-        s_cols.append(X_g.T @ u_g)
+        v_g = X_g @ c
+        u_g = v_g + W @ (shrink * (W.T @ v_g))
+        u_sq[i] = u_g @ u_g
+        S[:, i] = X_g.T @ u_g
 
     cov = XtX_inv @ meat @ XtX_inv
     se = np.sqrt(np.diag(cov))
 
-    S = np.column_stack(s_cols)
-    G = np.diag(u_sq) - S.T @ XtX_inv @ S
-    G_norm_sq = float(np.sum(G**2))
-    df = float(np.trace(G) ** 2 / G_norm_sq) if G_norm_sq > 0 else float(len(clusters) - 1)
+    # G = diag(u_sq) - S' M S, without forming it: its diagonal, then its off-diagonal mass.
+    MS = XtX_inv @ S
+    cross_diag = np.einsum("ig,ig->g", S, MS)
+    MT = XtX_inv @ (S @ S.T)
+    off_diag_sq = max(float(np.sum(MT * MT.T)) - float(cross_diag @ cross_diag), 0.0)
+    G_diag = u_sq - cross_diag
+    G_norm_sq = float(G_diag @ G_diag) + off_diag_sq
+    df = float(G_diag.sum() ** 2 / G_norm_sq) if G_norm_sq > 0 else float(len(clusters) - 1)
 
     return se, df
 
