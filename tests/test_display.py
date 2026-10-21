@@ -90,11 +90,10 @@ class TestForestPlotBothLifts:
         assert fig.layout.xaxis.title.text == "Absolute Lift"
         assert fig.layout.xaxis2.title.text == "Relative Lift"
         assert fig.layout.xaxis.tickformat == fig.layout.xaxis2.tickformat == ",.0%"
-        # One legend section per lift, so relative lift has an entry too.
-        assert [trace.showlegend for trace in fig.data] == [True, True]
-        assert [trace.legendgroup for trace in fig.data] == ["panel1", "panel2"]
-        assert [trace.legendgrouptitle.text for trace in fig.data] == ["Absolute Lift", "Relative Lift"]
-        assert fig.layout.legend.groupclick == "toggleitem"
+        # One legend entry for the row, which toggles it in both panels, and one color.
+        assert [trace.showlegend for trace in fig.data] == [True, False]
+        assert [trace.legendgroup for trace in fig.data] == ["Total"] * 2
+        assert fig.data[0].marker.color == fig.data[1].marker.color == fig.data[1].error_x.color
 
     @staticmethod
     def test_stored_results_unchanged():
@@ -268,12 +267,13 @@ class TestMultiArmForestPlot:
         table.analyze(comparisons="all")
         fig = table.plot(is_individual=False, lift="both")
         assert len(fig.data) == 6
-        assert all(trace.showlegend for trace in fig.data)
-        sections = {trace.legendgrouptitle.text: [] for trace in fig.data}
-        for trace in fig.data:
-            sections[trace.legendgrouptitle.text].append(trace.name)
         comparisons = ["B vs A", "C vs A", "C vs B"]
-        assert sections == {"Absolute Lift": comparisons, "Relative Lift": comparisons}
+        assert [trace.name for trace in fig.data] == comparisons * 2
+        # Each comparison has one legend entry and the same color in both panels.
+        assert [trace.showlegend for trace in fig.data] == [True] * 3 + [False] * 3
+        assert [trace.legendgroup for trace in fig.data] == comparisons * 2
+        colors = [trace.marker.color for trace in fig.data]
+        assert colors[:3] == colors[3:] == ["#636EFA", "#EF553B", "#00CC96"]
         assert table.incremental_results["comparison_type"] == "all"
 
     def test_palette_colours_each_comparison(self):

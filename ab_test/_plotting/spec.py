@@ -90,8 +90,6 @@ class ForestPanel:
         Title of the x-axis; ``None`` leaves it untitled.
     x_format : AxisFormat
         Tick labels of the x-axis.
-    legend_title : str or None
-        Title of this panel's legend section when there are several panels.
     vlines : list of VLine
         Vertical reference lines.
     """
@@ -99,7 +97,6 @@ class ForestPanel:
     points: list[ForestPoint]
     x_title: str | None = None
     x_format: AxisFormat = field(default_factory=AxisFormat)
-    legend_title: str | None = None
     vlines: list[VLine] = field(default_factory=list)
 
 

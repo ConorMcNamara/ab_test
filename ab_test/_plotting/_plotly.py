@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import plotly.colors
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -40,6 +41,11 @@ def _axis_kwargs(axis_format: AxisFormat) -> dict[str, str]:
 def forest(spec: ForestSpec) -> go.Figure:
     """Draw a forest plot, one subplot per panel sharing the y-axis."""
     multi = len(spec.panels) > 1
+    # Each row keeps one color in every panel: its own, or Plotly's next default color.
+    palette = plotly.colors.qualitative.Plotly
+    colors: dict[str, str] = {}
+    for point in (point for panel in spec.panels for point in panel.points):
+        colors.setdefault(point.label, point.color or palette[len(colors) % len(palette)])
     fig = (
         make_subplots(rows=1, cols=len(spec.panels), shared_yaxes=True, horizontal_spacing=0.08)
         if multi
@@ -47,9 +53,8 @@ def forest(spec: ForestSpec) -> go.Figure:
     )
     for col, panel in enumerate(spec.panels, start=1):
         for point in panel.points:
-            marker: dict[str, Any] = {"symbol": point.shape, "size": point.size}
-            if point.color is not None:
-                marker["color"] = point.color
+            color = colors[point.label]
+            marker: dict[str, Any] = {"symbol": point.shape, "size": point.size, "color": color}
             trace = go.Scatter(x=[point.estimate], y=[point.label], marker=marker, name=point.label)  # type: ignore[attr-defined]
             if point.lower is not None and point.upper is not None:
                 error_x: dict[str, Any] = {
@@ -58,16 +63,12 @@ def forest(spec: ForestSpec) -> go.Figure:
                     "array": [point.upper - point.estimate],
                     "arrayminus": [point.estimate - point.lower],
                     "visible": True,
+                    "color": color,
                 }
-                if point.color is not None:
-                    error_x["color"] = point.color
                 trace.update(error_x=error_x)
             if multi:
-                # Each panel gets its own legend section, titled with its lift, so every
-                # point has an entry and the title toggles the whole panel.
-                trace.update(legendgroup=f"panel{col}", legendgrouptitle_text=panel.legend_title)
-                if spec.show_legend:
-                    trace.update(showlegend=True)
+                # One legend entry per row, which toggles that row in every panel.
+                trace.update(legendgroup=point.label, showlegend=spec.show_legend and col == 1)
                 fig.add_trace(trace, row=1, col=col)
             else:
                 fig.add_trace(trace)
@@ -78,9 +79,6 @@ def forest(spec: ForestSpec) -> go.Figure:
             fig.update_xaxes(title_text=panel.x_title, row=1, col=col, **_axis_kwargs(panel.x_format))
         else:
             fig.update_xaxes(**_axis_kwargs(panel.x_format))
-    if multi:
-        # Clicking an entry hides that point only; clicking a section title hides the panel.
-        fig.update_layout(legend_groupclick="toggleitem")
     fig.update_layout(title_text=spec.title, yaxis_title=spec.y_title)
     if not spec.show_legend:
         fig.update_layout(showlegend=False)

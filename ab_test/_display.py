@@ -284,7 +284,6 @@ def effect_panel(
         points,
         x_title=label,
         x_format=AxisFormat(tickformat=_EFFECT_TICK_FORMATS[lift]),
-        legend_title=label,
         vlines=[VLine(0.0, opacity=zero_line_opacity)],
     )
 
@@ -430,9 +429,9 @@ def forest_spec(
                     )
                 points.append(ForestPoint(row_name, row["lift"], row["ci_lower"], row["ci_upper"], c_row))
             axis_format = AxisFormat(**_lift_axis_format(result["lift_type"]))
-            panels.append(ForestPanel(points, x_title=label, x_format=axis_format, legend_title=label))
+            panels.append(ForestPanel(points, x_title=label, x_format=axis_format))
         compared = f"{names[0]} vs. {names[1]}" if len(names) == 2 else "Each Comparison"
-        lift_labels = " and ".join(panel.legend_title or "Lift" for panel in panels)
+        lift_labels = " and ".join(panel.x_title or "Lift" for panel in panels)
         title = f"{lift_labels} of {compared}{f': {subtitle}' if subtitle else ''}"
         y_title = ""
     return ForestSpec(panels, title=title, y_title=y_title, reverse=reverse_plot, dark_mode=dark_mode)
