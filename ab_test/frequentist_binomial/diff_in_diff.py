@@ -16,17 +16,16 @@ import itertools
 from typing import Any
 
 import numpy as np
-import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 from tabulate import tabulate
 
 from ab_test._display import (
-    apply_dark_mode,
-    combine_lift_panels,
     convert_to_tabulate_str,
+    effect_panel,
     format_percent,
-    resolve_plot_color,
 )
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.spec import ForestPanel, ForestSpec
 from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_binomial.contingency import ContingencyTable
 
@@ -442,7 +441,8 @@ class DiffInDiff:
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
-    ) -> None:
+        backend: str = "plotly",
+    ) -> Figure:
         """Forest plot of per-segment treatment effects.
 
         Parameters
@@ -459,34 +459,42 @@ class DiffInDiff:
             plot.
         color : str, dict, list, or None, default=None
             Colorblind palette name, mapping of segment names to colors,
-            list of colors, or ``None`` for Plotly defaults.
+            list of colors, or ``None`` for the backend's default colors.
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
-        """
-        if isinstance(lift, str) and lift.casefold() == "both":
-            figures = [
-                self._plot_figure(lift=panel_lift, alpha=alpha, reverse_plot=reverse_plot, color=color)
-                for panel_lift in ("absolute", "relative")
-            ]
-            fig = combine_lift_panels(
-                figures,
-                f"{self.metric_name} — Treatment Effect by Segment (Risk Difference and Relative Lift)",
-                ["Risk Difference", "Relative Lift"],
-            )
-        else:
-            fig = self._plot_figure(lift=lift, alpha=alpha, reverse_plot=reverse_plot, color=color)
-        apply_dark_mode(fig, dark_mode)
-        fig.show()  # type: ignore[no-untyped-call]
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
-    def _plot_figure(
+        Returns
+        -------
+        plotly.graph_objects.Figure, altair.LayerChart or altair.HConcatChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``. Altair draws the two panels with
+            ``lift="both"`` as an ``HConcatChart``.
+        """
+        validate_backend(backend)
+        lifts = ("absolute", "relative") if isinstance(lift, str) and lift.casefold() == "both" else (lift,)
+        panels = [self._plot_panel(lift=panel_lift, alpha=alpha, color=color) for panel_lift in lifts]
+        lift_labels = " and ".join(str(panel.x_title) for panel in panels)
+        spec = ForestSpec(
+            panels,
+            title=f"{self.metric_name} — Treatment Effect by Segment ({lift_labels})",
+            y_title="",
+            reverse=reverse_plot,
+            dark_mode=dark_mode,
+            show_legend=False,
+            white_background=True,
+        )
+        return render(spec, backend)
+
+    def _plot_panel(
         self,
         lift: str = "absolute",
         alpha: float = 0.05,
-        reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
-    ) -> go.Figure:
-        """Build the forest plot for a single lift (see :meth:`plot`)."""
+    ) -> ForestPanel:
+        """Describe the forest-plot panel for a single lift (see :meth:`plot`)."""
         lift = lift.casefold()
         if lift == "cpa":
             raise ValueError(_CPA_ERROR)
@@ -494,68 +502,4 @@ class DiffInDiff:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
         stats = _compute_segment_stats(self._tables, lift, alpha)
-        resolved = resolve_plot_color(color)
-
-        names = stats["names"]
-        effects = stats["effects"]
-        ci_lowers = stats["ci_lowers"]
-        ci_uppers = stats["ci_uppers"]
-
-        if reverse_plot:
-            names = names[::-1]
-            effects = effects[::-1]
-            ci_lowers = ci_lowers[::-1]
-            ci_uppers = ci_uppers[::-1]
-
-        fig = go.Figure()
-
-        for i, name in enumerate(names):
-            marker_color = None
-            if isinstance(resolved, list):
-                marker_color = resolved[i % len(resolved)]
-            elif isinstance(resolved, dict):
-                marker_color = resolved.get(name)
-
-            fig.add_trace(
-                go.Scatter(
-                    x=[effects[i]],
-                    y=[name],
-                    mode="markers",
-                    marker={"size": 10, "symbol": "circle", "color": marker_color},
-                    error_x={
-                        "type": "data",
-                        "symmetric": False,
-                        "array": [ci_uppers[i] - effects[i]],
-                        "arrayminus": [effects[i] - ci_lowers[i]],
-                    },
-                    name=name,
-                    showlegend=False,
-                )
-            )
-
-        fig.add_vline(x=0, line_dash="dash", line_color="gray")
-
-        lift_labels = {
-            "absolute": "Risk Difference",
-            "relative": "Relative Lift",
-            "incremental": "Incremental Conversions",
-            "roas": "Return on Ad Spend",
-            "revenue": "Revenue",
-        }
-        tick_formats = {
-            "absolute": ",.1%",
-            "relative": ",.1%",
-            "incremental": ",",
-            "roas": ".3~g",
-            "revenue": "$,",
-        }
-        lift_label = lift_labels[lift]
-        fig.update_layout(
-            title=f"{self.metric_name} — Treatment Effect by Segment ({lift_label})",
-            xaxis_title=lift_label,
-            xaxis_tickformat=tick_formats[lift],
-            yaxis_title="",
-            template="plotly_white",
-        )
-
-        return fig
+        return effect_panel(stats["names"], stats["effects"], stats["ci_lowers"], stats["ci_uppers"], lift, color)

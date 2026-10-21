@@ -1,7 +1,6 @@
 """Tests for difference-in-differences analysis."""
 
 import numpy as np
-import plotly.graph_objects as go
 import pytest
 import scipy.stats as ss
 
@@ -260,38 +259,31 @@ class TestDiffInDiffPlot:
         women = _make_table("Women", 120, 1000, 125, 1000)
         return men, women
 
-    def test_plot_runs_without_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_runs_without_error(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot()
 
-    def test_plot_absolute(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_absolute(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot(lift="absolute")
 
-    def test_plot_relative(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_relative(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot(lift="relative")
 
-    def test_plot_with_palette(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_with_palette(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot(color="wong")
 
-    def test_plot_with_color_dict(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_with_color_dict(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot(color={"Men": "#FF0000", "Women": "#0000FF"})
 
-    def test_plot_with_color_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_with_color_list(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot(color=["#FF0000", "#0000FF"])
 
-    def test_plot_invalid_lift_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_invalid_lift_raises(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         with pytest.raises(ValueError, match="lift must be"):
             dd.plot(lift="logistic")
@@ -480,17 +472,14 @@ class TestDiffInDiffPlotNewLifts:
         t2 = _make_table("B", 120, 1000, 125, 1000, spend=500.0, msrp=50.0)
         return t1, t2
 
-    def test_plot_incremental(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_incremental(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot(lift="incremental")
 
-    def test_plot_roas(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_roas(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot(lift="roas")
 
-    def test_plot_revenue(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_revenue(self) -> None:
         dd = DiffInDiff(*self._make_tables())
         dd.plot(lift="revenue")

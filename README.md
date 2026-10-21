@@ -47,6 +47,8 @@ pip install "abtest-analysis[sklearn] @ git+https://github.com/ConorMcNamara/ab_
 
 Other extras: `pyspark`, `modin`, `ibis`, and `narwhals` for DataFrame export.
 
+`altair` adds an Altair plotting backend. Plots use Plotly by default; pass `backend="altair"` to any plot (`.plot()`, `.plot_pdf()`, the `plot_*` functions, or `time_trend_test`) to draw it with Altair instead.
+
 ### Development setup
 
 ```bash
@@ -124,6 +126,8 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 
 `"score"`, `"likelihood"`, `"z"`, `"wald"`, `"fisher"`, `"barnard"`, `"boschloo"`, `"modified_likelihood"`, `"freeman-tukey"`, `"neyman"`, `"cressie-read"`, `"msprt"`, `"randomization"`
 
+`"barnard"` and `"boschloo"` evaluate every possible table, so they raise a `ValueError` above roughly 1,200 trials per group. At those sizes `"score"` gives essentially the same p-value, and `"fisher"` stays fast at any size.
+
 ### `conf_int_method`
 
 `"binary_search"`, `"wilson"`, `"jeffrey"`, `"agresti-coull"`, `"clopper-pearson"`, `"wald"`, `"delta"`
@@ -131,6 +135,15 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 ### `cred_int_method`
 
 `"credible"` (equal-tailed), `"hdi"` (highest density interval)
+
+### Plots
+
+Every plot returns its figure without showing it: a Plotly figure by default, or an Altair chart with `backend="altair"`. In a notebook the figure displays as the last expression of a cell; in a script, call `.show()` on it (or save it with `.write_html()` for Plotly, `.save()` for Altair).
+
+```python
+fig = ct.plot(is_individual=False)
+fig.show()
+```
 
 ### Color palettes (`.plot`)
 

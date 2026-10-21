@@ -30,6 +30,8 @@ __all__ = [
 ]
 
 _MAX_EXACT_COMBINATIONS = 1_000_000
+# Permutations times clusters shuffled at once: bounds the Monte Carlo test's memory.
+_PERM_BATCH = 2_000_000
 
 
 def randomization_test(
@@ -109,15 +111,22 @@ def _cluster_perm_chunk(
     chunk_size: int,
     seed: int,
 ) -> int:
-    """Run a chunk of Monte Carlo cluster permutations and return the extreme count."""
+    """Run a chunk of Monte Carlo cluster permutations and return the extreme count.
+
+    The permutations are shuffled in batches, so memory stays bounded however many
+    clusters there are. Batches draw from one stream in order, so the result does not
+    depend on the batch size.
+    """
     k_total = len(all_props)
     rng = np.random.default_rng(seed)
-    random_keys = rng.random((chunk_size, k_total))
-    indices = np.argsort(random_keys, axis=1)
-    ctrl_means = all_props[indices[:, :k_ctrl]].mean(axis=1)
-    treat_means = all_props[indices[:, k_ctrl:]].mean(axis=1)
-    perm_diffs = treat_means - ctrl_means
-    return int(np.sum(np.abs(perm_diffs) >= abs_obs - 1e-12))
+    batch = max(1, _PERM_BATCH // k_total)
+    extreme = 0
+    for done in range(0, chunk_size, batch):
+        # Shuffling each row is far cheaper than sorting a row of random keys.
+        shuffled = rng.permuted(np.broadcast_to(all_props, (min(batch, chunk_size - done), k_total)), axis=1)
+        perm_diffs = shuffled[:, k_ctrl:].mean(axis=1) - shuffled[:, :k_ctrl].mean(axis=1)
+        extreme += int(np.sum(np.abs(perm_diffs) >= abs_obs - 1e-12))
+    return extreme
 
 
 def cluster_randomization_test(

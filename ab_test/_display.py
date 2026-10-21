@@ -8,17 +8,18 @@ and :class:`~ab_test.bayesian_binomial.contingency.BayesianContingencyTable`.
 import math
 from typing import Any, overload
 
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from tabulate import tabulate
+
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, VLine
 
 __all__ = [
     "COLORBLIND_PALETTES",
     "resolve_plot_color",
     "convert_to_tabulate_str",
     "render_forest_plot",
-    "apply_dark_mode",
-    "combine_lift_panels",
+    "forest_spec",
+    "effect_panel",
     "tabulate_summary",
     "format_percent",
 ]
@@ -211,77 +212,80 @@ def _lift_axis_format(lift_type: str) -> dict[str, str]:
     return {"tickformat": "~s"}
 
 
-def apply_dark_mode(fig: go.Figure, dark_mode: bool) -> go.Figure:
-    """Switch a figure to Plotly's dark template when ``dark_mode`` is True.
+# Axis titles and tick formats of the per-segment/per-stratum forest plots.
+_EFFECT_LABELS = {
+    "absolute": "Risk Difference",
+    "relative": "Relative Lift",
+    "incremental": "Incremental Conversions",
+    "roas": "Return on Ad Spend",
+    "revenue": "Revenue",
+    "cpa": "Cost Per Acquisition",
+}
+_EFFECT_TICK_FORMATS = {
+    "absolute": ",.1%",
+    "relative": ",.1%",
+    "incremental": ",",
+    "roas": ".3~g",
+    "revenue": "$,",
+    "cpa": "$,",
+}
+
+
+def effect_panel(
+    names: list[str],
+    effects: list[float],
+    ci_lowers: list[float],
+    ci_uppers: list[float],
+    lift: str,
+    color: str | dict[str, Any] | list[Any] | None = None,
+    *,
+    pooled: tuple[float, float, float] | None = None,
+    zero_line_opacity: float = 1.0,
+) -> ForestPanel:
+    """Describe one lift's forest-plot panel of per-segment (or per-stratum) effects.
+
+    Each segment is a circle with its interval; a pooled estimate, if given, is
+    a diamond labelled ``"Overall"`` below them. A dashed line marks zero.
 
     Parameters
     ----------
-    fig : plotly.graph_objects.Figure
-        The figure to restyle in place.
-    dark_mode : bool
-        If True, use the ``"plotly_dark"`` template (dark background, light
-        text and gridlines). If False, the figure is left unchanged.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        The same figure, for chaining.
+    names : list of str
+        Segment names, in order.
+    effects, ci_lowers, ci_uppers : list of float
+        Each segment's effect and interval.
+    lift : str
+        The lift the effects are on, which sets the axis title and format.
+    color : str, list, dict, or None, default=None
+        Passed to :func:`resolve_plot_color`. A list colors the segments in
+        order (cycling) and then the pooled row; a dict is keyed by segment
+        name, with ``"Overall"`` for the pooled row.
+    pooled : tuple of float or None, default=None
+        The pooled effect and its interval, ``(effect, lower, upper)``.
+    zero_line_opacity : float, default=1.0
+        Opacity of the zero line.
     """
-    if dark_mode:
-        fig.update_layout(template="plotly_dark")
-    return fig
+    plot_color = resolve_plot_color(color)
 
+    def _color(index: int, name: str) -> str | None:
+        if isinstance(plot_color, list):
+            return plot_color[index % len(plot_color)]  # type: ignore[no-any-return]
+        if isinstance(plot_color, dict):
+            return plot_color.get(name)
+        return None
 
-def combine_lift_panels(figures: list[go.Figure], title: str, panel_titles: list[str]) -> go.Figure:
-    """Place single-lift forest plots side by side, sharing the y-axis.
-
-    Each figure becomes one panel: its traces, vertical reference lines and
-    x-axis tick format are copied over, and its legend entries form a legend
-    section titled with the panel's title (clicking an entry hides that trace,
-    clicking the title hides the panel). Layout taken from the first figure:
-    template, legend visibility, y-axis title and a reversed y-axis.
-
-    Parameters
-    ----------
-    figures : list of plotly.graph_objects.Figure
-        One finished single-lift figure per panel, with the same rows.
-    title : str
-        Title of the combined figure.
-    panel_titles : list of str
-        x-axis title of each panel.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        The combined figure.
-    """
-    combined = make_subplots(rows=1, cols=len(figures), shared_yaxes=True, horizontal_spacing=0.08)
-    for col, (panel, panel_title) in enumerate(zip(figures, panel_titles, strict=True), start=1):
-        layout: Any = panel.layout
-        traces: Any = panel.data
-        for trace in traces:
-            # One legend section per panel, titled with its lift, rather than legend
-            # entries for the first panel only.
-            trace.update(legendgroup=f"panel{col}", legendgrouptitle_text=panel_title)
-            combined.add_trace(trace, row=1, col=col)
-        for shape in layout.shapes:
-            if shape.type == "line" and shape.x0 == shape.x1:
-                combined.add_vline(x=shape.x0, line=shape.line.to_plotly_json(), opacity=shape.opacity, row=1, col=col)
-        axis = layout.xaxis
-        combined.update_xaxes(
-            title_text=panel_title, tickformat=axis.tickformat, tickprefix=axis.tickprefix, row=1, col=col
-        )
-    first: Any = figures[0].layout
-    combined.update_layout(
-        title_text=title,
-        template=first.template,
-        showlegend=first.showlegend,
-        yaxis_title=first.yaxis.title.text,
-        legend_groupclick="toggleitem",
+    points = [
+        ForestPoint(name, effects[k], ci_lowers[k], ci_uppers[k], _color(k, name), shape="circle", size=10)
+        for k, name in enumerate(names)
+    ]
+    if pooled is not None:
+        points.append(ForestPoint("Overall", *pooled, _color(len(names), "Overall"), shape="diamond", size=14))
+    label = _EFFECT_LABELS[lift]
+    return ForestPanel(
+        points,
+        x_title=label,
+        x_format=AxisFormat(tickformat=_EFFECT_TICK_FORMATS[lift]),
+        vlines=[VLine(0.0, opacity=zero_line_opacity)],
     )
-    if first.yaxis.autorange == "reversed":
-        combined.update_yaxes(autorange="reversed")
-    return combined
 
 
 def render_forest_plot(
@@ -294,8 +298,10 @@ def render_forest_plot(
     experiment_name: str | None = None,
     metric_name: str | None = None,
     dark_mode: bool = False,
-) -> None:
-    """Render a dot-and-whisker (forest) plot of point estimates and intervals.
+    *,
+    backend: str = "plotly",
+) -> Figure:
+    """Draw a dot-and-whisker (forest) plot of point estimates and intervals.
 
     Parameters
     ----------
@@ -330,87 +336,89 @@ def render_forest_plot(
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template). Very dark palette colors, such as the
         first colors of ``"tol"``, can be hard to see on it.
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure, altair.LayerChart or altair.HConcatChart
+        The plot, not yet shown: it displays as the last expression of a notebook
+        cell, or call its ``.show()``. Altair draws the two panels for a list of
+        results as an ``HConcatChart``.
 
     Raises
     ------
     ValueError
         If ``is_individual`` is False but ``incremental_results`` is None,
-        i.e. ``.analyze()`` was not run first.
+        i.e. ``.analyze()`` was not run first, or if ``backend`` names no
+        known backend.
     KeyError
         If ``is_individual`` is True but ``individual_results`` is empty,
         i.e. ``.analyze_individually()`` was not run first.
+    ImportError
+        If ``backend="altair"`` but Altair is not installed.
+    """
+    validate_backend(backend)
+    spec = forest_spec(
+        names,
+        individual_results,
+        incremental_results,
+        is_individual=is_individual,
+        reverse_plot=reverse_plot,
+        color=color,
+        experiment_name=experiment_name,
+        metric_name=metric_name,
+        dark_mode=dark_mode,
+    )
+    return render(spec, backend)
+
+
+def forest_spec(
+    names: list[str],
+    individual_results: dict[str, dict[str, float]],
+    incremental_results: dict[str, Any] | list[dict[str, Any]] | None,
+    is_individual: bool = True,
+    reverse_plot: bool = True,
+    color: str | dict[str, Any] | list[Any] | None = None,
+    experiment_name: str | None = None,
+    metric_name: str | None = None,
+    dark_mode: bool = False,
+) -> ForestSpec:
+    """Describe the forest plot drawn by :func:`render_forest_plot`, for any backend.
+
+    Takes the same arguments as :func:`render_forest_plot`, less ``backend``,
+    and raises the same errors.
     """
     plot_color = resolve_plot_color(color)
-    fig = go.Figure()  # type: ignore[attr-defined]
+    subtitle = " - ".join(part for part in (experiment_name, metric_name) if part)
     if is_individual:
-        for index, name in enumerate(names):
+        points = []
+        for index, name in enumerate([*names, "Total"]):
             ind_results = individual_results[name]
             c = (
                 (plot_color[index] if isinstance(plot_color, list) else plot_color[name])
                 if plot_color is not None
                 else None
             )
-            marker: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
-            error_x: dict[str, Any] = {
-                "type": "data",
-                "symmetric": False,
-                "array": [ind_results["ci_upper"] - ind_results["lift"]],
-                "arrayminus": [ind_results["lift"] - ind_results["ci_lower"]],
-                "visible": True,
-            }
-            if c is not None:
-                marker["color"] = c
-                error_x["color"] = c
-            fig.add_trace(
-                go.Scatter(  # type: ignore[attr-defined]
-                    x=[ind_results["lift"]],
-                    y=[name],
-                    marker=marker,
-                    error_x=error_x,
-                    name=name,
-                )
-            )
-        total_results = individual_results["Total"]
-        c_total = (
-            (plot_color[index + 1] if isinstance(plot_color, list) else plot_color["Total"])
-            if plot_color is not None
-            else None
-        )
-        marker_total: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
-        error_x_total: dict[str, Any] = {
-            "type": "data",
-            "symmetric": False,
-            "array": [total_results["ci_upper"] - total_results["lift"]],
-            "arrayminus": [total_results["lift"] - total_results["ci_lower"]],
-            "visible": True,
-        }
-        if c_total is not None:
-            marker_total["color"] = c_total
-            error_x_total["color"] = c_total
-        fig.add_trace(
-            go.Scatter(  # type: ignore[attr-defined]
-                x=[total_results["lift"]],
-                y=["Total"],
-                marker=marker_total,
-                error_x=error_x_total,
-                name="Total",
-            )
-        )
-        fig.update_layout(xaxis_tickformat=",.0%")
+            points.append(ForestPoint(name, ind_results["lift"], ind_results["ci_lower"], ind_results["ci_upper"], c))
+        panels = [ForestPanel(points, x_title=metric_name or "Success Rate", x_format=AxisFormat(tickformat=",.0%"))]
+        title = f"Individual Performance by Cell{f': {subtitle}' if subtitle else ''}"
+        y_title = "Cell"
     else:
         if incremental_results is None:
             raise ValueError("Call .analyze() before plotting incremental results.")
-        panels = incremental_results if isinstance(incremental_results, list) else [incremental_results]
-        if len(panels) > 1:
-            fig = make_subplots(rows=1, cols=len(panels), shared_yaxes=True, horizontal_spacing=0.08)
+        results = incremental_results if isinstance(incremental_results, list) else [incremental_results]
         c_inc = (
             (plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0])
             if plot_color is not None
             else None
         )
-        for col, result in enumerate(panels, start=1):
+        panels = []
+        for result in results:
+            label = _LIFT_LABELS.get(result["lift_type"], "Lift")
             # Three or more variants give one row per comparison; two give a single "Total" row.
             rows = list(result["comparisons"].items()) if "comparisons" in result else [("Total", result)]
+            points = []
             for row_index, (row_name, row) in enumerate(rows):
                 c_row = c_inc
                 if plot_color is not None and len(rows) > 1:
@@ -419,64 +427,11 @@ def render_forest_plot(
                         if isinstance(plot_color, list)
                         else plot_color.get(row_name, c_inc)
                     )
-                marker_inc: dict[str, Any] = {"symbol": "diamond", "size": 12.5}
-                error_x_inc: dict[str, Any] = {
-                    "type": "data",
-                    "symmetric": False,
-                    "array": [row["ci_upper"] - row["lift"]],
-                    "arrayminus": [row["lift"] - row["ci_lower"]],
-                    "visible": True,
-                }
-                if c_row is not None:
-                    marker_inc["color"] = c_row
-                    error_x_inc["color"] = c_row
-                trace = go.Scatter(  # type: ignore[attr-defined]
-                    x=[row["lift"]],
-                    y=[row_name],
-                    marker=marker_inc,
-                    error_x=error_x_inc,
-                    name=row_name,
-                    showlegend=col == 1,
-                )
-                if len(panels) > 1:
-                    # Each panel gets its own legend section, titled with its lift, so every
-                    # point has an entry and the title toggles the whole panel.
-                    trace.update(
-                        showlegend=True,
-                        legendgroup=f"panel{col}",
-                        legendgrouptitle_text=_LIFT_LABELS.get(result["lift_type"], "Lift"),
-                    )
-                    fig.add_trace(trace, row=1, col=col)
-                else:
-                    fig.add_trace(trace)
-            axis_format = _lift_axis_format(result["lift_type"])
-            if len(panels) > 1:
-                fig.update_xaxes(
-                    title_text=_LIFT_LABELS.get(result["lift_type"], "Lift"), row=1, col=col, **axis_format
-                )
-            else:
-                fig.update_xaxes(**axis_format)
-        if len(panels) > 1:
-            # Clicking an entry hides that point only; clicking a section title hides the panel.
-            fig.update_layout(legend_groupclick="toggleitem")
-
-    subtitle = " - ".join(part for part in (experiment_name, metric_name) if part)
-    if is_individual:
-        title = f"Individual Performance by Cell{f': {subtitle}' if subtitle else ''}"
-        xaxis_title = metric_name or "Success Rate"
-        yaxis_title = "Cell"
-    else:
-        panels = incremental_results if isinstance(incremental_results, list) else [incremental_results]
-        labels = [_LIFT_LABELS.get(r["lift_type"], "Lift") if r is not None else "Lift" for r in panels]
+                points.append(ForestPoint(row_name, row["lift"], row["ci_lower"], row["ci_upper"], c_row))
+            axis_format = AxisFormat(**_lift_axis_format(result["lift_type"]))
+            panels.append(ForestPanel(points, x_title=label, x_format=axis_format))
         compared = f"{names[0]} vs. {names[1]}" if len(names) == 2 else "Each Comparison"
-        title = f"{' and '.join(labels)} of {compared}{f': {subtitle}' if subtitle else ''}"
-        # With several panels each x-axis carries its own title.
-        xaxis_title = labels[0] if len(labels) == 1 else None
-        yaxis_title = ""
-    fig.update_layout(title_text=title, yaxis_title=yaxis_title)
-    if xaxis_title is not None:
-        fig.update_layout(xaxis_title=xaxis_title)
-    apply_dark_mode(fig, dark_mode)
-    if reverse_plot:
-        fig.update_yaxes(autorange="reversed")
-    fig.show()  # type: ignore[no-untyped-call]
+        lift_labels = " and ".join(panel.x_title or "Lift" for panel in panels)
+        title = f"{lift_labels} of {compared}{f': {subtitle}' if subtitle else ''}"
+        y_title = ""
+    return ForestSpec(panels, title=title, y_title=y_title, reverse=reverse_plot, dark_mode=dark_mode)

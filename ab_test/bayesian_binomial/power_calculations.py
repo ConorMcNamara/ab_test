@@ -4,11 +4,11 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import numpy as np
-import plotly.graph_objects as go
 import scipy.stats as ss
 from joblib import Parallel, delayed
 
-from ab_test._display import apply_dark_mode
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test._lift import _SCALED_LIFTS, from_absolute, to_absolute
 
 __all__ = [
@@ -973,7 +973,8 @@ def plot_bayes_power_curve(
     seed: Seed = None,
     n_jobs: int = 1,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot Bayesian power as a function of per-group sample size.
 
     Parameters
@@ -1012,6 +1013,8 @@ def plot_bayes_power_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
     seed : int, numpy.random.Generator or None, optional
         Seed for the simulations. Every point on the curve reuses the same
         random numbers, so the curve is smooth and reproducible. ``None``
@@ -1019,10 +1022,11 @@ def plot_bayes_power_curve(
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure with per-group sample size on the x-axis
-        and Bayesian power on the y-axis.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, with per-group sample
+        size on the x-axis and Bayesian power on the y-axis.
     """
+    validate_backend(backend)
     # One seed for the whole curve: every point reuses the same random numbers.
     entropy = _entropy(seed)
     power_fn = bayes_power_lift if decision == "lift" else bayes_power_loss
@@ -1077,37 +1081,14 @@ def plot_bayes_power_curve(
             kwargs["loss_threshold"] = loss_threshold
         powers.append(power_fn(**kwargs))
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=powers,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name="Power",
-        )
-    )
-    fig.add_hline(
-        y=0.8,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="80% power",
-        annotation_position="top left",
-    )
-
     rule = f"P(B>A) ≥ {confidence_level}" if decision == "lift" else f"E[loss] ≤ {loss_threshold}"
-    fig.update_layout(
-        title=f"Bayesian Power Curve ({rule})",
-        xaxis_title="Per-group sample size",
-        yaxis_title="Power",
-        yaxis_range=[0, 1.05],
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = power_curve_spec(
+        [curve("Power", sample_sizes, powers)],
+        f"Bayesian Power Curve ({rule})",
+        "Per-group sample size",
+        dark_mode=dark_mode,
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)
 
 
 def plot_bayes_sensitivity_curve(
@@ -1129,7 +1110,8 @@ def plot_bayes_sensitivity_curve(
     seed: Seed = None,
     n_jobs: int = 1,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot minimum detectable lift as a function of per-group sample size.
 
     Parameters
@@ -1166,6 +1148,8 @@ def plot_bayes_sensitivity_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
     seed : int, numpy.random.Generator or None, optional
         Seed for the simulations. Every point on the curve reuses the same
         random numbers, so the curve is smooth and reproducible. ``None``
@@ -1173,10 +1157,11 @@ def plot_bayes_sensitivity_curve(
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure with per-group sample size on the x-axis
-        and minimum detectable lift on the y-axis.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, with per-group sample
+        size on the x-axis and minimum detectable lift on the y-axis.
     """
+    validate_backend(backend)
     # One seed for the whole curve: every point reuses the same random numbers.
     entropy = _entropy(seed)
     mdl_fn = bayes_minimum_detectable_lift if decision == "lift" else bayes_minimum_detectable_lift_loss
@@ -1230,17 +1215,6 @@ def plot_bayes_sensitivity_curve(
             kwargs["loss_threshold"] = loss_threshold
         mdls.append(mdl_fn(**kwargs))
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=mdls,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name="MDL",
-        )
-    )
-
     _lift_labels = {
         "relative": "Minimum detectable relative lift",
         "absolute": "Minimum detectable absolute lift",
@@ -1251,16 +1225,13 @@ def plot_bayes_sensitivity_curve(
         "cpa": "Maximum detectable CPA",
     }
     y_label = _lift_labels.get(lift, f"Minimum detectable {lift} lift")
-    y_format = ",.0%" if lift in ("relative", "absolute") else ",."
     rule = f"P(B>A) ≥ {confidence_level}" if decision == "lift" else f"E[loss] ≤ {loss_threshold}"
-    fig.update_layout(
-        title=f"Bayesian Sensitivity Curve ({rule})",
-        xaxis_title="Per-group sample size",
-        yaxis_title=y_label,
-        yaxis_tickformat=y_format,
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = sensitivity_curve_spec(
+        [curve("MDL", sample_sizes, mdls)],
+        f"Bayesian Sensitivity Curve ({rule})",
+        "Per-group sample size",
+        y_label,
+        lift,
+        dark_mode=dark_mode,
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)

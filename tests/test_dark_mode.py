@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import plotly.io as pio
 import pytest
 
@@ -104,10 +103,6 @@ PLOTS = {
     "time_trend": lambda dm: time_trend_test([100, 98, 102], [1000] * 3, [140, 128, 118], [1000] * 3, dark_mode=dm)[
         "figure"
     ],
-}
-
-# These call fig.show() instead of returning the figure.
-SHOWN = {
     "cluster_plot": lambda dm: _clusters(ClusterRandomizedTrial).plot(dark_mode=dm),
     "bayes_cluster_plot": lambda dm: _clusters(BayesianClusterRandomizedTrial).plot(n_samples=2_000, dark_mode=dm),
     "stratified_plot": lambda dm: _strata(StratifiedContingencyTable).plot(dark_mode=dm),
@@ -120,30 +115,13 @@ SHOWN = {
 }
 
 
-@pytest.fixture
-def draw(monkeypatch):
-    shown = []
-    monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: shown.append(self))
-
-    def _draw(name, dark_mode):
-        if name in PLOTS:
-            return PLOTS[name](dark_mode)
-        SHOWN[name](dark_mode)
-        return shown[-1]
-
-    return _draw
-
-
-ALL_PLOTS = [*PLOTS, *SHOWN]
-
-
-@pytest.mark.parametrize("name", ALL_PLOTS)
-def test_dark_mode_uses_dark_background(draw, name):
-    fig = draw(name, dark_mode=True)
+@pytest.mark.parametrize("name", PLOTS)
+def test_dark_mode_uses_dark_background(name):
+    fig = PLOTS[name](True)
     assert fig.layout.template.layout.paper_bgcolor == DARK_BACKGROUND
 
 
-@pytest.mark.parametrize("name", ALL_PLOTS)
-def test_default_is_not_dark(draw, name):
-    fig = draw(name, dark_mode=False)
+@pytest.mark.parametrize("name", PLOTS)
+def test_default_is_not_dark(name):
+    fig = PLOTS[name](False)
     assert fig.layout.template.layout.paper_bgcolor != DARK_BACKGROUND

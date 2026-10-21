@@ -8,6 +8,7 @@ import pytest
 
 from ab_test.frequentist_binomial.cluster import ClusterRandomizedTrial
 from ab_test.frequentist_binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial import randomization_inference
 from ab_test.frequentist_binomial.randomization_inference import (
     cluster_randomization_test,
     randomization_test,
@@ -113,6 +114,15 @@ class TestClusterRandomizationTest:
         exact_p = cluster_randomization_test(s_c, m_c, s_t, m_t, exact=True)
         mc_p = cluster_randomization_test(s_c, m_c, s_t, m_t, n_permutations=100_000, seed=42)
         assert mc_p == pytest.approx(exact_p, abs=0.02)
+
+    @staticmethod
+    def test_batches_do_not_change_the_result(monkeypatch: pytest.MonkeyPatch) -> None:
+        # Shuffles are drawn in batches to bound memory; the batches read one random stream
+        # in order, so a batch of 7 permutations gives exactly the result of one batch.
+        args = ([10, 8, 12, 9], [100, 90, 110, 100], [15, 18, 20, 11], [100, 100, 95, 105])
+        whole = cluster_randomization_test(*args, n_permutations=1_000, seed=3)
+        monkeypatch.setattr(randomization_inference, "_PERM_BATCH", 7 * 8)
+        assert cluster_randomization_test(*args, n_permutations=1_000, seed=3) == whole
 
     @staticmethod
     def test_seed_reproducibility() -> None:

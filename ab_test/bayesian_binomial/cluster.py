@@ -22,17 +22,18 @@ import math
 from typing import Any, Literal, Self
 
 import numpy as np
-import plotly.graph_objects as go  # type: ignore[import-untyped]
 from scipy.special import betaln, expit
 from tabulate import tabulate
 
 from ab_test._display import (
-    apply_dark_mode,
     convert_to_tabulate_str,
     format_percent,
     resolve_plot_color,
     tabulate_summary,
 )
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, LineSeries, LineSpec, Segment
+from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.power_calculations import (
     Seed,
@@ -181,6 +182,8 @@ _LOGIT_MU_BOUNDS = (-12.0, 12.0)
 _LOG_KAPPA_BOUNDS = (math.log(1e-2), math.log(1e7))
 _GRID_TRIM = 25.0  # drop in log density that bounds the refined grid
 _GRID_PASSES = 3
+# Grid cells times clusters evaluated at once: bounds the memory of the hierarchical posterior.
+_GRID_CHUNK = 2_000_000
 
 
 def _log_hyperprior(logit_mu: np.ndarray[Any, Any], log_kappa: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
@@ -209,8 +212,16 @@ def _hierarchical_mu_posterior(
         ``(logit_mu_grid, mu_weights, log_kappa_grid, kappa_weights)``,
         where the weights are the marginal posterior masses on each grid.
     """
-    s = np.asarray(successes, dtype=float)
-    n = np.asarray(trials, dtype=float)
+    # Clusters with the same counts have the same likelihood, so evaluate each distinct
+    # (successes, trials) pair once, weighted by how often it occurs, a chunk at a time.
+    pairs, counts = np.unique(
+        np.column_stack([np.asarray(successes, dtype=float), np.asarray(trials, dtype=float)]),
+        axis=0,
+        return_counts=True,
+    )
+    s, n = pairs[:, 0], pairs[:, 1]
+    n_clusters = int(counts.sum())
+    chunk = max(1, _GRID_CHUNK // (n_mu * n_kappa))
     (lm_lo, lm_hi), (lk_lo, lk_hi) = _LOGIT_MU_BOUNDS, _LOG_KAPPA_BOUNDS
     for _ in range(_GRID_PASSES):
         lm = np.linspace(lm_lo, lm_hi, n_mu)
@@ -218,7 +229,10 @@ def _hierarchical_mu_posterior(
         mu = expit(lm)[None, :, None]
         kappa = np.exp(lk)[:, None, None]
         a, b = mu * kappa, (1 - mu) * kappa
-        log_post = np.sum(betaln(a + s, b + n - s), axis=-1) - len(s) * betaln(a, b)[..., 0]
+        log_post = -n_clusters * betaln(a, b)[..., 0]
+        for i in range(0, len(s), chunk):
+            sl = slice(i, i + chunk)
+            log_post += betaln(a + s[sl], b + n[sl] - s[sl]) @ counts[sl]
         log_post += _log_hyperprior(lm[None, :], lk[:, None])
         keep = log_post >= log_post.max() - _GRID_TRIM
         (lm_lo, lm_hi), (lk_lo, lk_hi) = _refine_bounds(keep, lm, 0), _refine_bounds(keep, lk, 1)
@@ -842,7 +856,8 @@ class BayesianClusterRandomizedTrial:
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
-    ) -> None:
+        backend: str = "plotly",
+    ) -> Figure:
         """Forest plot of per-cluster proportions and pooled credible interval.
 
         Each cluster is shown as a small dot at its observed proportion.
@@ -868,15 +883,22 @@ class BayesianClusterRandomizedTrial:
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or altair.LayerChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``.
         """
+        validate_backend(backend)
         if self.model_params is None:
             self._fit_model()
         assert self.model_params is not None
 
         plot_color = resolve_plot_color(color)
-        fig = go.Figure()  # type: ignore[attr-defined]
-
-        y_labels: list[str] = []
+        points: list[ForestPoint] = []
         for gi, g in enumerate(self._groups):
             c = None
             if plot_color is not None:
@@ -887,59 +909,23 @@ class BayesianClusterRandomizedTrial:
 
             for c_name, data in self._clusters[g].items():
                 prop = data["successes"] / data["trials"]
-                label = f"{g}: {c_name}"
-                y_labels.append(label)
-                marker_kw: dict[str, Any] = {"symbol": "circle", "size": 6}
-                if c is not None:
-                    marker_kw["color"] = c
-                fig.add_trace(
-                    go.Scatter(  # type: ignore[attr-defined]
-                        x=[prop],
-                        y=[label],
-                        marker=marker_kw,
-                        name=label,
-                        showlegend=False,
-                    )
-                )
+                points.append(ForestPoint(f"{g}: {c_name}", prop, None, None, c, shape="circle", size=6))
 
             params = self.model_params[g]
             samples_arm = _sample_mu(params["logit_mu_grid"], params["mu_weights"], n_samples)
             arm_mean = float(np.mean(samples_arm))
             ci_lo, ci_hi = self._credible_interval(samples_arm, confidence_level, cred_int_method)
+            points.append(ForestPoint(f"{g} (pooled)", arm_mean, ci_lo, ci_hi, c, shape="diamond", size=14))
 
-            label_arm = f"{g} (pooled)"
-            y_labels.append(label_arm)
-            marker_pooled: dict[str, Any] = {"symbol": "diamond", "size": 14}
-            error_x_pooled: dict[str, Any] = {
-                "type": "data",
-                "symmetric": False,
-                "array": [ci_hi - arm_mean],
-                "arrayminus": [arm_mean - ci_lo],
-                "visible": True,
-            }
-            if c is not None:
-                marker_pooled["color"] = c
-                error_x_pooled["color"] = c
-            fig.add_trace(
-                go.Scatter(  # type: ignore[attr-defined]
-                    x=[arm_mean],
-                    y=[label_arm],
-                    marker=marker_pooled,
-                    error_x=error_x_pooled,
-                    name=label_arm,
-                    showlegend=False,
-                )
-            )
-
-        fig.update_layout(
+        spec = ForestSpec(
+            [ForestPanel(points, x_format=AxisFormat(tickformat=",.1%"))],
             title=f"{self.experiment_name} — {self.metric_name} (Cluster Proportions)",
-            xaxis_tickformat=",.1%",
-            showlegend=False,
+            y_title="",
+            reverse=reverse_plot,
+            dark_mode=dark_mode,
+            show_legend=False,
         )
-        if reverse_plot:
-            fig.update_layout(yaxis={"autorange": "reversed"})
-        apply_dark_mode(fig, dark_mode)
-        fig.show()  # type: ignore[no-untyped-call]
+        return render(spec, backend)
 
     def plot_pdf(
         self,
@@ -948,7 +934,8 @@ class BayesianClusterRandomizedTrial:
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
-    ) -> go.Figure:
+        backend: str = "plotly",
+    ) -> Figure:
         """Plot the posterior density of each arm's conversion rate.
 
         The curves are the hierarchical model's posterior for each arm-level
@@ -966,19 +953,22 @@ class BayesianClusterRandomizedTrial:
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
         Returns
         -------
-        go.Figure
-            Plotly figure with overlapping PDF curves.
+        plotly.graph_objects.Figure or altair.LayerChart
+            Plotly figure, or Altair chart, with overlapping PDF curves.
         """
+        validate_backend(backend)
         if self.model_params is None:
             self._fit_model()
         assert self.model_params is not None
 
         plot_color = resolve_plot_color(color)
-        fig = go.Figure()  # type: ignore[attr-defined]
-
+        series: list[LineSeries] = []
+        segments: list[Segment] = []
         for gi, g in enumerate(self._groups):
             params = self.model_params[g]
             logit_mu, weights = params["logit_mu_grid"], params["mu_weights"]
@@ -993,30 +983,10 @@ class BayesianClusterRandomizedTrial:
                 elif isinstance(plot_color, dict):
                     c = plot_color.get(g)
 
-            line_kw: dict[str, Any] = {"width": 2}
-            if c is not None:
-                line_kw["color"] = c
-
-            fig.add_trace(
-                go.Scatter(  # type: ignore[attr-defined]
-                    x=x.tolist(),
-                    y=y.tolist(),
-                    mode="lines",
-                    line=line_kw,
-                    name=f"{g} (posterior mean={params['mean']:.2%})",
-                )
-            )
-
+            series.append(LineSeries(f"{g} (posterior mean={params['mean']:.2%})", x.tolist(), y.tolist(), color=c))
             samples = _sample_mu(logit_mu, weights, n_samples)
             hdi_lo, hdi_hi = calculate_hdi_from_samples(samples, confidence_level)
-            fig.add_shape(
-                type="line",
-                x0=hdi_lo,
-                x1=hdi_hi,
-                y0=-0.02 * max(y) * (gi + 1),
-                y1=-0.02 * max(y) * (gi + 1),
-                line={"color": c or "gray", "width": 4},
-            )
+            segments.append(Segment(hdi_lo, hdi_hi, -0.02 * max(y) * (gi + 1), c or "gray"))
 
         prob_t_gt_c = None
         prob_best = None
@@ -1031,16 +1001,16 @@ class BayesianClusterRandomizedTrial:
             leader = max(prob_best, key=prob_best.get)
             title += f" | P({leader} is best) = {prob_best[leader]:.4f}"
 
-        fig.update_layout(
+        spec = LineSpec(
+            series=series,
             title=title,
-            xaxis_title="Conversion Rate",
-            yaxis_title="Density",
-            xaxis_tickformat=",.1%",
-            template="plotly_white",
-            legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+            x_title="Conversion Rate",
+            y_title="Density",
+            x_format=AxisFormat(tickformat=",.1%"),
+            segments=segments,
+            dark_mode=dark_mode,
         )
-        apply_dark_mode(fig, dark_mode)
-        return fig
+        return render(spec, backend)
 
 
 # ---------------------------------------------------------------------------
@@ -1687,7 +1657,8 @@ def plot_cluster_bayes_power_curve(
     *,
     seed: Seed = None,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot Bayesian CRT power as a function of clusters per arm.
 
     Parameters
@@ -1726,11 +1697,14 @@ def plot_cluster_bayes_power_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
+    plotly.graph_objects.Figure or altair.LayerChart
     """
+    validate_backend(backend)
     # One seed for the whole curve: every point reuses the same random numbers.
     entropy = _entropy(seed)
     power_fn = cluster_bayes_power_lift if decision == "lift" else cluster_bayes_power_loss
@@ -1759,37 +1733,15 @@ def plot_cluster_bayes_power_curve(
             kwargs["loss_threshold"] = loss_threshold
         powers.append(power_fn(**kwargs))
 
-    fig = go.Figure()  # type: ignore[attr-defined]
-    fig.add_trace(
-        go.Scatter(  # type: ignore[attr-defined]
-            x=list(cluster_counts),
-            y=powers,
-            mode="lines+markers",
-            line={"color": "#636EFA", "width": 2},
-            name="Power",
-        )
-    )
-    fig.add_hline(
-        y=0.8,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="80% power",
-        annotation_position="top left",
-    )
-
     rule = f"P(T>C) >= {confidence_level}" if decision == "lift" else f"E[loss] <= {loss_threshold}"
-    fig.update_layout(
-        title=f"Bayesian CRT Power Curve ({rule})",
-        xaxis_title="Clusters per arm",
-        yaxis_title="Power (Assurance)",
-        yaxis_range=[0, 1.05],
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = power_curve_spec(
+        [curve("Power", cluster_counts, powers, markers=True)],
+        f"Bayesian CRT Power Curve ({rule})",
+        "Clusters per arm",
+        y_title="Power (Assurance)",
+        dark_mode=dark_mode,
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)
 
 
 def plot_cluster_bayes_sensitivity_curve(
@@ -1808,7 +1760,8 @@ def plot_cluster_bayes_sensitivity_curve(
     *,
     seed: Seed = None,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot minimum detectable lift as a function of clusters per arm.
 
     Parameters
@@ -1845,11 +1798,14 @@ def plot_cluster_bayes_sensitivity_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
+    plotly.graph_objects.Figure or altair.LayerChart
     """
+    validate_backend(backend)
     # One seed for the whole curve: every point reuses the same random numbers.
     entropy = _entropy(seed)
     mdl_fn = cluster_bayes_minimum_detectable_lift if decision == "lift" else cluster_bayes_minimum_detectable_lift_loss
@@ -1877,27 +1833,14 @@ def plot_cluster_bayes_sensitivity_curve(
             kwargs["loss_threshold"] = loss_threshold
         mdls.append(mdl_fn(**kwargs))
 
-    fig = go.Figure()  # type: ignore[attr-defined]
-    fig.add_trace(
-        go.Scatter(  # type: ignore[attr-defined]
-            x=list(cluster_counts),
-            y=mdls,
-            mode="lines+markers",
-            line={"color": "#636EFA", "width": 2},
-            name="MDL",
-        )
-    )
-
     y_label = f"Minimum detectable {lift} lift"
     rule = f"P(T>C) >= {confidence_level}" if decision == "lift" else f"E[loss] <= {loss_threshold}"
-    fig.update_layout(
-        title=f"Bayesian CRT Sensitivity Curve ({rule})",
-        xaxis_title="Clusters per arm",
-        yaxis_title=y_label,
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = sensitivity_curve_spec(
+        [curve("MDL", cluster_counts, mdls, markers=True)],
+        f"Bayesian CRT Sensitivity Curve ({rule})",
+        "Clusters per arm",
+        y_label,
+        lift,
+        dark_mode=dark_mode,
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)

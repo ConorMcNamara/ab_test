@@ -31,6 +31,11 @@ __all__ = [
 
 _validate_two_group = validate_two_group
 
+# SciPy's Barnard and Boschloo tests evaluate every possible table, (n1 + 1) * (n2 + 1) of them,
+# at each of 32 nuisance values. At 1,000 trials per arm that already takes about 1 s for Barnard
+# and 6 s for Boschloo; at 10,000 per arm Barnard takes most of a minute and over 7 GB.
+_MAX_EXACT_TABLES = 1_500_000
+
 
 def _contingency_table(
     trials: np.ndarray[Any, Any] | list[Any],
@@ -76,6 +81,17 @@ def _pvalue_decision(pval: Any, crit: float | None) -> float | bool:
             "A z or chi-squared critical value would make every result significant."
         )
     return bool(pval <= crit)
+
+
+def _require_feasible_exact(trials: np.ndarray[Any, Any] | list[Any], test_name: str) -> None:
+    """Reject samples too large for an unconditional exact test to finish in reasonable time."""
+    n_tables = (int(trials[0]) + 1) * (int(trials[1]) + 1)
+    if n_tables > _MAX_EXACT_TABLES:
+        raise ValueError(
+            f"{test_name} would evaluate {n_tables:,} possible tables (at most {_MAX_EXACT_TABLES:,} are "
+            "supported), so it would take minutes and gigabytes of memory. At these sample sizes the score "
+            "test gives essentially the same p-value; Fisher's exact test also stays fast at any size."
+        )
 
 
 def _require_zero_null(null_lift: float, test_name: str) -> None:
@@ -508,6 +524,12 @@ def barnard_exact_test(
     Wald statistic with a normal critical value would give an asymptotic
     decision that can disagree with the exact p-value.
 
+    Raises
+    ------
+    ValueError
+        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 1,500,000, roughly
+        1,200 trials per group: the test's cost grows with that product.
+
     Notes
     -----
     Only supports two experiment groups and a null lift of 0 (no difference
@@ -516,6 +538,7 @@ def barnard_exact_test(
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     _require_zero_null(null_lift, "barnard_exact_test")
+    _require_feasible_exact(trials, "barnard_exact_test")
     contingency_table = _contingency_table(trials, successes)
     barnard = ss.barnard_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     return _pvalue_decision(barnard.pvalue, crit)
@@ -535,6 +558,12 @@ def boschloo_exact_test(
     (i.e. treated as an alpha threshold) because Boschloo's test has no
     test statistic amenable to a critical-value comparison.
 
+    Raises
+    ------
+    ValueError
+        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 1,500,000, roughly
+        1,200 trials per group: the test's cost grows with that product.
+
     Notes
     -----
     Only supports two experiment groups and a null lift of 0 (no difference
@@ -543,6 +572,7 @@ def boschloo_exact_test(
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     _require_zero_null(null_lift, "boschloo_exact_test")
+    _require_feasible_exact(trials, "boschloo_exact_test")
     contingency_table = _contingency_table(trials, successes)
     boschloo = ss.boschloo_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     return _pvalue_decision(boschloo.pvalue, crit)

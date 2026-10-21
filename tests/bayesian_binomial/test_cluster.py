@@ -17,7 +17,8 @@ from ab_test.bayesian_binomial.cluster import (
     plot_cluster_bayes_power_curve,
     plot_cluster_bayes_sensitivity_curve,
 )
-from ab_test.bayesian_binomial.cluster import _sample_mu, _search_min_clusters
+from ab_test.bayesian_binomial import cluster as cluster_module
+from ab_test.bayesian_binomial.cluster import _hierarchical_mu_posterior, _sample_mu, _search_min_clusters
 
 
 # ---------------------------------------------------------------------------
@@ -732,6 +733,20 @@ class TestHierarchicalPosterior:
             hits += crt.pooled_results["prob_t_gt_c"] >= 0.95
         assert hits / 200 <= 0.08
 
+    @staticmethod
+    def test_chunked_grid_matches_one_pass(monkeypatch):
+        # Many clusters are evaluated a chunk at a time, with repeated counts evaluated once;
+        # neither may change the posterior. Repeats come from the few distinct sizes and rates.
+        rng = np.random.default_rng(0)
+        trials = rng.choice([50, 100, 200], 300)
+        successes = rng.binomial(trials, 0.1)
+        one_pass = _hierarchical_mu_posterior(successes, trials)
+        monkeypatch.setattr(cluster_module, "_GRID_CHUNK", 200 * 100 * 7)  # 7 distinct pairs per chunk
+        chunked = _hierarchical_mu_posterior(successes, trials)
+        for expected, actual in zip(one_pass, chunked):
+            # Only summation order differs, on log-likelihoods of order 1e5.
+            np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=1e-15)
+
 
 class TestCachedResults:
     @staticmethod
@@ -804,8 +819,7 @@ class TestClusterSeeding:
         assert powers == sorted(powers)
 
     @staticmethod
-    def test_plot_reproducible(monkeypatch):
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: None)
+    def test_plot_reproducible():
         kwargs = {**TestClusterSeeding.COMMON, **TestClusterSeeding.FAST, "cluster_counts": [10, 20, 30]}
         first = plot_cluster_bayes_power_curve(**kwargs, seed=2)
         second = plot_cluster_bayes_power_curve(**kwargs, seed=2)
@@ -925,14 +939,12 @@ class TestBayesianMultiGroup:
             _three_group_bayes().analyze(comparisons="pairs")
 
     @staticmethod
-    def test_plots_cover_every_group(monkeypatch):
-        figures = []
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+    def test_plots_cover_every_group():
         crt = _three_group_bayes()
         np.random.seed(0)
         crt.analyze(n_samples=20_000)
-        crt.plot(n_samples=2_000)
-        pooled = [trace.y[0] for trace in figures[-1].data if trace.y[0].endswith("(pooled)")]
+        fig = crt.plot(n_samples=2_000)
+        pooled = [trace.y[0] for trace in fig.data if trace.y[0].endswith("(pooled)")]
         assert pooled == ["A (pooled)", "B (pooled)", "C (pooled)"]
         fig = crt.plot_pdf(n_samples=2_000)
         assert len(fig.data) == 3
