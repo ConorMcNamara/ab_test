@@ -15,9 +15,10 @@ import math
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import plotly.graph_objects as go
 
-from ab_test._display import apply_dark_mode, format_percent
+from ab_test._display import format_percent
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.spec import AxisFormat, Band, HLine, LineSeries, LineSpec
 from ab_test.frequentist_binomial.utils import mle_under_alternative, mle_under_null, observed_lift, validate_two_group
 
 if TYPE_CHECKING:
@@ -174,7 +175,8 @@ def plot_msprt_over_time(
     *,
     tau: float | None = None,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot the mSPRT point estimate and confidence intervals over time.
 
     Each checkpoint's interval inverts the mSPRT at that look. They are not
@@ -204,13 +206,17 @@ def plot_msprt_over_time(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure showing the point estimate as a line with
-        markers, a shaded confidence band, and a dashed null-lift reference.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, showing the point
+        estimate as a line with markers, a shaded confidence band, and a dashed
+        null-lift reference.
     """
+    validate_backend(backend)
     if len(tables) != len(labels):
         raise ValueError(f"tables and labels must have the same length, got {len(tables)} and {len(labels)}")
 
@@ -229,57 +235,25 @@ def plot_msprt_over_time(
         lbs.append(lb)
         ubs.append(ub)
 
-    fig = go.Figure()
-
-    fig.add_trace(
-        go.Scatter(
-            x=labels,
-            y=ubs,
-            mode="lines",
-            line={"width": 0},
-            showlegend=False,
-            hoverinfo="skip",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=labels,
-            y=lbs,
-            mode="lines",
-            line={"width": 0},
-            fill="tonexty",
-            fillcolor="rgba(99, 110, 250, 0.2)",
-            name=f"{format_percent(1 - alpha)}% CI",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=labels,
-            y=estimates,
-            mode="lines+markers",
-            marker={"size": 8, "symbol": "diamond"},
-            line={"color": "#636EFA", "width": 2},
-            name="Point estimate",
-        )
-    )
-    fig.add_hline(
-        y=null_lift,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="H₀",
-        annotation_position="top left",
-    )
-
-    tick_format = ",.0%" if lift in ("relative", "absolute") else "~s"
-    fig.update_layout(
+    spec = LineSpec(
+        series=[
+            LineSeries(
+                "Point estimate",
+                labels,
+                estimates,
+                color="#636EFA",
+                markers=True,
+                marker_shape="diamond",
+                marker_size=8,
+            )
+        ],
         title="mSPRT Confidence Sequence Over Time",
-        xaxis_title="Checkpoint",
-        yaxis_title=f"{lift.capitalize()} lift",
-        yaxis_tickformat=tick_format,
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        x_title="Checkpoint",
+        y_title=f"{lift.capitalize()} lift",
+        y_format=AxisFormat(tickformat=",.0%" if lift in ("relative", "absolute") else "~s"),
+        hlines=[HLine(null_lift, "H₀")],
+        x_categorical=True,
+        bands=[Band(f"{format_percent(1 - alpha)}% CI", labels, lbs, ubs)],
+        dark_mode=dark_mode,
     )
-
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)

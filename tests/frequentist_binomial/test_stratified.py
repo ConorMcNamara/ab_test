@@ -216,32 +216,24 @@ class TestPlot:
         st.add("Treatment", 100, 400, stratum="desktop")
         return st
 
-    def test_plot_runs_without_error(self, monkeypatch):
+    def test_plot_runs_without_error(self):
         st = self._make_table()
-        import plotly.graph_objects as go
 
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
         st.plot(lift="relative")
 
-    def test_plot_absolute(self, monkeypatch):
+    def test_plot_absolute(self):
         st = self._make_table()
-        import plotly.graph_objects as go
 
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
         st.plot(lift="absolute")
 
-    def test_plot_with_palette(self, monkeypatch):
+    def test_plot_with_palette(self):
         st = self._make_table()
-        import plotly.graph_objects as go
 
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
         st.plot(color="wong")
 
-    def test_plot_with_color_dict(self, monkeypatch):
+    def test_plot_with_color_dict(self):
         st = self._make_table()
-        import plotly.graph_objects as go
 
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
         st.plot(color={"mobile": "blue", "desktop": "red", "Overall": "black"})
 
 
@@ -457,24 +449,18 @@ class TestStratifiedPlotNewLifts:
         st.add("Treatment", 100, 400, stratum="desktop")
         return st
 
-    def test_plot_incremental(self, monkeypatch):
-        import plotly.graph_objects as go
+    def test_plot_incremental(self):
 
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
         st = self._make_table()
         st.plot(lift="incremental")
 
-    def test_plot_roas(self, monkeypatch):
-        import plotly.graph_objects as go
+    def test_plot_roas(self):
 
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
         st = self._make_table()
         st.plot(lift="roas")
 
-    def test_plot_revenue(self, monkeypatch):
-        import plotly.graph_objects as go
+    def test_plot_revenue(self):
 
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
         st = self._make_table()
         st.plot(lift="revenue")
 

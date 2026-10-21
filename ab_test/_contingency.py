@@ -18,6 +18,7 @@ import polars as pl
 from tabulate import tabulate
 
 from ab_test._display import render_forest_plot
+from ab_test._plotting import Figure
 
 __all__ = [
     "BaseContingencyTable",
@@ -232,7 +233,8 @@ class BaseContingencyTable:
         *,
         lift: str | None = None,
         dark_mode: bool = False,
-    ) -> None:
+        backend: str = "plotly",
+    ) -> Figure:
         """Plot the point estimates as well as confidence/credible intervals.
 
         Parameters
@@ -243,7 +245,7 @@ class BaseContingencyTable:
         reverse_plot : bool, default=True
             Whether we are reversing the order of our plot or not.
         color : str, list, dict, or None, default=None
-            If None, uses Plotly's default color scheme.
+            If None, uses the backend's default color scheme.
             If a string, one of the colorblind-friendly palette names: ``"ibm"``,
             ``"wong"``, ``"ito"``, ``"tol"``, ``"tol_bright"``, ``"tol_vibrant"``,
             ``"tol_muted"``, ``"tol_light"``.
@@ -257,6 +259,15 @@ class BaseContingencyTable:
             left unchanged).
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure, altair.LayerChart or altair.HConcatChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``. Altair draws the two panels with
+            ``lift="both"`` as an ``HConcatChart``.
 
         Raises
         ------
@@ -264,10 +275,13 @@ class BaseContingencyTable:
             If ``is_individual`` is False and .analyze() has not been run yet,
             if ``lift`` is not ``None`` or ``"both"``, if ``lift="both"`` is
             used with ``is_individual=True``, or if the .analyze() settings
-            cannot produce an interval on both scales.
+            cannot produce an interval on both scales, or if ``backend``
+            names no known backend.
         KeyError
             If ``is_individual`` is True and .analyze_individually() has not
             been run yet.
+        ImportError
+            If ``backend="altair"`` but Altair is not installed.
 
         Notes
         -----
@@ -281,7 +295,7 @@ class BaseContingencyTable:
         if lift == "both" and is_individual:
             raise ValueError("lift='both' compares the variants; use it with is_individual=False")
         incremental = self._both_lift_results() if lift == "both" else self.incremental_results
-        render_forest_plot(
+        return render_forest_plot(
             self.names,
             self.individual_results,
             incremental,
@@ -291,6 +305,7 @@ class BaseContingencyTable:
             experiment_name=self.experiment_name,
             metric_name=self.metric_name,
             dark_mode=dark_mode,
+            backend=backend,
         )
 
     def _both_lift_results(self) -> list[dict[str, Any]]:

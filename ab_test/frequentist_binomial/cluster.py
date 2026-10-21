@@ -22,18 +22,19 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import plotly.graph_objects as go
 import scipy.stats as ss
 from scipy.optimize import brentq
 from tabulate import tabulate
 
 from ab_test._display import (
-    apply_dark_mode,
     convert_to_tabulate_str,
     format_percent,
     resolve_plot_color,
     tabulate_summary,
 )
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec
+from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_binomial.randomization_inference import cluster_randomization_test
 from ab_test.frequentist_binomial.power_calculations import (
@@ -1008,7 +1009,8 @@ class ClusterRandomizedTrial:
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
-    ) -> None:
+        backend: str = "plotly",
+    ) -> Figure:
         """Forest plot of per-cluster proportions and arm estimates.
 
         Each cluster is a dot and each group's mean a diamond, for any number
@@ -1028,14 +1030,22 @@ class ClusterRandomizedTrial:
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or altair.LayerChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``.
         """
+        validate_backend(backend)
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
         groups = self._build_groups()
         plot_color = resolve_plot_color(color)
-        fig = go.Figure()
 
         def group_color(index: int, name: str) -> Any:
             if isinstance(plot_color, list):
@@ -1044,49 +1054,30 @@ class ClusterRandomizedTrial:
                 return plot_color.get(name)
             return None
 
-        # One dot per cluster, grouped by arm in the order the groups were added.
+        # One dot per cluster, grouped by arm in the order the groups were added, then each arm's mean.
+        points: list[ForestPoint] = []
         for index, (grp, s, m) in enumerate(groups):
             labels = [name for name, info in self._clusters.items() if info["group"] == grp]
             for label, prop in zip(labels, s / m):
-                c = group_color(index, grp)
-                marker_kw: dict[str, Any] = {"symbol": "circle", "size": 8}
-                if c is not None:
-                    marker_kw["color"] = c
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=[float(prop)],
-                        y=[f"{label} ({grp})"],
-                        marker=marker_kw,
-                        name=label,
-                        showlegend=False,
+                points.append(
+                    ForestPoint(
+                        f"{label} ({grp})", float(prop), None, None, group_color(index, grp), shape="circle", size=8
                     )
                 )
-
         for index, (grp_name, s, m) in enumerate(groups):
-            c_arm = group_color(index, grp_name)
-            marker_kw_arm: dict[str, Any] = {"symbol": "diamond", "size": 14}
-            if c_arm is not None:
-                marker_kw_arm["color"] = c_arm
+            mean = float(np.mean(s / m))
+            points.append(ForestPoint(f"{grp_name} (mean)", mean, None, None, group_color(index, grp_name), size=14))
 
-            fig.add_trace(
-                go.Scatter(
-                    x=[float(np.mean(s / m))],
-                    y=[f"{grp_name} (mean)"],
-                    marker=marker_kw_arm,
-                    name=f"{grp_name} mean",
-                )
-            )
-
-        fig.update_layout(
+        spec = ForestSpec(
+            [ForestPanel(points, x_title="Success Rate", x_format=AxisFormat(tickformat=",.2%"))],
             title=f"Cluster Proportions — {self.experiment_name}",
-            xaxis_title="Success Rate",
-            xaxis_tickformat=",.2%",
-            template="plotly_white",
-            yaxis={"autorange": "reversed" if reverse_plot else True},
+            y_title="",
+            reverse=reverse_plot,
+            dark_mode=dark_mode,
+            show_legend=False,
+            white_background=True,
         )
-        apply_dark_mode(fig, dark_mode)
-        fig.show()
+        return render(spec, backend)
 
 
 # ---------------------------------------------------------------------------
@@ -1108,7 +1099,8 @@ def plot_cluster_power_curve(
     *,
     comparisons: str = "control",
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot statistical power with and without cluster adjustment.
 
     Parameters
@@ -1144,12 +1136,16 @@ def plot_cluster_power_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        Plotly figure with cluster-adjusted and unadjusted power curves.
+    plotly.graph_objects.Figure or altair.LayerChart
+        Plotly figure, or Altair chart, with cluster-adjusted and unadjusted
+        power curves.
     """
+    validate_backend(backend)
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
@@ -1198,45 +1194,12 @@ def plot_cluster_power_curve(
         for ss in sample_sizes
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=adjusted_powers,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name=f"Cluster-adjusted (ICC={icc:.3f}, m={avg_cluster_size:.0f})",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=unadjusted_powers,
-            mode="lines",
-            line={"color": "#EF553B", "width": 2, "dash": "dot"},
-            name="No clustering",
-        )
-    )
-    fig.add_hline(
-        y=0.8,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="80% power",
-        annotation_position="top left",
-    )
-
-    fig.update_layout(
-        title="Power Curve (Cluster-Adjusted)",
-        xaxis_title="Total sample size",
-        yaxis_title="Power",
-        yaxis_range=[0, 1.05],
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
-    )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    series = [
+        curve(f"Cluster-adjusted (ICC={icc:.3f}, m={avg_cluster_size:.0f})", sample_sizes, adjusted_powers),
+        curve("No clustering", sample_sizes, unadjusted_powers, baseline_dash="dot"),
+    ]
+    spec = power_curve_spec(series, "Power Curve (Cluster-Adjusted)", "Total sample size", dark_mode=dark_mode)
+    return render(spec, backend)
 
 
 def plot_cluster_sensitivity_curve(
@@ -1253,7 +1216,8 @@ def plot_cluster_sensitivity_curve(
     *,
     comparisons: str = "control",
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot minimum detectable lift with and without cluster adjustment.
 
     Parameters
@@ -1289,13 +1253,16 @@ def plot_cluster_sensitivity_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        Plotly figure with cluster-adjusted and unadjusted sensitivity
-        curves.
+    plotly.graph_objects.Figure or altair.LayerChart
+        Plotly figure, or Altair chart, with cluster-adjusted and unadjusted
+        sensitivity curves.
     """
+    validate_backend(backend)
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
@@ -1345,35 +1312,12 @@ def plot_cluster_sensitivity_curve(
         for ss in sample_sizes
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=adjusted_mdls,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name=f"Cluster-adjusted (ICC={icc:.3f}, m={avg_cluster_size:.0f})",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=unadjusted_mdls,
-            mode="lines",
-            line={"color": "#EF553B", "width": 2, "dash": "dot"},
-            name="No clustering",
-        )
-    )
-
+    series = [
+        curve(f"Cluster-adjusted (ICC={icc:.3f}, m={avg_cluster_size:.0f})", sample_sizes, adjusted_mdls),
+        curve("No clustering", sample_sizes, unadjusted_mdls, baseline_dash="dot"),
+    ]
     y_label = f"Minimum detectable {lift} lift"
-    fig.update_layout(
-        title="Sensitivity Curve (Cluster-Adjusted)",
-        xaxis_title="Total sample size",
-        yaxis_title=y_label,
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = sensitivity_curve_spec(
+        series, "Sensitivity Curve (Cluster-Adjusted)", "Total sample size", y_label, lift, dark_mode=dark_mode
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)

@@ -13,18 +13,17 @@ import itertools
 from typing import Any, Literal, Self
 
 import numpy as np
-import plotly.graph_objects as go  # type: ignore[import-untyped]
 from tabulate import tabulate
 
 from ab_test._display import (
-    apply_dark_mode,
-    combine_lift_panels,
     convert_to_tabulate_str,
+    effect_panel,
     format_percent,
-    resolve_plot_color,
     tabulate_summary,
 )
 from ab_test._lift import scale_bounds, scale_metric
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.spec import ForestPanel, ForestSpec
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.utils import (
     _between_group_sd_samples,
@@ -762,7 +761,8 @@ class BayesianStratifiedContingencyTable:
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
-    ) -> None:
+        backend: str = "plotly",
+    ) -> Figure:
         """Forest plot of per-stratum and pooled treatment effects.
 
         Each stratum is shown as a circle with a credible-interval
@@ -786,50 +786,52 @@ class BayesianStratifiedContingencyTable:
             Whether to reverse the y-axis order (first stratum at top).
         color : str, list, dict, or None, default=None
             Colorblind palette name, mapping of stratum names to colors,
-            list of colors, or ``None`` for Plotly defaults.
+            list of colors, or ``None`` for the backend's default colors.
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure, altair.LayerChart or altair.HConcatChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``. Altair draws the two panels with
+            ``lift="both"`` as an ``HConcatChart``.
         """
-        if isinstance(lift, str) and lift.casefold() == "both":
-            figures = [
-                self._plot_figure(
-                    lift=panel_lift,
-                    confidence_level=confidence_level,
-                    n_samples=n_samples,
-                    cred_int_method=cred_int_method,
-                    reverse_plot=reverse_plot,
-                    color=color,
-                )
-                for panel_lift in ("absolute", "relative")
-            ]
-            fig = combine_lift_panels(
-                figures,
-                f"{self.experiment_name} — {self.metric_name} (Risk Difference and Relative Lift)",
-                ["Risk Difference", "Relative Lift"],
-            )
-        else:
-            fig = self._plot_figure(
-                lift=lift,
+        validate_backend(backend)
+        lifts = ("absolute", "relative") if isinstance(lift, str) and lift.casefold() == "both" else (lift,)
+        panels = [
+            self._plot_panel(
+                lift=panel_lift,
                 confidence_level=confidence_level,
                 n_samples=n_samples,
                 cred_int_method=cred_int_method,
-                reverse_plot=reverse_plot,
                 color=color,
             )
-        apply_dark_mode(fig, dark_mode)
-        fig.show()  # type: ignore[no-untyped-call]
+            for panel_lift in lifts
+        ]
+        lift_labels = " and ".join(str(panel.x_title) for panel in panels)
+        spec = ForestSpec(
+            panels,
+            title=f"{self.experiment_name} — {self.metric_name} ({lift_labels})",
+            y_title="",
+            reverse=reverse_plot,
+            dark_mode=dark_mode,
+            show_legend=False,
+        )
+        return render(spec, backend)
 
-    def _plot_figure(
+    def _plot_panel(
         self,
         lift: str = "relative",
         confidence_level: float = 0.95,
         n_samples: int = 100_000,
         cred_int_method: Literal["credible", "hdi"] = "credible",
-        reverse_plot: bool = True,
         color: str | dict[str, Any] | list[Any] | None = None,
-    ) -> go.Figure:
-        """Build the forest plot for a single lift (see :meth:`plot`)."""
+    ) -> ForestPanel:
+        """Describe the forest-plot panel for a single lift (see :meth:`plot`)."""
         lift = self._validate_lift(lift)
         successes, trials, alphas, betas, strata_names = self._build_arrays(two_groups=True)
 
@@ -847,92 +849,13 @@ class BayesianStratifiedContingencyTable:
             ci_uppers.append(hi)
 
         pooled_est, pooled_lb, pooled_ub, _ = self._summarize(pooled_samples, lift, confidence_level, cred_int_method)
-
-        plot_color = resolve_plot_color(color)
-        fig = go.Figure()  # type: ignore[attr-defined]
-
-        for k, s_name in enumerate(strata_names):
-            c = None
-            if plot_color is not None:
-                if isinstance(plot_color, list):
-                    c = plot_color[k % len(plot_color)]
-                elif isinstance(plot_color, dict):
-                    c = plot_color.get(s_name)
-
-            marker_kw: dict[str, Any] = {"symbol": "circle", "size": 10}
-            error_x_kw: dict[str, Any] = {
-                "type": "data",
-                "symmetric": False,
-                "array": [ci_uppers[k] - effects[k]],
-                "arrayminus": [effects[k] - ci_lowers[k]],
-                "visible": True,
-            }
-            if c is not None:
-                marker_kw["color"] = c
-                error_x_kw["color"] = c
-
-            fig.add_trace(
-                go.Scatter(  # type: ignore[attr-defined]
-                    x=[effects[k]],
-                    y=[s_name],
-                    marker=marker_kw,
-                    error_x=error_x_kw,
-                    name=s_name,
-                )
-            )
-
-        c_pooled = None
-        if plot_color is not None:
-            if isinstance(plot_color, list):
-                c_pooled = plot_color[len(strata_names) % len(plot_color)]
-            elif isinstance(plot_color, dict):
-                c_pooled = plot_color.get("Overall")
-
-        marker_pooled: dict[str, Any] = {"symbol": "diamond", "size": 14}
-        error_x_pooled: dict[str, Any] = {
-            "type": "data",
-            "symmetric": False,
-            "array": [pooled_ub - pooled_est],
-            "arrayminus": [pooled_est - pooled_lb],
-            "visible": True,
-        }
-        if c_pooled is not None:
-            marker_pooled["color"] = c_pooled
-            error_x_pooled["color"] = c_pooled
-
-        fig.add_trace(
-            go.Scatter(  # type: ignore[attr-defined]
-                x=[pooled_est],
-                y=["Overall"],
-                marker=marker_pooled,
-                error_x=error_x_pooled,
-                name="Overall (pooled)",
-            )
+        return effect_panel(
+            strata_names,
+            effects,
+            ci_lowers,
+            ci_uppers,
+            lift,
+            color,
+            pooled=(pooled_est, pooled_lb, pooled_ub),
+            zero_line_opacity=0.5,
         )
-
-        lift_labels = {
-            "absolute": "Risk Difference",
-            "relative": "Relative Lift",
-            "incremental": "Incremental Conversions",
-            "roas": "Return on Ad Spend",
-            "revenue": "Revenue",
-            "cpa": "Cost Per Acquisition",
-        }
-        tick_formats = {
-            "absolute": ",.1%",
-            "relative": ",.1%",
-            "incremental": ",",
-            "roas": ".3~g",
-            "revenue": "$,",
-            "cpa": "$,",
-        }
-
-        fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
-        fig.update_layout(
-            title=f"{self.experiment_name} — {self.metric_name} ({lift_labels[lift]})",
-            xaxis_tickformat=tick_formats[lift],
-            showlegend=False,
-        )
-        if reverse_plot:
-            fig.update_layout(yaxis={"autorange": "reversed"})
-        return fig
