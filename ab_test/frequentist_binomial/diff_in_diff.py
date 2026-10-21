@@ -24,7 +24,7 @@ from ab_test._display import (
     effect_panel,
     format_percent,
 )
-from ab_test._plotting import render, show, validate_backend
+from ab_test._plotting import Figure, render, validate_backend
 from ab_test._plotting.spec import ForestPanel, ForestSpec
 from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_binomial.contingency import ContingencyTable
@@ -442,7 +442,7 @@ class DiffInDiff:
         *,
         dark_mode: bool = False,
         backend: str = "plotly",
-    ) -> None:
+    ) -> Figure:
         """Forest plot of per-segment treatment effects.
 
         Parameters
@@ -465,6 +465,13 @@ class DiffInDiff:
             ``"plotly_dark"`` template).
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure, altair.LayerChart or altair.HConcatChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``. Altair draws the two panels with
+            ``lift="both"`` as an ``HConcatChart``.
         """
         validate_backend(backend)
         lifts = ("absolute", "relative") if isinstance(lift, str) and lift.casefold() == "both" else (lift,)
@@ -479,7 +486,7 @@ class DiffInDiff:
             show_legend=False,
             white_background=True,
         )
-        show(render(spec, backend))
+        return render(spec, backend)
 
     def _plot_panel(
         self,

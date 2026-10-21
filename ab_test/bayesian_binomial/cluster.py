@@ -31,7 +31,7 @@ from ab_test._display import (
     resolve_plot_color,
     tabulate_summary,
 )
-from ab_test._plotting import Figure, render, show, validate_backend
+from ab_test._plotting import Figure, render, validate_backend
 from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, LineSeries, LineSpec, Segment
 from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
@@ -844,7 +844,7 @@ class BayesianClusterRandomizedTrial:
         *,
         dark_mode: bool = False,
         backend: str = "plotly",
-    ) -> None:
+    ) -> Figure:
         """Forest plot of per-cluster proportions and pooled credible interval.
 
         Each cluster is shown as a small dot at its observed proportion.
@@ -872,6 +872,12 @@ class BayesianClusterRandomizedTrial:
             ``"plotly_dark"`` template).
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or altair.LayerChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``.
         """
         validate_backend(backend)
         if self.model_params is None:
@@ -906,7 +912,7 @@ class BayesianClusterRandomizedTrial:
             dark_mode=dark_mode,
             show_legend=False,
         )
-        show(render(spec, backend))
+        return render(spec, backend)
 
     def plot_pdf(
         self,

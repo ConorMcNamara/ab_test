@@ -624,16 +624,12 @@ class TestBayesianMultiArm:
             BayesianContingencyTable("x", "c").add("A", 10, 100, 1, 1).analyze()
 
     @staticmethod
-    def test_plot_has_one_row_per_comparison(monkeypatch):
-        import plotly.graph_objects as go
-
-        figures = []
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+    def test_plot_has_one_row_per_comparison():
         table = _three_arms()
         np.random.seed(0)
         table.analyze(comparisons="all")
-        table.plot(is_individual=False)
-        assert [trace.y[0] for trace in figures[-1].data] == ["B vs A", "C vs A", "C vs B"]
+        fig = table.plot(is_individual=False)
+        assert [trace.y[0] for trace in fig.data] == ["B vs A", "C vs A", "C vs B"]
 
 
 class TestBayesianMultiArmCommonScale:

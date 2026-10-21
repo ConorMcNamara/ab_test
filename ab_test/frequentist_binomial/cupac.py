@@ -54,7 +54,7 @@ import pandas as pd
 import scipy.stats as ss
 
 from ab_test._display import format_percent, resolve_plot_color
-from ab_test._plotting import Figure, render, show, validate_backend
+from ab_test._plotting import Figure, render, validate_backend
 from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, VLine
 from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.frequentist_binomial.power_calculations import (
@@ -678,7 +678,7 @@ class CupacExperiment:
         *,
         dark_mode: bool = False,
         backend: str = "plotly",
-    ) -> None:
+    ) -> Figure:
         """Plot unadjusted vs adjusted estimates with confidence intervals.
 
         Parameters
@@ -691,6 +691,12 @@ class CupacExperiment:
             ``"plotly_dark"`` template).
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or altair.LayerChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``.
         """
         validate_backend(backend)
         if self._results is None:
@@ -729,7 +735,7 @@ class CupacExperiment:
             dark_mode=dark_mode,
             white_background=True,
         )
-        show(render(spec, backend))
+        return render(spec, backend)
 
 
 def cupac_adjusted_power(

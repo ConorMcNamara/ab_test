@@ -18,6 +18,7 @@ import polars as pl
 from tabulate import tabulate
 
 from ab_test._display import render_forest_plot
+from ab_test._plotting import Figure
 
 __all__ = [
     "BaseContingencyTable",
@@ -233,7 +234,7 @@ class BaseContingencyTable:
         lift: str | None = None,
         dark_mode: bool = False,
         backend: str = "plotly",
-    ) -> None:
+    ) -> Figure:
         """Plot the point estimates as well as confidence/credible intervals.
 
         Parameters
@@ -261,6 +262,13 @@ class BaseContingencyTable:
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
+        Returns
+        -------
+        plotly.graph_objects.Figure, altair.LayerChart or altair.HConcatChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``. Altair draws the two panels with
+            ``lift="both"`` as an ``HConcatChart``.
+
         Raises
         ------
         ValueError
@@ -287,7 +295,7 @@ class BaseContingencyTable:
         if lift == "both" and is_individual:
             raise ValueError("lift='both' compares the variants; use it with is_individual=False")
         incremental = self._both_lift_results() if lift == "both" else self.incremental_results
-        render_forest_plot(
+        return render_forest_plot(
             self.names,
             self.individual_results,
             incremental,

@@ -553,8 +553,7 @@ class TestClusterRandomizedTrial:
 
 class TestClusterRandomizedTrialPlot:
     @staticmethod
-    def test_plot_runs(monkeypatch):
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_runs():
         crt = _make_crt()
         crt.analyze()
         crt.plot()
@@ -873,11 +872,9 @@ class TestMultiGroup:
         assert "comparisons" not in crt.summary()
 
     @staticmethod
-    def test_plot_draws_every_group(monkeypatch):
-        figures = []
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+    def test_plot_draws_every_group():
         crt, _ = _three_group_crt()
-        crt.plot(color="ibm")
-        means = [trace for trace in figures[-1].data if trace.y[0].endswith("(mean)")]
+        fig = crt.plot(color="ibm")
+        means = [trace for trace in fig.data if trace.y[0].endswith("(mean)")]
         assert [trace.y[0] for trace in means] == ["A (mean)", "B (mean)", "C (mean)"]
         assert len({trace.marker.color for trace in means}) == 3

@@ -29,7 +29,6 @@ __all__ = [
     "Figure",
     "validate_backend",
     "render",
-    "show",
     "AxisFormat",
     "Band",
     "ForestPanel",
@@ -76,8 +75,3 @@ def render(spec: ForestSpec | LineSpec, backend: str = "plotly") -> Figure:
     if isinstance(spec, ForestSpec):
         return module.forest(spec)  # type: ignore[no-any-return]
     return module.line(spec)  # type: ignore[no-any-return]
-
-
-def show(figure: Figure) -> None:
-    """Display a figure from :func:`render` with its library's ``show()``."""
-    figure.show()  # type: ignore[no-untyped-call]

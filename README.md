@@ -134,6 +134,15 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 
 `"credible"` (equal-tailed), `"hdi"` (highest density interval)
 
+### Plots
+
+Every plot returns its figure without showing it: a Plotly figure by default, or an Altair chart with `backend="altair"`. In a notebook the figure displays as the last expression of a cell; in a script, call `.show()` on it (or save it with `.write_html()` for Plotly, `.save()` for Altair).
+
+```python
+fig = ct.plot(is_individual=False)
+fig.show()
+```
+
 ### Color palettes (`.plot`)
 
 `"ibm"`, `"wong"`, `"ito"`, `"tol"`, `"tol_bright"`, `"tol_vibrant"`, `"tol_muted"`, `"tol_light"`

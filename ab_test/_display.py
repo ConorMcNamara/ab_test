@@ -10,7 +10,7 @@ from typing import Any, overload
 
 from tabulate import tabulate
 
-from ab_test._plotting import render, show, validate_backend
+from ab_test._plotting import Figure, render, validate_backend
 from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, VLine
 
 __all__ = [
@@ -301,8 +301,8 @@ def render_forest_plot(
     dark_mode: bool = False,
     *,
     backend: str = "plotly",
-) -> None:
-    """Render a dot-and-whisker (forest) plot of point estimates and intervals.
+) -> Figure:
+    """Draw a dot-and-whisker (forest) plot of point estimates and intervals.
 
     Parameters
     ----------
@@ -340,6 +340,13 @@ def render_forest_plot(
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
+    Returns
+    -------
+    plotly.graph_objects.Figure, altair.LayerChart or altair.HConcatChart
+        The plot, not yet shown: it displays as the last expression of a notebook
+        cell, or call its ``.show()``. Altair draws the two panels for a list of
+        results as an ``HConcatChart``.
+
     Raises
     ------
     ValueError
@@ -364,7 +371,7 @@ def render_forest_plot(
         metric_name=metric_name,
         dark_mode=dark_mode,
     )
-    show(render(spec, backend))
+    return render(spec, backend)
 
 
 def forest_spec(

@@ -804,8 +804,7 @@ class TestClusterSeeding:
         assert powers == sorted(powers)
 
     @staticmethod
-    def test_plot_reproducible(monkeypatch):
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: None)
+    def test_plot_reproducible():
         kwargs = {**TestClusterSeeding.COMMON, **TestClusterSeeding.FAST, "cluster_counts": [10, 20, 30]}
         first = plot_cluster_bayes_power_curve(**kwargs, seed=2)
         second = plot_cluster_bayes_power_curve(**kwargs, seed=2)
@@ -925,14 +924,12 @@ class TestBayesianMultiGroup:
             _three_group_bayes().analyze(comparisons="pairs")
 
     @staticmethod
-    def test_plots_cover_every_group(monkeypatch):
-        figures = []
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+    def test_plots_cover_every_group():
         crt = _three_group_bayes()
         np.random.seed(0)
         crt.analyze(n_samples=20_000)
-        crt.plot(n_samples=2_000)
-        pooled = [trace.y[0] for trace in figures[-1].data if trace.y[0].endswith("(pooled)")]
+        fig = crt.plot(n_samples=2_000)
+        pooled = [trace.y[0] for trace in fig.data if trace.y[0].endswith("(pooled)")]
         assert pooled == ["A (pooled)", "B (pooled)", "C (pooled)"]
         fig = crt.plot_pdf(n_samples=2_000)
         assert len(fig.data) == 3

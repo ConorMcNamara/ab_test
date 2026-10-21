@@ -1,7 +1,6 @@
 """Tests for Bayesian difference-in-differences analysis."""
 
 import numpy as np
-import plotly.graph_objects as go
 import pytest
 
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
@@ -310,24 +309,21 @@ class TestBayesianDiffInDiffRevenue:
 
 class TestBayesianDiffInDiffPlot:
     @staticmethod
-    def test_plot_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_runs() -> None:
         t1 = _make_table("A", 100, 1000, 130, 1000)
         t2 = _make_table("B", 120, 1000, 125, 1000)
         dd = BayesianDiffInDiff(t1, t2)
         dd.plot(n_samples=50_000)
 
     @staticmethod
-    def test_plot_relative(monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_relative() -> None:
         t1 = _make_table("A", 100, 1000, 130, 1000)
         t2 = _make_table("B", 120, 1000, 125, 1000)
         dd = BayesianDiffInDiff(t1, t2)
         dd.plot(lift="relative", n_samples=50_000)
 
     @staticmethod
-    def test_plot_incremental(monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(go.Figure, "show", lambda self: None)
+    def test_plot_incremental() -> None:
         t1 = _make_table("A", 100, 1000, 130, 1000, spend=500.0, msrp=50.0)
         t2 = _make_table("B", 120, 1000, 125, 1000, spend=500.0, msrp=50.0)
         dd = BayesianDiffInDiff(t1, t2)

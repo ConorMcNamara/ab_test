@@ -32,7 +32,7 @@ from ab_test._display import (
     resolve_plot_color,
     tabulate_summary,
 )
-from ab_test._plotting import Figure, render, show, validate_backend
+from ab_test._plotting import Figure, render, validate_backend
 from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec
 from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.corrections import adjust_pvalues
@@ -1010,7 +1010,7 @@ class ClusterRandomizedTrial:
         *,
         dark_mode: bool = False,
         backend: str = "plotly",
-    ) -> None:
+    ) -> Figure:
         """Forest plot of per-cluster proportions and arm estimates.
 
         Each cluster is a dot and each group's mean a diamond, for any number
@@ -1032,6 +1032,12 @@ class ClusterRandomizedTrial:
             ``"plotly_dark"`` template).
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or altair.LayerChart
+            The plot, not yet shown: it displays as the last expression of a notebook
+            cell, or call its ``.show()``.
         """
         validate_backend(backend)
         lift = lift.casefold()
@@ -1071,7 +1077,7 @@ class ClusterRandomizedTrial:
             show_legend=False,
             white_background=True,
         )
-        show(render(spec, backend))
+        return render(spec, backend)
 
 
 # ---------------------------------------------------------------------------

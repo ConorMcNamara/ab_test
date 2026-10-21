@@ -49,13 +49,6 @@ ABSOLUTE = {"lift": 0.03, "ci_lower": 0.002, "ci_upper": 0.058, "lift_type": "ab
 RELATIVE = {"lift": 0.3, "ci_lower": 0.02, "ci_upper": 0.66, "lift_type": "relative"}
 
 
-@pytest.fixture
-def shown(monkeypatch):
-    charts = []
-    monkeypatch.setattr(alt.TopLevelMixin, "show", lambda self: charts.append(self))
-    return charts
-
-
 def _panels(chart_dict):
     """Each panel of a chart, whether or not the panels are concatenated."""
     return chart_dict.get("hconcat", [chart_dict])
@@ -164,22 +157,30 @@ class TestForestAltair:
 
 class TestTablePlotAltair:
     @staticmethod
-    def test_contingency_table_shows_altair_chart(shown):
+    def test_contingency_table_returns_altair_chart():
         table = ContingencyTable("Checkout", "conversion").add("Control", 100, 1000).add("Treatment", 130, 1000)
         table.analyze()
-        table.plot(is_individual=False, lift="both", backend="altair", dark_mode=True)
-        (chart,) = shown
+        chart = table.plot(is_individual=False, lift="both", backend="altair", dark_mode=True)
         assert isinstance(chart, alt.HConcatChart)
         assert chart.to_dict()["usermeta"]["embedOptions"]["theme"] == "dark"
 
     @staticmethod
-    def test_plotly_stays_the_default(monkeypatch):
-        figures = []
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+    def test_plotly_stays_the_default():
         table = ContingencyTable("Checkout", "conversion").add("Control", 100, 1000).add("Treatment", 130, 1000)
         table.analyze_individually()
-        table.plot()
-        assert isinstance(figures[0], go.Figure)
+        assert isinstance(table.plot(), go.Figure)
+
+    @staticmethod
+    @pytest.mark.parametrize("backend", ["plotly", "altair"])
+    def test_plot_returns_without_showing(monkeypatch, backend):
+        def fail(*args, **kwargs):
+            raise AssertionError("plot() showed its figure")
+
+        monkeypatch.setattr(go.Figure, "show", fail)
+        monkeypatch.setattr(alt.TopLevelMixin, "show", fail)
+        table = ContingencyTable("Checkout", "conversion").add("Control", 100, 1000).add("Treatment", 130, 1000)
+        table.analyze_individually()
+        assert table.plot(backend=backend) is not None
 
 
 def _strata(cls, *prior):
@@ -236,22 +237,18 @@ class TestEffectPanel:
 
 class TestSegmentPlots:
     @pytest.mark.parametrize("name", SEGMENT_PLOTS)
-    def test_plotly_hides_legend_and_marks_zero(self, monkeypatch, name):
-        figures = []
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+    def test_plotly_hides_legend_and_marks_zero(self, name):
         make, kwargs, rows = SEGMENT_PLOTS[name]
-        make().plot(**kwargs)
-        (fig,) = figures
+        fig = make().plot(**kwargs)
         assert [trace.y[0] for trace in fig.data] == rows
         assert fig.layout.showlegend is False
         assert fig.layout.yaxis.autorange == "reversed"
         assert [shape.x0 for shape in fig.layout.shapes] == [0]
 
     @pytest.mark.parametrize("name", SEGMENT_PLOTS)
-    def test_altair_single_lift(self, shown, name):
+    def test_altair_single_lift(self, name):
         make, kwargs, rows = SEGMENT_PLOTS[name]
-        make().plot(lift="relative", backend="altair", **kwargs)
-        chart = shown[-1].to_dict()
+        chart = make().plot(lift="relative", backend="altair", **kwargs).to_dict()
         ((whisker, dot, zero),) = _layers(chart)
         assert [row["label"] for row in _rows(chart, _panels(chart)[0])] == rows
         assert whisker["encoding"]["y"]["sort"] == rows
@@ -262,29 +259,26 @@ class TestSegmentPlots:
         assert chart["title"].endswith("(Relative Lift)")
 
     @pytest.mark.parametrize("name", SEGMENT_PLOTS)
-    def test_altair_both_lifts(self, shown, name):
+    def test_altair_both_lifts(self, name):
         make, kwargs, _ = SEGMENT_PLOTS[name]
-        make().plot(lift="both", backend="altair", dark_mode=True, **kwargs)
-        chart = shown[-1].to_dict()
+        chart = make().plot(lift="both", backend="altair", dark_mode=True, **kwargs).to_dict()
         panels = _layers(chart)
         assert [panel[0]["encoding"]["x"]["axis"]["title"] for panel in panels] == ["Risk Difference", "Relative Lift"]
         assert chart["title"].endswith("(Risk Difference and Relative Lift)")
         assert chart["usermeta"]["embedOptions"]["theme"] == "dark"
 
     @staticmethod
-    def test_pooled_row_is_larger_diamond(shown):
-        _strata(StratifiedContingencyTable).plot(backend="altair")
-        chart = shown[-1].to_dict()
+    def test_pooled_row_is_larger_diamond():
+        chart = _strata(StratifiedContingencyTable).plot(backend="altair").to_dict()
         data = _rows(chart, _panels(chart)[0])
         assert [(row["shape"], row["area"]) for row in data] == [("circle", 100), ("circle", 100), ("diamond", 196)]
 
     @pytest.mark.parametrize(("lift", "axis_format"), [("revenue", "$,~f"), ("incremental", ",~f"), ("roas", ".3~g")])
-    def test_typeless_formats_stay_out_of_exponent_notation(self, shown, lift, axis_format):
+    def test_typeless_formats_stay_out_of_exponent_notation(self, lift, axis_format):
         table = StratifiedContingencyTable("Checkout", "conversion", spend=5000.0, msrp=40.0)
         for stratum, (control, treatment) in {"desktop": (120, 140), "mobile": (80, 95)}.items():
             table.add("Control", control, 1000, stratum=stratum).add("Treatment", treatment, 1000, stratum=stratum)
-        table.plot(lift=lift, backend="altair")
-        ((whisker, _, _),) = _layers(shown[-1].to_dict())
+        ((whisker, _, _),) = _layers(table.plot(lift=lift, backend="altair").to_dict())
         assert whisker["encoding"]["x"]["axis"]["format"] == axis_format
 
     @staticmethod
@@ -442,8 +436,8 @@ def _trend(**kw):
     )
 
 
-# Plots that return their figure, each with cheap arguments.
-RETURNED = {
+# The other plots, each with cheap arguments.
+OTHER_PLOTS = {
     "pdf": lambda **kw: (
         BayesianContingencyTable("x", "y").add("A", 100, 1000, 1, 1).add("B", 130, 1000, 1, 1).plot_pdf(**kw)
     ),
@@ -451,30 +445,16 @@ RETURNED = {
     "gst_boundaries": lambda **kw: GroupSequentialDesign(n_analyses=3, sided="two").plot_boundaries(**kw),
     "msprt": lambda **kw: plot_msprt_over_time(_msprt_tables(), ["Day 1", "Day 2"], **kw),
     "time_trend": lambda **kw: _trend(**kw)["figure"],
-}
-# Plots that show their figure instead.
-SHOWN = {
     "cluster_plot": lambda **kw: _clusters(ClusterRandomizedTrial).plot(**kw),
     "bayes_cluster_plot": lambda **kw: _bayes_clusters().plot(n_samples=2_000, **kw),
     "cupac_plot": lambda **kw: _cupac().plot(**kw),
 }
 
 
-@pytest.fixture
-def draw(shown):
-    def _draw(name, **kw):
-        if name in RETURNED:
-            return RETURNED[name](**kw)
-        SHOWN[name](**kw)
-        return shown[-1]
-
-    return _draw
-
-
 class TestOtherPlotsAltair:
-    @pytest.mark.parametrize("name", [*RETURNED, *SHOWN])
-    def test_altair_chart_in_dark_mode(self, draw, name):
-        chart = draw(name, backend="altair", dark_mode=True)
+    @pytest.mark.parametrize("name", OTHER_PLOTS)
+    def test_altair_chart_in_dark_mode(self, name):
+        chart = OTHER_PLOTS[name](backend="altair", dark_mode=True)
         assert isinstance(chart, alt.TopLevelMixin)
         assert chart.to_dict()["usermeta"]["embedOptions"]["theme"] == "dark"
 
@@ -484,30 +464,30 @@ class TestOtherPlotsAltair:
         assert isinstance(chart, alt.LayerChart)
 
     @staticmethod
-    def test_pdf_fills_densities_and_draws_hdi_bars(draw):
-        spec = draw("pdf", backend="altair").to_dict()
+    def test_pdf_fills_densities_and_draws_hdi_bars():
+        spec = OTHER_PLOTS["pdf"](backend="altair").to_dict()
         marks = [layer["mark"]["type"] for layer in spec["layer"]]
         assert marks[0] == "area"
         bars = next(layer for layer in spec["layer"] if "x2" in layer.get("encoding", {}))
         assert len(_rows(spec, bars)) == 2
-        fig = draw("pdf")
+        fig = OTHER_PLOTS["pdf"]()
         assert [trace.fill for trace in fig.data] == ["tozeroy", "tozeroy"]
         assert len(fig.layout.shapes) == 2
 
     @staticmethod
-    def test_msprt_band_and_categorical_checkpoints(draw):
-        spec = draw("msprt", backend="altair").to_dict()
+    def test_msprt_band_and_categorical_checkpoints():
+        spec = OTHER_PLOTS["msprt"](backend="altair").to_dict()
         band = spec["layer"][0]
         assert band["mark"] == {"type": "area", "opacity": 0.2}
         assert [row["x"] for row in _rows(spec, band)] == ["Day 1", "Day 2"]
         assert spec["layer"][1]["encoding"]["x"]["sort"] == ["Day 1", "Day 2"]
         # Plotly keeps its three traces: the band's two edges and the estimate.
-        fig = draw("msprt")
+        fig = OTHER_PLOTS["msprt"]()
         assert [trace.fill for trace in fig.data] == [None, "tonexty", None]
         assert fig.data[1].fillcolor == "rgba(99, 110, 250, 0.2)"
 
     @staticmethod
-    def test_time_trend_error_bars(draw):
+    def test_time_trend_error_bars():
         result = _trend(backend="altair")
         spec = result["figure"].to_dict()
         errors = next(layer for layer in spec["layer"] if layer["mark"] == {"type": "rule", "strokeWidth": 1.5})
@@ -515,22 +495,19 @@ class TestOtherPlotsAltair:
         assert result["slope"] == _trend()["slope"]
 
     @staticmethod
-    def test_gst_boundaries_markers(draw):
-        fig = draw("gst_boundaries")
+    def test_gst_boundaries_markers():
+        fig = OTHER_PLOTS["gst_boundaries"]()
         assert [trace.mode for trace in fig.data] == ["lines+markers", "lines+markers"]
         assert [trace.marker.symbol for trace in fig.data] == ["diamond", "diamond"]
         assert [trace.line.dash for trace in fig.data] == [None, "dash"]
         assert fig.layout.xaxis.dtick == 1
-        spec = draw("gst_boundaries", backend="altair").to_dict()
+        spec = OTHER_PLOTS["gst_boundaries"](backend="altair").to_dict()
         assert spec["layer"][0]["encoding"]["x"]["axis"]["tickMinStep"] == 1
 
     @pytest.mark.parametrize("name", ["cluster_plot", "bayes_cluster_plot"])
-    def test_clusters_are_dots_without_whiskers(self, draw, monkeypatch, name):
-        figures = []
-        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
-        SHOWN[name]()
-        whiskers = [trace.error_x.array for trace in figures[-1].data]
+    def test_clusters_are_dots_without_whiskers(self, name):
+        whiskers = [trace.error_x.array for trace in OTHER_PLOTS[name]().data]
         assert whiskers.count(None) >= 6  # one dot per cluster
-        spec = draw(name, backend="altair").to_dict()
+        spec = OTHER_PLOTS[name](backend="altair").to_dict()
         ((whisker, _),) = [panel[:2] for panel in _layers(spec)]
         assert whisker["transform"] == [{"filter": "isValid(datum.lower)"}]
