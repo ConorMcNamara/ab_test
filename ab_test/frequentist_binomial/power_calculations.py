@@ -5,11 +5,11 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-import plotly.graph_objects as go
 import scipy.stats as ss
 from scipy.optimize import brentq
 
-from ab_test._display import apply_dark_mode
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.spec import AxisFormat, HLine, LineSeries, LineSpec
 from ab_test._lift import _SCALED_LIFTS, from_absolute, to_absolute
 from ab_test.frequentist_binomial.utils import simple_hypothesis_from_composite
 
@@ -459,7 +459,8 @@ def plot_power_curve(
     *,
     comparisons: str = "control",
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot statistical power as a function of total sample size.
 
     Parameters
@@ -493,14 +494,17 @@ def plot_power_curve(
         ``analyze()`` will make (see :func:`abtest_power`).
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        ``"plotly_dark"`` template, or Vega's ``"dark"`` theme).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure with total sample size on the x-axis and
-        power on the y-axis.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, with total sample size
+        on the x-axis and power on the y-axis.
     """
+    validate_backend(backend)
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
@@ -536,36 +540,17 @@ def plot_power_curve(
         for ss in sample_sizes
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=powers,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name="Power",
-        )
-    )
-    fig.add_hline(
-        y=0.8,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="80% power",
-        annotation_position="top left",
-    )
-
-    fig.update_layout(
+    spec = LineSpec(
+        series=[LineSeries("Power", [int(n) for n in sample_sizes], [float(p) for p in powers], color="#636EFA")],
         title="Power Curve",
-        xaxis_title="Total sample size",
-        yaxis_title="Power",
-        yaxis_range=[0, 1.05],
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        x_title="Total sample size",
+        y_title="Power",
+        y_format=AxisFormat(tickformat=",.0%"),
+        y_range=(0.0, 1.05),
+        hlines=[HLine(0.8, "80% power")],
+        dark_mode=dark_mode,
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)
 
 
 def plot_sensitivity_curve(
@@ -583,7 +568,8 @@ def plot_sensitivity_curve(
     *,
     comparisons: str = "control",
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot minimum detectable lift as a function of total sample size.
 
     Parameters
@@ -617,14 +603,17 @@ def plot_sensitivity_curve(
         ``analyze()`` will make (see :func:`abtest_power`).
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        ``"plotly_dark"`` template, or Vega's ``"dark"`` theme).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure with total sample size on the x-axis and
-        minimum detectable lift on the y-axis.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, with total sample size
+        on the x-axis and minimum detectable lift on the y-axis.
     """
+    validate_backend(backend)
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
@@ -666,17 +655,6 @@ def plot_sensitivity_curve(
         for ss in sample_sizes
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=mdls,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name="MDL",
-        )
-    )
-
     _lift_labels = {
         "relative": "Minimum detectable relative lift",
         "absolute": "Minimum detectable absolute lift",
@@ -687,15 +665,12 @@ def plot_sensitivity_curve(
         "cpa": "Maximum detectable CPA",
     }
     y_label = _lift_labels.get(lift, f"Minimum detectable {lift} lift")
-    y_format = ",.0%" if lift in ("relative", "absolute") else ",."
-    fig.update_layout(
+    spec = LineSpec(
+        series=[LineSeries("MDL", [int(n) for n in sample_sizes], [float(m) for m in mdls], color="#636EFA")],
         title="Sensitivity Curve",
-        xaxis_title="Total sample size",
-        yaxis_title=y_label,
-        yaxis_tickformat=y_format,
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        x_title="Total sample size",
+        y_title=y_label,
+        y_format=AxisFormat(tickformat=",.0%" if lift in ("relative", "absolute") else None),
+        dark_mode=dark_mode,
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)
