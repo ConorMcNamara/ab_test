@@ -182,6 +182,8 @@ _LOGIT_MU_BOUNDS = (-12.0, 12.0)
 _LOG_KAPPA_BOUNDS = (math.log(1e-2), math.log(1e7))
 _GRID_TRIM = 25.0  # drop in log density that bounds the refined grid
 _GRID_PASSES = 3
+# Grid cells times clusters evaluated at once: bounds the memory of the hierarchical posterior.
+_GRID_CHUNK = 2_000_000
 
 
 def _log_hyperprior(logit_mu: np.ndarray[Any, Any], log_kappa: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
@@ -210,8 +212,16 @@ def _hierarchical_mu_posterior(
         ``(logit_mu_grid, mu_weights, log_kappa_grid, kappa_weights)``,
         where the weights are the marginal posterior masses on each grid.
     """
-    s = np.asarray(successes, dtype=float)
-    n = np.asarray(trials, dtype=float)
+    # Clusters with the same counts have the same likelihood, so evaluate each distinct
+    # (successes, trials) pair once, weighted by how often it occurs, a chunk at a time.
+    pairs, counts = np.unique(
+        np.column_stack([np.asarray(successes, dtype=float), np.asarray(trials, dtype=float)]),
+        axis=0,
+        return_counts=True,
+    )
+    s, n = pairs[:, 0], pairs[:, 1]
+    n_clusters = int(counts.sum())
+    chunk = max(1, _GRID_CHUNK // (n_mu * n_kappa))
     (lm_lo, lm_hi), (lk_lo, lk_hi) = _LOGIT_MU_BOUNDS, _LOG_KAPPA_BOUNDS
     for _ in range(_GRID_PASSES):
         lm = np.linspace(lm_lo, lm_hi, n_mu)
@@ -219,7 +229,10 @@ def _hierarchical_mu_posterior(
         mu = expit(lm)[None, :, None]
         kappa = np.exp(lk)[:, None, None]
         a, b = mu * kappa, (1 - mu) * kappa
-        log_post = np.sum(betaln(a + s, b + n - s), axis=-1) - len(s) * betaln(a, b)[..., 0]
+        log_post = -n_clusters * betaln(a, b)[..., 0]
+        for i in range(0, len(s), chunk):
+            sl = slice(i, i + chunk)
+            log_post += betaln(a + s[sl], b + n[sl] - s[sl]) @ counts[sl]
         log_post += _log_hyperprior(lm[None, :], lk[:, None])
         keep = log_post >= log_post.max() - _GRID_TRIM
         (lm_lo, lm_hi), (lk_lo, lk_hi) = _refine_bounds(keep, lm, 0), _refine_bounds(keep, lk, 1)
