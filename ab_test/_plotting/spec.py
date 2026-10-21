@@ -20,7 +20,23 @@ __all__ = [
     "Segment",
     "HLine",
     "LineSpec",
+    "label_colors",
 ]
+
+
+def label_colors(labels: Sequence[str], colors: Sequence[str | None], palette: Sequence[str]) -> dict[str, str]:
+    """Give each distinct label one color, so both backends color it the same.
+
+    A label takes the first color given for it anywhere, so an uncolored
+    occurrence doesn't hide a later explicit color. A label never given one
+    takes the palette color at its position among the distinct labels.
+    """
+    explicit: dict[str, str] = {}
+    for label, color in zip(labels, colors, strict=True):
+        if color is not None:
+            explicit.setdefault(label, color)
+    distinct = dict.fromkeys(labels)
+    return {label: explicit.get(label, palette[i % len(palette)]) for i, label in enumerate(distinct)}
 
 
 @dataclass(frozen=True)

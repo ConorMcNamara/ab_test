@@ -49,7 +49,8 @@ Usage
 
    test = BayesianDiffInDiff(men, women)
    print(test.analyze(lift="absolute", confidence_level=0.95))
-   test.plot(lift="absolute", confidence_level=0.95)
+   fig = test.plot(lift="absolute", confidence_level=0.95)
+   fig.show()
 
 Segments must be **independent** — the same user should not appear in multiple
 segment tables.  If your segments overlap, the posterior estimates will be
