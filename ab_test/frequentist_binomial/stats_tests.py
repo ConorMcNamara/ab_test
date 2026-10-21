@@ -40,6 +40,21 @@ def _contingency_table(
     return np.array([successes, non_successes])
 
 
+def _chi2_df1_sf(statistic: float) -> float:
+    """P-value of a chi-squared statistic with one degree of freedom.
+
+    P(Z**2 >= x) = erfc(sqrt(x / 2)) for standard normal Z. On a single number
+    this is hundreds of times faster than ``scipy.stats.chi2.sf``, which
+    matters when a confidence interval inverts a test dozens of times.
+    """
+    return math.erfc(math.sqrt(statistic / 2))
+
+
+def _two_sided_normal_p(z: float) -> float:
+    """Two-sided p-value of a standard normal statistic, P(|Z| >= |z|)."""
+    return math.erfc(abs(z) / math.sqrt(2))
+
+
 def _test_result(statistic: Any, pval: Any, crit: float | None) -> float | bool:
     """Return the p-value, or a significance boolean when a critical value is given."""
     if crit is None:
@@ -97,7 +112,7 @@ def _power_divergence_test(
             observed = np.asarray(contingency_table, dtype=float)
             expected = ss.contingency.expected_freq(observed)
             statistic = float(4 * np.sum((np.sqrt(observed) - np.sqrt(expected)) ** 2))
-            return _test_result(statistic, ss.chi2.sf(statistic, df=1), crit)
+            return _test_result(statistic, _chi2_df1_sf(statistic), crit)
     result = ss.chi2_contingency(contingency_table, correction=False, lambda_=lambda_)  # type: ignore[no-untyped-call, attr-defined, var-annotated]
     return _test_result(result.statistic, result.pvalue, crit)
 
@@ -240,12 +255,7 @@ def score_test(
     )
 
     if crit is None:
-        # Note: this line takes 80% of the time for the score test, including the
-        # MLE, which is really fast! So there's no real point in optimizing
-        # anything else here. On the other hand, if we can optimize this line, then
-        # great!
-        pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
-        return float(pval)
+        return _chi2_df1_sf(ts)
     return ts >= crit
 
 
@@ -304,8 +314,7 @@ def likelihood_ratio_test(
 
     ts = max(2 * (log_likelihood(p1) - log_likelihood(p0)), 0.0)
     if crit is None:
-        pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
-        return float(pval)
+        return _chi2_df1_sf(ts)
     return ts >= crit
 
 
@@ -376,7 +385,7 @@ def z_test(
         return 1.0 if crit is None else False
     z = (p1[1] - p1[0] - null_lift) / math.sqrt(sigma2)
     if crit is None:
-        return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]
+        return _two_sided_normal_p(z)
     return bool(abs(z) >= crit)
 
 
@@ -453,7 +462,7 @@ def wald_test(
         return significant
     z = diff / math.sqrt(sigma2)
     if crit is None:
-        return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]
+        return _two_sided_normal_p(z)
     return bool(abs(z) >= crit)
 
 

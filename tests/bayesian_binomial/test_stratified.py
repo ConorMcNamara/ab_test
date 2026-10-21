@@ -360,6 +360,36 @@ class TestBayesianStratifiedAnalyzeByStratum:
         assert "Credible Interval" in result
 
 
+class TestBayesianStratifiedPooling:
+    @staticmethod
+    @pytest.mark.parametrize("lift", ["absolute", "relative"])
+    def test_weights_match_sample_variances(lift):
+        # Pooling weights come from exact posterior variances, so strata can be pooled as
+        # they are drawn; they must agree with the variances of the draws themselves.
+        st = _make_two_strata()
+        successes, trials, alphas, betas, _ = st._build_arrays(two_groups=True)
+        weights = st._pooling_weights(successes, trials, alphas, betas, lift)
+        np.random.seed(0)
+        draws = list(st._iter_stratum_samples(successes, trials, alphas, betas, lift, 400_000))
+        sample_weights = 1 / np.array([np.var(d) for d in draws])
+        np.testing.assert_allclose(weights, sample_weights / sample_weights.sum(), rtol=5e-3)
+
+    @staticmethod
+    def test_many_strata_are_drawn_one_at_a_time():
+        # Holding every stratum's draws took 2.6 GB at 1,000 strata; now only one is alive at a time.
+        st = BayesianStratifiedContingencyTable("Test", "converted")
+        for k in range(50):
+            st.add("Control", successes=100, trials=1000, alpha=1, beta=1, stratum=f"s{k}")
+            st.add("Treatment", successes=120, trials=1000, alpha=1, beta=1, stratum=f"s{k}")
+        successes, trials, alphas, betas, _ = st._build_arrays(two_groups=True)
+        draws = st._iter_stratum_samples(successes, trials, alphas, betas, "absolute", 10)
+        assert iter(draws) is draws  # a generator, not a list of 50 arrays
+        np.random.seed(0)
+        st.analyze(lift="absolute", n_samples=50_000)
+        # Fifty identical strata pool to the shared effect.
+        assert st.pooled_results["lift"] == pytest.approx(0.02, abs=0.001)
+
+
 class TestBayesianStratifiedHeterogeneity:
     @staticmethod
     def test_homogeneous_strata_small_tau():

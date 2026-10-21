@@ -27,6 +27,8 @@ def credible_interval(
     is_sample: bool = True,
     n_samples: int = 100_000,
     method: Literal["credible", "hdi"] = "credible",
+    *,
+    samples: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]] | None = None,
 ) -> tuple[float, float]:
     """Compute the credible interval for the lift between two binomial variants.
 
@@ -62,6 +64,9 @@ def credible_interval(
         percentiles; ``"hdi"`` uses the Highest Density Interval. Note that if_sample = False
         creates a symmetric interval, thereby both ``"credible"`` and ``"hdi"``
         return the same interval. By default, ``"credible"``.
+    samples : tuple of np.ndarray, optional
+        Posterior draws for the control and treatment to use instead of
+        drawing ``n_samples`` new ones when ``is_sample=True``.
 
     Returns
     -------
@@ -77,8 +82,11 @@ def credible_interval(
     lower_bound = (1 - confidence_level) / 2
     upper_bound = 1 - lower_bound
     if is_sample:
-        theta_1 = sample_beta(successes[0], trials[0], prior_alphas[0], prior_betas[0], n_samples)
-        theta_2 = sample_beta(successes[1], trials[1], prior_alphas[1], prior_betas[1], n_samples)
+        if samples is None:
+            theta_1 = sample_beta(successes[0], trials[0], prior_alphas[0], prior_betas[0], n_samples)
+            theta_2 = sample_beta(successes[1], trials[1], prior_alphas[1], prior_betas[1], n_samples)
+        else:
+            theta_1, theta_2 = samples
         abs_lift = theta_2 - theta_1
         lift_samples = abs_lift / np.where(theta_1 == 0, 1e-09, theta_1) if lift == "relative" else abs_lift
         if method == "credible":

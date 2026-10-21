@@ -222,8 +222,10 @@ def mle_under_null(
         p_hat = (successes[0] + successes[1]) / (trials[0] + trials[1])
         p = [p_hat, p_hat]
     elif lift == "relative":
-        S = np.sum(successes)
-        T = np.sum(trials)
+        # Confidence intervals call this dozens of times, and np.sum on two numbers is slow. NumPy
+        # scalars keep NumPy's division semantics (inf with a warning, not ZeroDivisionError).
+        S = np.float64(successes[0] + successes[1])
+        T = np.float64(trials[0] + trials[1])
         neg_b = T + S + null_lift * (S + trials[1] - successes[1])
         a = T * (1 + null_lift)
         c = S

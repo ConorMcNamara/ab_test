@@ -297,6 +297,20 @@ class TestFisherTest:
 
 
 @pytest.mark.slow
+class TestFastPValues:
+    @staticmethod
+    def test_chi2_and_normal_tails_match_scipy():
+        # The score, likelihood-ratio, z and Wald tests use erfc instead of scipy's distributions,
+        # which made inverting them for confidence intervals several times faster.
+        from ab_test.frequentist_binomial.stats_tests import _chi2_df1_sf, _two_sided_normal_p
+
+        for x in [0.0, 1e-12, 1e-6, 0.5, 3.84, 10.0, 100.0, 700.0]:
+            assert _chi2_df1_sf(x) == pytest.approx(ss.chi2.sf(x, df=1), rel=1e-12, abs=1e-300)
+            z = math.sqrt(x)
+            assert _two_sided_normal_p(z) == pytest.approx(2 * ss.norm.cdf(-z), rel=1e-12, abs=1e-300)
+            assert _two_sided_normal_p(-z) == _two_sided_normal_p(z)
+
+
 class TestBarnardTest:
     # Note that this test takes a while to go through all the permutations
     @staticmethod

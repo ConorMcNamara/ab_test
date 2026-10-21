@@ -182,6 +182,7 @@ def calculate_metrics(
     msrp: float | None = None,
     *,
     loss_in_lift_units: bool = False,
+    samples: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]] | None = None,
 ) -> dict[str, float]:
     """Compute a suite of Bayesian metrics comparing variant B against variant A.
 
@@ -219,6 +220,10 @@ def calculate_metrics(
         for incremental). If ``False`` (the default), it is E[max(A - B, 0)]
         as a difference in rates, whatever ``lift`` is. CPA is not monotone
         in the lift, so for ``"cpa"`` the loss is always a rate difference.
+    samples : tuple of np.ndarray, optional
+        Posterior draws ``(sample_a, sample_b)`` to use instead of drawing
+        ``n_samples`` new ones, e.g. to compare many variants from one draw
+        per variant.
 
     Returns
     -------
@@ -231,8 +236,11 @@ def calculate_metrics(
         - ``f"Probability {lift} exceeds {high_threshold}"`` : float
         - ``f"Probability {lift} is below {low_threshold}"`` : float
     """
-    sample_a = sample_beta(successes[0], trials[0], alphas[0], betas[0], n_samples)
-    sample_b = sample_beta(successes[1], trials[1], alphas[1], betas[1], n_samples)
+    if samples is None:
+        sample_a = sample_beta(successes[0], trials[0], alphas[0], betas[0], n_samples)
+        sample_b = sample_beta(successes[1], trials[1], alphas[1], betas[1], n_samples)
+    else:
+        sample_a, sample_b = samples
     prob_b_greater_a = float(np.mean(sample_b > sample_a))
     if loss_in_lift_units and lift != "cpa":
         lift_samples = compute_sample_lift(
