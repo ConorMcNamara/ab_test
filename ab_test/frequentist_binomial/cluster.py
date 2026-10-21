@@ -22,19 +22,18 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import plotly.graph_objects as go
 import scipy.stats as ss
 from scipy.optimize import brentq
 from tabulate import tabulate
 
 from ab_test._display import (
-    apply_dark_mode,
     convert_to_tabulate_str,
     format_percent,
     resolve_plot_color,
     tabulate_summary,
 )
-from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting import Figure, render, show, validate_backend
+from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec
 from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.corrections import adjust_pvalues
 from ab_test.frequentist_binomial.randomization_inference import cluster_randomization_test
@@ -1010,6 +1009,7 @@ class ClusterRandomizedTrial:
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
+        backend: str = "plotly",
     ) -> None:
         """Forest plot of per-cluster proportions and arm estimates.
 
@@ -1030,14 +1030,16 @@ class ClusterRandomizedTrial:
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
         """
+        validate_backend(backend)
         lift = lift.casefold()
         if lift not in _VALID_LIFTS:
             raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
 
         groups = self._build_groups()
         plot_color = resolve_plot_color(color)
-        fig = go.Figure()
 
         def group_color(index: int, name: str) -> Any:
             if isinstance(plot_color, list):
@@ -1046,49 +1048,30 @@ class ClusterRandomizedTrial:
                 return plot_color.get(name)
             return None
 
-        # One dot per cluster, grouped by arm in the order the groups were added.
+        # One dot per cluster, grouped by arm in the order the groups were added, then each arm's mean.
+        points: list[ForestPoint] = []
         for index, (grp, s, m) in enumerate(groups):
             labels = [name for name, info in self._clusters.items() if info["group"] == grp]
             for label, prop in zip(labels, s / m):
-                c = group_color(index, grp)
-                marker_kw: dict[str, Any] = {"symbol": "circle", "size": 8}
-                if c is not None:
-                    marker_kw["color"] = c
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=[float(prop)],
-                        y=[f"{label} ({grp})"],
-                        marker=marker_kw,
-                        name=label,
-                        showlegend=False,
+                points.append(
+                    ForestPoint(
+                        f"{label} ({grp})", float(prop), None, None, group_color(index, grp), shape="circle", size=8
                     )
                 )
-
         for index, (grp_name, s, m) in enumerate(groups):
-            c_arm = group_color(index, grp_name)
-            marker_kw_arm: dict[str, Any] = {"symbol": "diamond", "size": 14}
-            if c_arm is not None:
-                marker_kw_arm["color"] = c_arm
+            mean = float(np.mean(s / m))
+            points.append(ForestPoint(f"{grp_name} (mean)", mean, None, None, group_color(index, grp_name), size=14))
 
-            fig.add_trace(
-                go.Scatter(
-                    x=[float(np.mean(s / m))],
-                    y=[f"{grp_name} (mean)"],
-                    marker=marker_kw_arm,
-                    name=f"{grp_name} mean",
-                )
-            )
-
-        fig.update_layout(
+        spec = ForestSpec(
+            [ForestPanel(points, x_title="Success Rate", x_format=AxisFormat(tickformat=",.2%"))],
             title=f"Cluster Proportions — {self.experiment_name}",
-            xaxis_title="Success Rate",
-            xaxis_tickformat=",.2%",
-            template="plotly_white",
-            yaxis={"autorange": "reversed" if reverse_plot else True},
+            y_title="",
+            reverse=reverse_plot,
+            dark_mode=dark_mode,
+            show_legend=False,
+            white_background=True,
         )
-        apply_dark_mode(fig, dark_mode)
-        fig.show()
+        show(render(spec, backend))
 
 
 # ---------------------------------------------------------------------------

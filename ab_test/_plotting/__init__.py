@@ -7,7 +7,18 @@ Plotly is a required dependency and the default backend. Altair is optional
 import importlib.util
 from typing import TYPE_CHECKING, Any, TypeAlias
 
-from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, HLine, LineSeries, LineSpec, VLine
+from ab_test._plotting.spec import (
+    AxisFormat,
+    Band,
+    ForestPanel,
+    ForestPoint,
+    ForestSpec,
+    HLine,
+    LineSeries,
+    LineSpec,
+    Segment,
+    VLine,
+)
 
 if TYPE_CHECKING:
     import altair as alt
@@ -20,12 +31,14 @@ __all__ = [
     "render",
     "show",
     "AxisFormat",
+    "Band",
     "ForestPanel",
     "ForestPoint",
     "ForestSpec",
     "HLine",
     "LineSeries",
     "LineSpec",
+    "Segment",
     "VLine",
 ]
 

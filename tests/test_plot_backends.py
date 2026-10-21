@@ -5,19 +5,36 @@ import importlib.util
 import plotly.graph_objects as go
 import pytest
 
+from tests.test_dark_mode import _clusters, _cupac, _msprt_tables
+
 from ab_test._display import effect_panel, forest_spec, render_forest_plot
 from ab_test._plotting import render, validate_backend
 from ab_test._plotting.curves import curve, sensitivity_curve_spec
-from ab_test.bayesian_binomial.cluster import plot_cluster_bayes_power_curve, plot_cluster_bayes_sensitivity_curve
+from ab_test.bayesian_binomial.cluster import (
+    BayesianClusterRandomizedTrial,
+    plot_cluster_bayes_power_curve,
+    plot_cluster_bayes_sensitivity_curve,
+)
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 from ab_test.bayesian_binomial.diff_in_diff import BayesianDiffInDiff
 from ab_test.bayesian_binomial.power_calculations import plot_bayes_power_curve, plot_bayes_sensitivity_curve
 from ab_test.bayesian_binomial.stratified import BayesianStratifiedContingencyTable
-from ab_test.frequentist_binomial.cluster import plot_cluster_power_curve, plot_cluster_sensitivity_curve
+from ab_test.diagnostics import time_trend_test
+from ab_test.frequentist_binomial.cluster import (
+    ClusterRandomizedTrial,
+    plot_cluster_power_curve,
+    plot_cluster_sensitivity_curve,
+)
 from ab_test.frequentist_binomial.contingency import ContingencyTable
 from ab_test.frequentist_binomial.cupac import plot_cupac_power_curve, plot_cupac_sensitivity_curve
 from ab_test.frequentist_binomial.diff_in_diff import DiffInDiff
-from ab_test.frequentist_binomial.gst import plot_gst_power_curve, plot_gst_sensitivity_curve
+from ab_test.frequentist_binomial.gst import (
+    GroupSequentialDesign,
+    plot_gst_boundaries,
+    plot_gst_power_curve,
+    plot_gst_sensitivity_curve,
+)
+from ab_test.frequentist_binomial.msprt import plot_msprt_over_time
 from ab_test.frequentist_binomial.power_calculations import plot_power_curve, plot_sensitivity_curve
 from ab_test.frequentist_binomial.stratified import StratifiedContingencyTable
 
@@ -410,3 +427,110 @@ class TestCurvesAltair:
         series = [curve("MDL", [1, 2], [0.1, 0.2])]
         assert sensitivity_curve_spec(series, "t", "x", "y", "relative").y_format.tickformat == ",.0%"
         assert sensitivity_curve_spec(series, "t", "x", "y", "revenue").y_format.tickformat is None
+
+
+def _bayes_clusters():
+    trial = _clusters(BayesianClusterRandomizedTrial)
+    trial.analyze()
+    return trial
+
+
+def _trend(**kw):
+    labels = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+    return time_trend_test(
+        [100, 98, 102, 99, 97], [1000] * 5, [140, 128, 118, 112, 105], [1000] * 5, labels=labels, **kw
+    )
+
+
+# Plots that return their figure, each with cheap arguments.
+RETURNED = {
+    "pdf": lambda **kw: (
+        BayesianContingencyTable("x", "y").add("A", 100, 1000, 1, 1).add("B", 130, 1000, 1, 1).plot_pdf(**kw)
+    ),
+    "cluster_pdf": lambda **kw: _bayes_clusters().plot_pdf(n_samples=2_000, **kw),
+    "gst_boundaries": lambda **kw: GroupSequentialDesign(n_analyses=3, sided="two").plot_boundaries(**kw),
+    "msprt": lambda **kw: plot_msprt_over_time(_msprt_tables(), ["Day 1", "Day 2"], **kw),
+    "time_trend": lambda **kw: _trend(**kw)["figure"],
+}
+# Plots that show their figure instead.
+SHOWN = {
+    "cluster_plot": lambda **kw: _clusters(ClusterRandomizedTrial).plot(**kw),
+    "bayes_cluster_plot": lambda **kw: _bayes_clusters().plot(n_samples=2_000, **kw),
+    "cupac_plot": lambda **kw: _cupac().plot(**kw),
+}
+
+
+@pytest.fixture
+def draw(shown):
+    def _draw(name, **kw):
+        if name in RETURNED:
+            return RETURNED[name](**kw)
+        SHOWN[name](**kw)
+        return shown[-1]
+
+    return _draw
+
+
+class TestOtherPlotsAltair:
+    @pytest.mark.parametrize("name", [*RETURNED, *SHOWN])
+    def test_altair_chart_in_dark_mode(self, draw, name):
+        chart = draw(name, backend="altair", dark_mode=True)
+        assert isinstance(chart, alt.TopLevelMixin)
+        assert chart.to_dict()["usermeta"]["embedOptions"]["theme"] == "dark"
+
+    @staticmethod
+    def test_gst_boundaries_wrapper_passes_backend():
+        chart = plot_gst_boundaries(GroupSequentialDesign(n_analyses=3), backend="altair")
+        assert isinstance(chart, alt.LayerChart)
+
+    @staticmethod
+    def test_pdf_fills_densities_and_draws_hdi_bars(draw):
+        spec = draw("pdf", backend="altair").to_dict()
+        marks = [layer["mark"]["type"] for layer in spec["layer"]]
+        assert marks[0] == "area"
+        bars = next(layer for layer in spec["layer"] if "x2" in layer.get("encoding", {}))
+        assert len(_rows(spec, bars)) == 2
+        fig = draw("pdf")
+        assert [trace.fill for trace in fig.data] == ["tozeroy", "tozeroy"]
+        assert len(fig.layout.shapes) == 2
+
+    @staticmethod
+    def test_msprt_band_and_categorical_checkpoints(draw):
+        spec = draw("msprt", backend="altair").to_dict()
+        band = spec["layer"][0]
+        assert band["mark"] == {"type": "area", "opacity": 0.2}
+        assert [row["x"] for row in _rows(spec, band)] == ["Day 1", "Day 2"]
+        assert spec["layer"][1]["encoding"]["x"]["sort"] == ["Day 1", "Day 2"]
+        # Plotly keeps its three traces: the band's two edges and the estimate.
+        fig = draw("msprt")
+        assert [trace.fill for trace in fig.data] == [None, "tonexty", None]
+        assert fig.data[1].fillcolor == "rgba(99, 110, 250, 0.2)"
+
+    @staticmethod
+    def test_time_trend_error_bars(draw):
+        result = _trend(backend="altair")
+        spec = result["figure"].to_dict()
+        errors = next(layer for layer in spec["layer"] if layer["mark"] == {"type": "rule", "strokeWidth": 1.5})
+        assert errors["transform"][0] == {"filter": {"field": "series", "oneOf": ["Period lift (95% CI)"]}}
+        assert result["slope"] == _trend()["slope"]
+
+    @staticmethod
+    def test_gst_boundaries_markers(draw):
+        fig = draw("gst_boundaries")
+        assert [trace.mode for trace in fig.data] == ["lines+markers", "lines+markers"]
+        assert [trace.marker.symbol for trace in fig.data] == ["diamond", "diamond"]
+        assert [trace.line.dash for trace in fig.data] == [None, "dash"]
+        assert fig.layout.xaxis.dtick == 1
+        spec = draw("gst_boundaries", backend="altair").to_dict()
+        assert spec["layer"][0]["encoding"]["x"]["axis"]["tickMinStep"] == 1
+
+    @pytest.mark.parametrize("name", ["cluster_plot", "bayes_cluster_plot"])
+    def test_clusters_are_dots_without_whiskers(self, draw, monkeypatch, name):
+        figures = []
+        monkeypatch.setattr(go.Figure, "show", lambda self, *args, **kwargs: figures.append(self))
+        SHOWN[name]()
+        whiskers = [trace.error_x.array for trace in figures[-1].data]
+        assert whiskers.count(None) >= 6  # one dot per cluster
+        spec = draw(name, backend="altair").to_dict()
+        ((whisker, _),) = [panel[:2] for panel in _layers(spec)]
+        assert whisker["transform"] == [{"filter": "isValid(datum.lower)"}]

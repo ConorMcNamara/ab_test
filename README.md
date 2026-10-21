@@ -47,7 +47,7 @@ pip install "abtest-analysis[sklearn] @ git+https://github.com/ConorMcNamara/ab_
 
 Other extras: `pyspark`, `modin`, `ibis`, and `narwhals` for DataFrame export.
 
-`altair` adds an Altair plotting backend. Plots use Plotly by default; so far the forest plots of the contingency, stratified and diff-in-diff tables (`.plot(backend="altair")`) and every power and sensitivity curve (`plot_*_power_curve`, `plot_*_sensitivity_curve`) can also draw with Altair.
+`altair` adds an Altair plotting backend. Plots use Plotly by default; pass `backend="altair"` to any plot (`.plot()`, `.plot_pdf()`, the `plot_*` functions, or `time_trend_test`) to draw it with Altair instead.
 
 ### Development setup
 

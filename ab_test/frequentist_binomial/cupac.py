@@ -51,11 +51,11 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import scipy.stats as ss
 
-from ab_test._display import apply_dark_mode, format_percent, resolve_plot_color
-from ab_test._plotting import Figure, render, validate_backend
+from ab_test._display import format_percent, resolve_plot_color
+from ab_test._plotting import Figure, render, show, validate_backend
+from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, VLine
 from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
@@ -672,7 +672,13 @@ class CupacExperiment:
         return_string += f"\n** {format_percent(1 - alpha)}% Confidence Interval"
         return return_string
 
-    def plot(self, color: str | dict[str, Any] | list[Any] | None = None, *, dark_mode: bool = False) -> None:
+    def plot(
+        self,
+        color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
+        backend: str = "plotly",
+    ) -> None:
         """Plot unadjusted vs adjusted estimates with confidence intervals.
 
         Parameters
@@ -683,7 +689,10 @@ class CupacExperiment:
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
         """
+        validate_backend(backend)
         if self._results is None:
             self.fit()
         results = self._check_fitted()
@@ -702,38 +711,25 @@ class CupacExperiment:
         c_unadj = plot_color[0] if isinstance(plot_color, list) else list(plot_color.values())[0]
         c_adj = plot_color[1] if isinstance(plot_color, list) else list(plot_color.values())[1]
 
-        fig = go.Figure()
         adj_label = f"Adjusted ({method_label})"
-        for label, ate, ci_minus, ci_plus, c in [
-            ("Unadjusted", results["ate_unadjusted"], unadj_ci, unadj_ci, c_unadj),
-            (adj_label, results["ate"], adj_ci_lo, adj_ci_hi, c_adj),
-        ]:
-            fig.add_trace(
-                go.Scatter(
-                    x=[ate],
-                    y=[label],
-                    marker={"symbol": "diamond", "size": 12.5, "color": c},
-                    error_x={
-                        "type": "data",
-                        "symmetric": False,
-                        "array": [ci_plus],
-                        "arrayminus": [ci_minus],
-                        "visible": True,
-                        "color": c,
-                    },
-                    name=label,
-                )
-            )
-        fig.add_vline(x=0, line_dash="dash", line_color="gray")
-        fig.update_layout(
-            title=f"{self.experiment_name}: Unadjusted vs {method_label}-Adjusted",
-            xaxis_title="Treatment Effect",
-            xaxis_tickformat=",.2%",
-            template="plotly_white",
-            yaxis={"autorange": "reversed"},
+        points = [
+            ForestPoint(label, ate, ate - ci_minus, ate + ci_plus, c)
+            for label, ate, ci_minus, ci_plus, c in [
+                ("Unadjusted", results["ate_unadjusted"], unadj_ci, unadj_ci, c_unadj),
+                (adj_label, results["ate"], adj_ci_lo, adj_ci_hi, c_adj),
+            ]
+        ]
+        panel = ForestPanel(
+            points, x_title="Treatment Effect", x_format=AxisFormat(tickformat=",.2%"), vlines=[VLine(0.0)]
         )
-        apply_dark_mode(fig, dark_mode)
-        fig.show()
+        spec = ForestSpec(
+            [panel],
+            title=f"{self.experiment_name}: Unadjusted vs {method_label}-Adjusted",
+            y_title="",
+            dark_mode=dark_mode,
+            white_background=True,
+        )
+        show(render(spec, backend))
 
 
 def cupac_adjusted_power(

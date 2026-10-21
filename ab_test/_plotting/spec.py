@@ -6,9 +6,21 @@ only data, labels and formats, never library objects, so both backends draw
 the same plot from it.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-__all__ = ["AxisFormat", "ForestPoint", "VLine", "ForestPanel", "ForestSpec", "LineSeries", "HLine", "LineSpec"]
+__all__ = [
+    "AxisFormat",
+    "ForestPoint",
+    "VLine",
+    "ForestPanel",
+    "ForestSpec",
+    "LineSeries",
+    "Band",
+    "Segment",
+    "HLine",
+    "LineSpec",
+]
 
 
 @dataclass(frozen=True)
@@ -36,8 +48,11 @@ class ForestPoint:
     ----------
     label : str
         The row's name on the y-axis.
-    estimate, lower, upper : float
-        The point estimate and its interval.
+    estimate : float
+        The point estimate.
+    lower, upper : float or None
+        Its interval; ``None`` draws the point alone, such as an observed
+        cluster rate.
     color : str or None
         Color of the row; ``None`` leaves it to the backend's color scheme.
     shape : {"diamond", "circle"}
@@ -48,8 +63,8 @@ class ForestPoint:
 
     label: str
     estimate: float
-    lower: float
-    upper: float
+    lower: float | None
+    upper: float | None
     color: str | None = None
     shape: str = "diamond"
     size: float = 12.5
@@ -122,47 +137,113 @@ class ForestSpec:
 
 @dataclass(frozen=True)
 class LineSeries:
-    """One line of a line chart.
+    """One line, or set of points, of a line chart.
 
     Parameters
     ----------
     name : str
-        Legend entry of the line.
-    x, y : list of float
-        The line's points.
+        Legend entry of the series.
+    x : sequence of float or sequence of str
+        The points' x values; strings when the x-axis is categorical.
+    y : sequence of float
+        The points' y values.
     color : str or None
-        Color of the line; ``None`` uses the first color of Plotly's palette.
+        Color of the series; ``None`` leaves it to the backend's color scheme.
     dash : {"dash", "dot"} or None
         Dash pattern, such as for a baseline to compare against; ``None`` draws
         a solid line.
     markers : bool
         Whether to mark each point, such as when the points are few.
+    lines : bool
+        Whether to join the points with a line; ``False`` draws points only.
+    marker_shape : {"circle", "diamond"}
+        Shape of the markers.
+    marker_size : float or None
+        Marker diameter in pixels; ``None`` keeps the backend's default.
+    fill : bool
+        Whether to shade the area between the line and zero, such as under a
+        density.
+    errors : sequence of float or None
+        Half-width of a vertical error bar at each point.
     """
 
     name: str
-    x: list[float]
-    y: list[float]
+    x: Sequence[float] | Sequence[str]
+    y: Sequence[float]
     color: str | None = None
     dash: str | None = None
     markers: bool = False
+    lines: bool = True
+    marker_shape: str = "circle"
+    marker_size: float | None = None
+    fill: bool = False
+    errors: Sequence[float] | None = None
+
+
+@dataclass(frozen=True)
+class Band:
+    """A shaded band between two lines, such as a confidence sequence.
+
+    Parameters
+    ----------
+    name : str
+        Legend entry of the band.
+    x : sequence of float or sequence of str
+        The band's x values.
+    lower, upper : sequence of float
+        The band's edges at each x.
+    color : str
+        Color of the band, drawn translucent.
+    """
+
+    name: str
+    x: Sequence[float] | Sequence[str]
+    lower: Sequence[float]
+    upper: Sequence[float]
+    color: str = "#636EFA"
+
+
+@dataclass(frozen=True)
+class Segment:
+    """A thick horizontal bar from ``x0`` to ``x1`` at height ``y``, such as an interval under a density."""
+
+    x0: float
+    x1: float
+    y: float
+    color: str
+    width: float = 4.0
 
 
 @dataclass(frozen=True)
 class HLine:
-    """A dashed horizontal reference line, labelled at its left end."""
+    """A gray horizontal reference line, labelled at its left end.
+
+    Parameters
+    ----------
+    y : float
+        Height of the line.
+    label : str or None
+        Text at its left end; ``None`` leaves it unlabelled.
+    dash : {"dash", "dot"}
+        Dash pattern.
+    opacity : float
+        Opacity of the line.
+    """
 
     y: float
     label: str | None = None
+    dash: str = "dash"
+    opacity: float = 1.0
 
 
 @dataclass(frozen=True)
 class LineSpec:
-    """A line chart, such as a power or sensitivity curve.
+    """A line chart, such as a power curve, a density or a value over time.
 
     Parameters
     ----------
     series : list of LineSeries
-        The lines to draw.
+        The lines and points to draw.
     title, x_title, y_title : str
         Titles of the chart and its axes.
     y_format : AxisFormat
@@ -173,6 +254,17 @@ class LineSpec:
         Horizontal reference lines.
     dark_mode : bool
         Whether to draw on a dark background.
+    x_format : AxisFormat
+        Tick labels of the x-axis.
+    x_categorical : bool
+        Whether the x values are labels, such as checkpoint names, kept in the
+        order given.
+    x_tick_step : float or None
+        Smallest gap between x ticks, such as 1 for whole-numbered analyses.
+    bands : list of Band
+        Shaded bands, drawn beneath the series.
+    segments : list of Segment
+        Horizontal bars, such as intervals drawn under densities.
     """
 
     series: list[LineSeries]
@@ -183,3 +275,8 @@ class LineSpec:
     y_range: tuple[float, float] | None = None
     hlines: list[HLine] = field(default_factory=list)
     dark_mode: bool = False
+    x_format: AxisFormat = field(default_factory=AxisFormat)
+    x_categorical: bool = False
+    x_tick_step: float | None = None
+    bands: list[Band] = field(default_factory=list)
+    segments: list[Segment] = field(default_factory=list)

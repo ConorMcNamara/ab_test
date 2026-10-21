@@ -21,13 +21,12 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-import plotly.graph_objects as go
 import scipy.stats as ss
 from scipy.optimize import brentq
 
-from ab_test._display import apply_dark_mode
 from ab_test._plotting import Figure, render, validate_backend
 from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
+from ab_test._plotting.spec import LineSeries, LineSpec
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
@@ -501,7 +500,12 @@ class GroupSequentialDesign:
         result += f"\n\nDesign: {self._n_analyses} analyses, alpha={self._alpha}, sided={self._sided}"
         return result
 
-    def plot_boundaries(self, *, dark_mode: bool = False) -> go.Figure:
+    def plot_boundaries(
+        self,
+        *,
+        dark_mode: bool = False,
+        backend: str = "plotly",
+    ) -> Figure:
         """Plot z-boundaries across analyses.
 
         Parameters
@@ -509,48 +513,34 @@ class GroupSequentialDesign:
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
         Returns
         -------
-        go.Figure
-            An interactive Plotly figure.
+        plotly.graph_objects.Figure or altair.LayerChart
+            An interactive Plotly figure, or Altair chart.
         """
+        validate_backend(backend)
         looks = list(range(1, self._n_analyses + 1))
 
-        fig = go.Figure()
-        fig.add_trace(
-            go.Scatter(
-                x=looks,
-                y=list(self._boundaries),
-                mode="lines+markers",
-                marker={"size": 8, "symbol": "diamond"},
-                line={"color": "#636EFA", "width": 2},
-                name="Z Boundary",
-            )
-        )
-        if self._sided == "two":
-            fig.add_trace(
-                go.Scatter(
-                    x=looks,
-                    y=list(-self._boundaries),
-                    mode="lines+markers",
-                    marker={"size": 8, "symbol": "diamond"},
-                    line={"color": "#636EFA", "width": 2, "dash": "dash"},
-                    name="Z Boundary (lower)",
-                )
+        def boundary(name: str, z: np.ndarray[Any, Any], dash: str | None = None) -> LineSeries:
+            return LineSeries(
+                name, looks, z.tolist(), color="#636EFA", dash=dash, markers=True, marker_shape="diamond", marker_size=8
             )
 
-        fig.update_layout(
+        series = [boundary("Z Boundary", self._boundaries)]
+        if self._sided == "two":
+            series.append(boundary("Z Boundary (lower)", -self._boundaries, dash="dash"))
+        spec = LineSpec(
+            series=series,
             title="Group Sequential Boundaries",
-            xaxis_title="Analysis",
-            yaxis_title="Z Boundary",
-            template="plotly_white",
-            xaxis={"dtick": 1},
-            hovermode="x unified",
-            legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+            x_title="Analysis",
+            y_title="Z Boundary",
+            x_tick_step=1,
+            dark_mode=dark_mode,
         )
-        apply_dark_mode(fig, dark_mode)
-        return fig
+        return render(spec, backend)
 
 
 # ---------------------------------------------------------------------------
@@ -733,20 +723,22 @@ def gst_minimum_detectable_lift(
 # ---------------------------------------------------------------------------
 
 
-def plot_gst_boundaries(design: GroupSequentialDesign) -> go.Figure:
+def plot_gst_boundaries(design: GroupSequentialDesign, *, backend: str = "plotly") -> Figure:
     """Plot stopping boundaries for a group sequential design.
 
     Parameters
     ----------
     design : GroupSequentialDesign
         A pre-computed design.
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart.
     """
-    return design.plot_boundaries()
+    return design.plot_boundaries(backend=backend)
 
 
 def plot_gst_power_curve(

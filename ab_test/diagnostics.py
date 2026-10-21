@@ -11,10 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-import plotly.graph_objects as go  # type: ignore[import-untyped]
 import scipy.stats as ss
 
-from ab_test._display import apply_dark_mode, format_percent
+from ab_test._display import format_percent
+from ab_test._plotting import render, validate_backend
+from ab_test._plotting.spec import HLine, LineSeries, LineSpec
 from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
 from ab_test.frequentist_binomial.stats_tests import ab_test
 from ab_test.frequentist_binomial.utils import observed_lift
@@ -110,6 +111,7 @@ def time_trend_test(
     labels: list[str] | np.ndarray[Any, Any] | None = None,
     *,
     dark_mode: bool = False,
+    backend: str = "plotly",
 ) -> dict[str, Any]:
     """Test whether the treatment effect is stable over time.
 
@@ -137,6 +139,8 @@ def time_trend_test(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
@@ -158,7 +162,8 @@ def time_trend_test(
           regression and size the error bars.
         - ``"cumulative_lift"`` : np.ndarray — running cumulative lift
           up to each period.
-        - ``"figure"`` : plotly.graph_objects.Figure — diagnostic plot.
+        - ``"figure"`` : plotly.graph_objects.Figure or altair.LayerChart —
+          diagnostic plot.
 
     Raises
     ------
@@ -166,6 +171,7 @@ def time_trend_test(
         If the arrays have mismatched lengths, there are fewer than 3 periods,
         or an arm has no successes (or no failures) in any period.
     """
+    validate_backend(backend)
     s_a = np.asarray(successes_a, dtype=float)
     t_a = np.asarray(trials_a, dtype=float)
     s_b = np.asarray(successes_b, dtype=float)
@@ -213,55 +219,38 @@ def time_trend_test(
 
     trend_line = y_bar + slope * (x - x_bar)
 
-    fig = go.Figure()  # type: ignore[attr-defined]
-
-    fig.add_trace(
-        go.Scatter(  # type: ignore[attr-defined]
-            x=display_labels,
-            y=period_lift,
-            error_y=dict(type="data", array=float(ss.norm.isf(alpha / 2)) * period_se, visible=True),
-            mode="markers",
-            name=f"Period lift ({format_percent(1 - alpha)}% CI)",
-            marker=dict(size=8, color="#636EFA"),
-        )
-    )
-
-    fig.add_trace(
-        go.Scatter(  # type: ignore[attr-defined]
-            x=display_labels,
-            y=cumulative_lift,
-            mode="lines+markers",
-            name="Cumulative lift",
-            line=dict(color="#00CC96", width=2),
-            marker=dict(size=5),
-        )
-    )
-
-    fig.add_trace(
-        go.Scatter(  # type: ignore[attr-defined]
-            x=display_labels,
-            y=trend_line,
-            mode="lines",
-            name=f"Trend (p={p_value:.3f})",
-            line=dict(color="#EF553B", width=2, dash="dash"),
-        )
-    )
-
-    fig.add_hline(y=0, line_dash="dot", line_color="gray", opacity=0.5)
-
     title = f"Time Trend Diagnostic — {diagnosis.capitalize()}"
     if trending:
         title += f" (slope={slope:.5f}, p={p_value:.4f})"
 
-    fig.update_layout(
+    spec = LineSpec(
+        series=[
+            LineSeries(
+                f"Period lift ({format_percent(1 - alpha)}% CI)",
+                display_labels,
+                period_lift.tolist(),
+                color="#636EFA",
+                lines=False,
+                marker_size=8,
+                errors=(float(ss.norm.isf(alpha / 2)) * period_se).tolist(),
+            ),
+            LineSeries(
+                "Cumulative lift",
+                display_labels,
+                cumulative_lift.tolist(),
+                color="#00CC96",
+                markers=True,
+                marker_size=5,
+            ),
+            LineSeries(f"Trend (p={p_value:.3f})", display_labels, trend_line.tolist(), color="#EF553B", dash="dash"),
+        ],
         title=title,
-        xaxis_title="Period",
-        yaxis_title="Absolute Lift (B − A)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        template="plotly_white",
+        x_title="Period",
+        y_title="Absolute Lift (B − A)",
+        hlines=[HLine(0.0, dash="dot", opacity=0.5)],
+        x_categorical=True,
+        dark_mode=dark_mode,
     )
-
-    apply_dark_mode(fig, dark_mode)
     return {
         "slope": slope,
         "slope_se": slope_se,
@@ -272,7 +261,7 @@ def time_trend_test(
         "period_lifts": period_lift,
         "period_se": period_se,
         "cumulative_lift": cumulative_lift,
-        "figure": fig,
+        "figure": render(spec, backend),
     }
 
 

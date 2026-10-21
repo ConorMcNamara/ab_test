@@ -4,18 +4,18 @@ import itertools
 from typing import Any, ClassVar, Literal, cast
 
 import numpy as np
-import plotly.graph_objects as go
 from scipy.stats import beta
 from tabulate import tabulate
 
 from ab_test._contingency import BaseContingencyTable
 from ab_test._display import (
-    apply_dark_mode,
     convert_to_tabulate_str,
     format_percent,
     resolve_plot_color,
     tabulate_summary,
 )
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.spec import AxisFormat, LineSeries, LineSpec, Segment
 from ab_test._lift import scale_bounds, scale_metric
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
@@ -543,7 +543,8 @@ class BayesianContingencyTable(BaseContingencyTable):
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
-    ) -> go.Figure:
+        backend: str = "plotly",
+    ) -> Figure:
         """Plot the posterior Beta distributions for each variant as an interactive figure.
 
         Renders overlapping PDF curves for both variants, annotates each with its
@@ -567,13 +568,16 @@ class BayesianContingencyTable(BaseContingencyTable):
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
         Returns
         -------
-        go.Figure
-            An interactive Plotly figure showing the posterior PDFs, HDI bars,
-            and a title containing P(B > A).
+        plotly.graph_objects.Figure or altair.LayerChart
+            An interactive Plotly figure, or Altair chart, showing the posterior
+            PDFs, HDI bars, and a title containing P(B > A).
         """
+        validate_backend(backend)
         # plot_pdf needs two concrete colors; fall back to Plotly's defaults when
         # no explicit color was requested.
         plot_color = resolve_plot_color(color) or ["#636EFA", "#EF553B"]
@@ -609,38 +613,21 @@ class BayesianContingencyTable(BaseContingencyTable):
         _sample_b = sample_beta(self.successes[1], self.trials[1], self.alphas[1], self.betas[1], n_samples)
         p_b_better = prob_lift_exceeds(_sample_a, _sample_b, threshold=0.0)
 
-        fig = go.Figure()
-
-        # Trace A (Control)
-        fig.add_trace(
-            go.Scatter(
-                x=x, y=pdf_a, name=f"{self.names[0]}", fill="tozeroy", line=dict(color=color_a, width=2), opacity=0.4
-            )
-        )
-        # Trace B (Variant)
-        fig.add_trace(
-            go.Scatter(
-                x=x, y=pdf_b, name=f"{self.names[1]}", fill="tozeroy", line=dict(color=color_b, width=2), opacity=0.4
-            )
-        )
-
-        # Add HDI indicators as horizontal bars at the bottom
-        # We calculate the max height to position the bars relatively
+        # HDI bars sit just below the curves, scaled to the taller one.
         max_y = max(np.max(pdf_a), np.max(pdf_b))
-        y_pos_a = -max_y * 0.05
-        y_pos_b = -max_y * 0.10
-
-        for hdi, hdi_color, y_pos in [(hdi_a, color_a, y_pos_a), (hdi_b, color_b, y_pos_b)]:
-            fig.add_shape(type="line", x0=hdi[0], y0=y_pos, x1=hdi[1], y1=y_pos, line=dict(color=hdi_color, width=5))
-        fig.update_layout(
+        spec = LineSpec(
+            series=[
+                LineSeries(f"{self.names[0]}", x.tolist(), pdf_a.tolist(), color=color_a, fill=True),
+                LineSeries(f"{self.names[1]}", x.tolist(), pdf_b.tolist(), color=color_b, fill=True),
+            ],
             title=f"Bayesian Binary Test: P({self.names[1]} > {self.names[0]}) = {p_b_better:.1%}",
-            xaxis_title="Conversion Rate (%)",
-            xaxis_tickformat=".1%",
-            yaxis_title="Probability Density",
-            template="plotly_white",
-            hovermode="x unified",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            x_title="Conversion Rate (%)",
+            y_title="Probability Density",
+            x_format=AxisFormat(tickformat=".1%"),
+            segments=[
+                Segment(hdi_a[0], hdi_a[1], -max_y * 0.05, color_a, width=5),
+                Segment(hdi_b[0], hdi_b[1], -max_y * 0.10, color_b, width=5),
+            ],
+            dark_mode=dark_mode,
         )
-
-        apply_dark_mode(fig, dark_mode)
-        return fig
+        return render(spec, backend)

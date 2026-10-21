@@ -8,7 +8,6 @@ and :class:`~ab_test.bayesian_binomial.contingency.BayesianContingencyTable`.
 import math
 from typing import Any, overload
 
-import plotly.graph_objects as go
 from tabulate import tabulate
 
 from ab_test._plotting import render, show, validate_backend
@@ -20,7 +19,6 @@ __all__ = [
     "convert_to_tabulate_str",
     "render_forest_plot",
     "forest_spec",
-    "apply_dark_mode",
     "effect_panel",
     "tabulate_summary",
     "format_percent",
@@ -212,27 +210,6 @@ def _lift_axis_format(lift_type: str) -> dict[str, str]:
     if lift_type == "cpa":
         return {"tickprefix": "$", "tickformat": "0.2"}
     return {"tickformat": "~s"}
-
-
-def apply_dark_mode(fig: go.Figure, dark_mode: bool) -> go.Figure:
-    """Switch a figure to Plotly's dark template when ``dark_mode`` is True.
-
-    Parameters
-    ----------
-    fig : plotly.graph_objects.Figure
-        The figure to restyle in place.
-    dark_mode : bool
-        If True, use the ``"plotly_dark"`` template (dark background, light
-        text and gridlines). If False, the figure is left unchanged.
-
-    Returns
-    -------
-    plotly.graph_objects.Figure
-        The same figure, for chaining.
-    """
-    if dark_mode:
-        fig.update_layout(template="plotly_dark")
-    return fig
 
 
 # Axis titles and tick formats of the per-segment/per-stratum forest plots.

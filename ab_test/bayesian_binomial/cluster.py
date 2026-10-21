@@ -22,18 +22,17 @@ import math
 from typing import Any, Literal, Self
 
 import numpy as np
-import plotly.graph_objects as go  # type: ignore[import-untyped]
 from scipy.special import betaln, expit
 from tabulate import tabulate
 
 from ab_test._display import (
-    apply_dark_mode,
     convert_to_tabulate_str,
     format_percent,
     resolve_plot_color,
     tabulate_summary,
 )
-from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting import Figure, render, show, validate_backend
+from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, LineSeries, LineSpec, Segment
 from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.power_calculations import (
@@ -844,6 +843,7 @@ class BayesianClusterRandomizedTrial:
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
+        backend: str = "plotly",
     ) -> None:
         """Forest plot of per-cluster proportions and pooled credible interval.
 
@@ -870,15 +870,16 @@ class BayesianClusterRandomizedTrial:
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
         """
+        validate_backend(backend)
         if self.model_params is None:
             self._fit_model()
         assert self.model_params is not None
 
         plot_color = resolve_plot_color(color)
-        fig = go.Figure()  # type: ignore[attr-defined]
-
-        y_labels: list[str] = []
+        points: list[ForestPoint] = []
         for gi, g in enumerate(self._groups):
             c = None
             if plot_color is not None:
@@ -889,59 +890,23 @@ class BayesianClusterRandomizedTrial:
 
             for c_name, data in self._clusters[g].items():
                 prop = data["successes"] / data["trials"]
-                label = f"{g}: {c_name}"
-                y_labels.append(label)
-                marker_kw: dict[str, Any] = {"symbol": "circle", "size": 6}
-                if c is not None:
-                    marker_kw["color"] = c
-                fig.add_trace(
-                    go.Scatter(  # type: ignore[attr-defined]
-                        x=[prop],
-                        y=[label],
-                        marker=marker_kw,
-                        name=label,
-                        showlegend=False,
-                    )
-                )
+                points.append(ForestPoint(f"{g}: {c_name}", prop, None, None, c, shape="circle", size=6))
 
             params = self.model_params[g]
             samples_arm = _sample_mu(params["logit_mu_grid"], params["mu_weights"], n_samples)
             arm_mean = float(np.mean(samples_arm))
             ci_lo, ci_hi = self._credible_interval(samples_arm, confidence_level, cred_int_method)
+            points.append(ForestPoint(f"{g} (pooled)", arm_mean, ci_lo, ci_hi, c, shape="diamond", size=14))
 
-            label_arm = f"{g} (pooled)"
-            y_labels.append(label_arm)
-            marker_pooled: dict[str, Any] = {"symbol": "diamond", "size": 14}
-            error_x_pooled: dict[str, Any] = {
-                "type": "data",
-                "symmetric": False,
-                "array": [ci_hi - arm_mean],
-                "arrayminus": [arm_mean - ci_lo],
-                "visible": True,
-            }
-            if c is not None:
-                marker_pooled["color"] = c
-                error_x_pooled["color"] = c
-            fig.add_trace(
-                go.Scatter(  # type: ignore[attr-defined]
-                    x=[arm_mean],
-                    y=[label_arm],
-                    marker=marker_pooled,
-                    error_x=error_x_pooled,
-                    name=label_arm,
-                    showlegend=False,
-                )
-            )
-
-        fig.update_layout(
+        spec = ForestSpec(
+            [ForestPanel(points, x_format=AxisFormat(tickformat=",.1%"))],
             title=f"{self.experiment_name} — {self.metric_name} (Cluster Proportions)",
-            xaxis_tickformat=",.1%",
-            showlegend=False,
+            y_title="",
+            reverse=reverse_plot,
+            dark_mode=dark_mode,
+            show_legend=False,
         )
-        if reverse_plot:
-            fig.update_layout(yaxis={"autorange": "reversed"})
-        apply_dark_mode(fig, dark_mode)
-        fig.show()  # type: ignore[no-untyped-call]
+        show(render(spec, backend))
 
     def plot_pdf(
         self,
@@ -950,7 +915,8 @@ class BayesianClusterRandomizedTrial:
         color: str | dict[str, Any] | list[Any] | None = None,
         *,
         dark_mode: bool = False,
-    ) -> go.Figure:
+        backend: str = "plotly",
+    ) -> Figure:
         """Plot the posterior density of each arm's conversion rate.
 
         The curves are the hierarchical model's posterior for each arm-level
@@ -968,19 +934,22 @@ class BayesianClusterRandomizedTrial:
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines (Plotly's
             ``"plotly_dark"`` template).
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
         Returns
         -------
-        go.Figure
-            Plotly figure with overlapping PDF curves.
+        plotly.graph_objects.Figure or altair.LayerChart
+            Plotly figure, or Altair chart, with overlapping PDF curves.
         """
+        validate_backend(backend)
         if self.model_params is None:
             self._fit_model()
         assert self.model_params is not None
 
         plot_color = resolve_plot_color(color)
-        fig = go.Figure()  # type: ignore[attr-defined]
-
+        series: list[LineSeries] = []
+        segments: list[Segment] = []
         for gi, g in enumerate(self._groups):
             params = self.model_params[g]
             logit_mu, weights = params["logit_mu_grid"], params["mu_weights"]
@@ -995,30 +964,10 @@ class BayesianClusterRandomizedTrial:
                 elif isinstance(plot_color, dict):
                     c = plot_color.get(g)
 
-            line_kw: dict[str, Any] = {"width": 2}
-            if c is not None:
-                line_kw["color"] = c
-
-            fig.add_trace(
-                go.Scatter(  # type: ignore[attr-defined]
-                    x=x.tolist(),
-                    y=y.tolist(),
-                    mode="lines",
-                    line=line_kw,
-                    name=f"{g} (posterior mean={params['mean']:.2%})",
-                )
-            )
-
+            series.append(LineSeries(f"{g} (posterior mean={params['mean']:.2%})", x.tolist(), y.tolist(), color=c))
             samples = _sample_mu(logit_mu, weights, n_samples)
             hdi_lo, hdi_hi = calculate_hdi_from_samples(samples, confidence_level)
-            fig.add_shape(
-                type="line",
-                x0=hdi_lo,
-                x1=hdi_hi,
-                y0=-0.02 * max(y) * (gi + 1),
-                y1=-0.02 * max(y) * (gi + 1),
-                line={"color": c or "gray", "width": 4},
-            )
+            segments.append(Segment(hdi_lo, hdi_hi, -0.02 * max(y) * (gi + 1), c or "gray"))
 
         prob_t_gt_c = None
         prob_best = None
@@ -1033,16 +982,16 @@ class BayesianClusterRandomizedTrial:
             leader = max(prob_best, key=prob_best.get)
             title += f" | P({leader} is best) = {prob_best[leader]:.4f}"
 
-        fig.update_layout(
+        spec = LineSpec(
+            series=series,
             title=title,
-            xaxis_title="Conversion Rate",
-            yaxis_title="Density",
-            xaxis_tickformat=",.1%",
-            template="plotly_white",
-            legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+            x_title="Conversion Rate",
+            y_title="Density",
+            x_format=AxisFormat(tickformat=",.1%"),
+            segments=segments,
+            dark_mode=dark_mode,
         )
-        apply_dark_mode(fig, dark_mode)
-        return fig
+        return render(spec, backend)
 
 
 # ---------------------------------------------------------------------------

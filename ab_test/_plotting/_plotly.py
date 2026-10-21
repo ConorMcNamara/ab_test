@@ -5,10 +5,30 @@ from typing import Any
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from ab_test._display import apply_dark_mode
 from ab_test._plotting.spec import AxisFormat, ForestSpec, LineSpec
 
 __all__ = ["forest", "line"]
+
+
+def apply_dark_mode(fig: go.Figure, dark_mode: bool) -> go.Figure:
+    """Switch a figure to Plotly's dark template when ``dark_mode`` is True.
+
+    Parameters
+    ----------
+    fig : plotly.graph_objects.Figure
+        The figure to restyle in place.
+    dark_mode : bool
+        If True, use the ``"plotly_dark"`` template (dark background, light
+        text and gridlines). If False, the figure is left unchanged.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        The same figure, for chaining.
+    """
+    if dark_mode:
+        fig.update_layout(template="plotly_dark")
+    return fig
 
 
 def _axis_kwargs(axis_format: AxisFormat) -> dict[str, str]:
@@ -28,17 +48,20 @@ def forest(spec: ForestSpec) -> go.Figure:
     for col, panel in enumerate(spec.panels, start=1):
         for point in panel.points:
             marker: dict[str, Any] = {"symbol": point.shape, "size": point.size}
-            error_x: dict[str, Any] = {
-                "type": "data",
-                "symmetric": False,
-                "array": [point.upper - point.estimate],
-                "arrayminus": [point.estimate - point.lower],
-                "visible": True,
-            }
             if point.color is not None:
                 marker["color"] = point.color
-                error_x["color"] = point.color
-            trace = go.Scatter(x=[point.estimate], y=[point.label], marker=marker, error_x=error_x, name=point.label)  # type: ignore[attr-defined]
+            trace = go.Scatter(x=[point.estimate], y=[point.label], marker=marker, name=point.label)  # type: ignore[attr-defined]
+            if point.lower is not None and point.upper is not None:
+                error_x: dict[str, Any] = {
+                    "type": "data",
+                    "symmetric": False,
+                    "array": [point.upper - point.estimate],
+                    "arrayminus": [point.estimate - point.lower],
+                    "visible": True,
+                }
+                if point.color is not None:
+                    error_x["color"] = point.color
+                trace.update(error_x=error_x)
             if multi:
                 # Each panel gets its own legend section, titled with its lift, so every
                 # point has an entry and the title toggles the whole panel.
@@ -72,30 +95,69 @@ def forest(spec: ForestSpec) -> go.Figure:
     return fig
 
 
+def _rgba(color: str, opacity: float) -> str:
+    """Turn a ``#rrggbb`` color into a translucent ``rgba(...)`` one."""
+    red, green, blue = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({red}, {green}, {blue}, {opacity})"
+
+
 def line(spec: LineSpec) -> go.Figure:
-    """Draw a line chart with dashed horizontal reference lines."""
+    """Draw a line chart with its bands, bars and dashed horizontal reference lines."""
     fig = go.Figure()
-    for series in spec.series:
-        line_style = {"color": series.color or "#636EFA", "width": 2}
-        if series.dash is not None:
-            line_style["dash"] = series.dash
+    for band in spec.bands:
+        # Fill from the lower edge up to the invisible upper one drawn just before it.
+        fig.add_trace(
+            go.Scatter(x=band.x, y=band.upper, mode="lines", line={"width": 0}, showlegend=False, hoverinfo="skip")
+        )
         fig.add_trace(
             go.Scatter(
-                x=series.x,
-                y=series.y,
-                mode="lines+markers" if series.markers else "lines",
-                line=line_style,
-                name=series.name,
+                x=band.x,
+                y=band.lower,
+                mode="lines",
+                line={"width": 0},
+                fill="tonexty",
+                fillcolor=_rgba(band.color, 0.2),
+                name=band.name,
             )
         )
-    for hline in spec.hlines:
-        fig.add_hline(
-            y=hline.y,
-            line_dash="dash",
-            line_color="gray",
-            annotation_text=hline.label,
-            annotation_position="top left",
+    for series in spec.series:
+        trace = go.Scatter(x=series.x, y=series.y, name=series.name)
+        if series.lines:
+            line_style: dict[str, Any] = {"width": 2}
+            if series.color is not None:
+                line_style["color"] = series.color
+            if series.dash is not None:
+                line_style["dash"] = series.dash
+            trace.update(mode="lines+markers" if series.markers else "lines", line=line_style)
+        else:
+            trace.update(mode="markers")
+        if series.markers or not series.lines:
+            marker: dict[str, Any] = {}
+            if series.marker_shape != "circle":
+                marker["symbol"] = series.marker_shape
+            if series.marker_size is not None:
+                marker["size"] = series.marker_size
+            if series.color is not None and not series.lines:
+                marker["color"] = series.color
+            if marker:
+                trace.update(marker=marker)
+        if series.fill:
+            trace.update(fill="tozeroy", opacity=0.4)
+        if series.errors is not None:
+            trace.update(error_y={"type": "data", "array": series.errors, "visible": True})
+        fig.add_trace(trace)
+    for segment in spec.segments:
+        fig.add_shape(
+            type="line",
+            x0=segment.x0,
+            x1=segment.x1,
+            y0=segment.y,
+            y1=segment.y,
+            line={"color": segment.color, "width": segment.width},
         )
+    for hline in spec.hlines:
+        label = {"annotation_text": hline.label, "annotation_position": "top left"} if hline.label else {}
+        fig.add_hline(y=hline.y, line_dash=hline.dash, line_color="gray", opacity=hline.opacity, **label)
     fig.update_layout(
         title=spec.title,
         xaxis_title=spec.x_title,
@@ -104,6 +166,9 @@ def line(spec: LineSpec) -> go.Figure:
         hovermode="x unified",
         legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
     )
+    fig.update_xaxes(**_axis_kwargs(spec.x_format))
+    if spec.x_tick_step is not None:
+        fig.update_xaxes(dtick=spec.x_tick_step)
     fig.update_yaxes(**_axis_kwargs(spec.y_format))
     if spec.y_range is not None:
         fig.update_yaxes(range=list(spec.y_range))
