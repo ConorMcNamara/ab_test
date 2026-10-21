@@ -122,12 +122,29 @@ class ForestSpec:
 
 @dataclass(frozen=True)
 class LineSeries:
-    """One line of a line chart."""
+    """One line of a line chart.
+
+    Parameters
+    ----------
+    name : str
+        Legend entry of the line.
+    x, y : list of float
+        The line's points.
+    color : str or None
+        Color of the line; ``None`` uses the first color of Plotly's palette.
+    dash : {"dash", "dot"} or None
+        Dash pattern, such as for a baseline to compare against; ``None`` draws
+        a solid line.
+    markers : bool
+        Whether to mark each point, such as when the points are few.
+    """
 
     name: str
     x: list[float]
     y: list[float]
     color: str | None = None
+    dash: str | None = None
+    markers: bool = False
 
 
 @dataclass(frozen=True)

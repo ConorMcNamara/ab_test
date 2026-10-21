@@ -9,7 +9,7 @@ import scipy.stats as ss
 from scipy.optimize import brentq
 
 from ab_test._plotting import Figure, render, validate_backend
-from ab_test._plotting.spec import AxisFormat, HLine, LineSeries, LineSpec
+from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test._lift import _SCALED_LIFTS, from_absolute, to_absolute
 from ab_test.frequentist_binomial.utils import simple_hypothesis_from_composite
 
@@ -540,15 +540,8 @@ def plot_power_curve(
         for ss in sample_sizes
     ]
 
-    spec = LineSpec(
-        series=[LineSeries("Power", [int(n) for n in sample_sizes], [float(p) for p in powers], color="#636EFA")],
-        title="Power Curve",
-        x_title="Total sample size",
-        y_title="Power",
-        y_format=AxisFormat(tickformat=",.0%"),
-        y_range=(0.0, 1.05),
-        hlines=[HLine(0.8, "80% power")],
-        dark_mode=dark_mode,
+    spec = power_curve_spec(
+        [curve("Power", sample_sizes, powers)], "Power Curve", "Total sample size", dark_mode=dark_mode
     )
     return render(spec, backend)
 
@@ -665,12 +658,7 @@ def plot_sensitivity_curve(
         "cpa": "Maximum detectable CPA",
     }
     y_label = _lift_labels.get(lift, f"Minimum detectable {lift} lift")
-    spec = LineSpec(
-        series=[LineSeries("MDL", [int(n) for n in sample_sizes], [float(m) for m in mdls], color="#636EFA")],
-        title="Sensitivity Curve",
-        x_title="Total sample size",
-        y_title=y_label,
-        y_format=AxisFormat(tickformat=",.0%" if lift in ("relative", "absolute") else None),
-        dark_mode=dark_mode,
+    spec = sensitivity_curve_spec(
+        [curve("MDL", sample_sizes, mdls)], "Sensitivity Curve", "Total sample size", y_label, lift, dark_mode=dark_mode
     )
     return render(spec, backend)

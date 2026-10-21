@@ -33,6 +33,8 @@ from ab_test._display import (
     resolve_plot_color,
     tabulate_summary,
 )
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.power_calculations import (
     Seed,
@@ -1687,7 +1689,8 @@ def plot_cluster_bayes_power_curve(
     *,
     seed: Seed = None,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot Bayesian CRT power as a function of clusters per arm.
 
     Parameters
@@ -1726,11 +1729,14 @@ def plot_cluster_bayes_power_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
+    plotly.graph_objects.Figure or altair.LayerChart
     """
+    validate_backend(backend)
     # One seed for the whole curve: every point reuses the same random numbers.
     entropy = _entropy(seed)
     power_fn = cluster_bayes_power_lift if decision == "lift" else cluster_bayes_power_loss
@@ -1759,37 +1765,15 @@ def plot_cluster_bayes_power_curve(
             kwargs["loss_threshold"] = loss_threshold
         powers.append(power_fn(**kwargs))
 
-    fig = go.Figure()  # type: ignore[attr-defined]
-    fig.add_trace(
-        go.Scatter(  # type: ignore[attr-defined]
-            x=list(cluster_counts),
-            y=powers,
-            mode="lines+markers",
-            line={"color": "#636EFA", "width": 2},
-            name="Power",
-        )
-    )
-    fig.add_hline(
-        y=0.8,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="80% power",
-        annotation_position="top left",
-    )
-
     rule = f"P(T>C) >= {confidence_level}" if decision == "lift" else f"E[loss] <= {loss_threshold}"
-    fig.update_layout(
-        title=f"Bayesian CRT Power Curve ({rule})",
-        xaxis_title="Clusters per arm",
-        yaxis_title="Power (Assurance)",
-        yaxis_range=[0, 1.05],
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = power_curve_spec(
+        [curve("Power", cluster_counts, powers, markers=True)],
+        f"Bayesian CRT Power Curve ({rule})",
+        "Clusters per arm",
+        y_title="Power (Assurance)",
+        dark_mode=dark_mode,
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)
 
 
 def plot_cluster_bayes_sensitivity_curve(
@@ -1808,7 +1792,8 @@ def plot_cluster_bayes_sensitivity_curve(
     *,
     seed: Seed = None,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot minimum detectable lift as a function of clusters per arm.
 
     Parameters
@@ -1845,11 +1830,14 @@ def plot_cluster_bayes_sensitivity_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
+    plotly.graph_objects.Figure or altair.LayerChart
     """
+    validate_backend(backend)
     # One seed for the whole curve: every point reuses the same random numbers.
     entropy = _entropy(seed)
     mdl_fn = cluster_bayes_minimum_detectable_lift if decision == "lift" else cluster_bayes_minimum_detectable_lift_loss
@@ -1877,27 +1865,14 @@ def plot_cluster_bayes_sensitivity_curve(
             kwargs["loss_threshold"] = loss_threshold
         mdls.append(mdl_fn(**kwargs))
 
-    fig = go.Figure()  # type: ignore[attr-defined]
-    fig.add_trace(
-        go.Scatter(  # type: ignore[attr-defined]
-            x=list(cluster_counts),
-            y=mdls,
-            mode="lines+markers",
-            line={"color": "#636EFA", "width": 2},
-            name="MDL",
-        )
-    )
-
     y_label = f"Minimum detectable {lift} lift"
     rule = f"P(T>C) >= {confidence_level}" if decision == "lift" else f"E[loss] <= {loss_threshold}"
-    fig.update_layout(
-        title=f"Bayesian CRT Sensitivity Curve ({rule})",
-        xaxis_title="Clusters per arm",
-        yaxis_title=y_label,
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = sensitivity_curve_spec(
+        [curve("MDL", cluster_counts, mdls, markers=True)],
+        f"Bayesian CRT Sensitivity Curve ({rule})",
+        "Clusters per arm",
+        y_label,
+        lift,
+        dark_mode=dark_mode,
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)

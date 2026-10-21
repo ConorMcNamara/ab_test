@@ -55,6 +55,8 @@ import plotly.graph_objects as go
 import scipy.stats as ss
 
 from ab_test._display import apply_dark_mode, format_percent, resolve_plot_color
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
@@ -896,7 +898,8 @@ def plot_cupac_power_curve(
     *,
     comparisons: str = "control",
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot statistical power as a function of total sample size with CUPAC adjustment.
 
     Overlays the unadjusted power curve so that the variance-reduction
@@ -934,13 +937,17 @@ def plot_cupac_power_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure with total sample size on the x-axis and
-        power on the y-axis, showing both adjusted and unadjusted curves.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, with total sample size
+        on the x-axis and power on the y-axis, showing both adjusted and
+        unadjusted curves.
     """
+    validate_backend(backend)
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
@@ -988,45 +995,12 @@ def plot_cupac_power_curve(
         for ss in sample_sizes
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=adjusted_powers,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name=f"CUPAC-adjusted (R²={r_squared:.2f})",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=unadjusted_powers,
-            mode="lines",
-            line={"color": "#EF553B", "width": 2, "dash": "dot"},
-            name="Unadjusted",
-        )
-    )
-    fig.add_hline(
-        y=0.8,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="80% power",
-        annotation_position="top left",
-    )
-
-    fig.update_layout(
-        title="Power Curve (CUPAC-adjusted)",
-        xaxis_title="Total sample size",
-        yaxis_title="Power",
-        yaxis_range=[0, 1.05],
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
-    )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    series = [
+        curve(f"CUPAC-adjusted (R²={r_squared:.2f})", sample_sizes, adjusted_powers),
+        curve("Unadjusted", sample_sizes, unadjusted_powers, baseline_dash="dot"),
+    ]
+    spec = power_curve_spec(series, "Power Curve (CUPAC-adjusted)", "Total sample size", dark_mode=dark_mode)
+    return render(spec, backend)
 
 
 def plot_cupac_sensitivity_curve(
@@ -1042,7 +1016,8 @@ def plot_cupac_sensitivity_curve(
     *,
     comparisons: str = "control",
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot minimum detectable lift as a function of total sample size with CUPAC adjustment.
 
     Overlays the unadjusted sensitivity curve so that the
@@ -1080,14 +1055,17 @@ def plot_cupac_sensitivity_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure with total sample size on the x-axis and
-        minimum detectable lift on the y-axis, showing both adjusted and
-        unadjusted curves.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, with total sample size
+        on the x-axis and minimum detectable lift on the y-axis, showing both
+        adjusted and unadjusted curves.
     """
+    validate_backend(backend)
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
@@ -1136,35 +1114,12 @@ def plot_cupac_sensitivity_curve(
         for ss in sample_sizes
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=adjusted_mdls,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name=f"CUPAC-adjusted (R²={r_squared:.2f})",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=unadjusted_mdls,
-            mode="lines",
-            line={"color": "#EF553B", "width": 2, "dash": "dot"},
-            name="Unadjusted",
-        )
-    )
-
+    series = [
+        curve(f"CUPAC-adjusted (R²={r_squared:.2f})", sample_sizes, adjusted_mdls),
+        curve("Unadjusted", sample_sizes, unadjusted_mdls, baseline_dash="dot"),
+    ]
     y_label = f"Minimum detectable {lift} lift"
-    fig.update_layout(
-        title="Sensitivity Curve (CUPAC-adjusted)",
-        xaxis_title="Total sample size",
-        yaxis_title=y_label,
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = sensitivity_curve_spec(
+        series, "Sensitivity Curve (CUPAC-adjusted)", "Total sample size", y_label, lift, dark_mode=dark_mode
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)

@@ -26,6 +26,8 @@ import scipy.stats as ss
 from scipy.optimize import brentq
 
 from ab_test._display import apply_dark_mode
+from ab_test._plotting import Figure, render, validate_backend
+from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
@@ -762,7 +764,8 @@ def plot_gst_power_curve(
     n_points: int = 100,
     *,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot power vs sample size for GST and fixed-horizon designs.
 
     Parameters
@@ -794,12 +797,15 @@ def plot_gst_power_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure with two traces.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, with two traces.
     """
+    validate_backend(backend)
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
@@ -847,45 +853,12 @@ def plot_gst_power_curve(
         for ss in sample_sizes
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=gst_powers,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name=f"GST ({n_analyses} analyses)",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=fixed_powers,
-            mode="lines",
-            line={"color": "#EF553B", "width": 2, "dash": "dash"},
-            name="Fixed-horizon",
-        )
-    )
-    fig.add_hline(
-        y=0.8,
-        line_dash="dash",
-        line_color="gray",
-        annotation_text="80% power",
-        annotation_position="top left",
-    )
-
-    fig.update_layout(
-        title="Power Curve: GST vs Fixed-Horizon",
-        xaxis_title="Total sample size",
-        yaxis_title="Power",
-        yaxis_range=[0, 1.05],
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
-    )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    series = [
+        curve(f"GST ({n_analyses} analyses)", sample_sizes, gst_powers),
+        curve("Fixed-horizon", sample_sizes, fixed_powers, baseline_dash="dash"),
+    ]
+    spec = power_curve_spec(series, "Power Curve: GST vs Fixed-Horizon", "Total sample size", dark_mode=dark_mode)
+    return render(spec, backend)
 
 
 def plot_gst_sensitivity_curve(
@@ -903,7 +876,8 @@ def plot_gst_sensitivity_curve(
     n_points: int = 100,
     *,
     dark_mode: bool = False,
-) -> go.Figure:
+    backend: str = "plotly",
+) -> Figure:
     """Plot minimum detectable lift vs sample size for GST and fixed-horizon.
 
     Parameters
@@ -935,12 +909,15 @@ def plot_gst_sensitivity_curve(
     dark_mode : bool, default=False
         Render on a dark background with light text and gridlines (Plotly's
         ``"plotly_dark"`` template).
+    backend : {"plotly", "altair"}, default="plotly"
+        Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
     Returns
     -------
-    go.Figure
-        An interactive Plotly figure with two traces.
+    plotly.graph_objects.Figure or altair.LayerChart
+        An interactive Plotly figure, or Altair chart, with two traces.
     """
+    validate_backend(backend)
     if group_proportions is None:
         group_proportions = [0.5, 0.5]
 
@@ -989,35 +966,12 @@ def plot_gst_sensitivity_curve(
         for ss in sample_sizes
     ]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=gst_mdls,
-            mode="lines",
-            line={"color": "#636EFA", "width": 2},
-            name=f"GST ({n_analyses} analyses)",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=list(sample_sizes),
-            y=fixed_mdls,
-            mode="lines",
-            line={"color": "#EF553B", "width": 2, "dash": "dash"},
-            name="Fixed-horizon",
-        )
-    )
-
+    series = [
+        curve(f"GST ({n_analyses} analyses)", sample_sizes, gst_mdls),
+        curve("Fixed-horizon", sample_sizes, fixed_mdls, baseline_dash="dash"),
+    ]
     y_label = f"Minimum detectable {lift} lift"
-    fig.update_layout(
-        title="Sensitivity Curve: GST vs Fixed-Horizon",
-        xaxis_title="Total sample size",
-        yaxis_title=y_label,
-        yaxis_tickformat=",.0%",
-        template="plotly_white",
-        hovermode="x unified",
-        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+    spec = sensitivity_curve_spec(
+        series, "Sensitivity Curve: GST vs Fixed-Horizon", "Total sample size", y_label, lift, dark_mode=dark_mode
     )
-    apply_dark_mode(fig, dark_mode)
-    return fig
+    return render(spec, backend)

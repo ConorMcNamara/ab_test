@@ -76,12 +76,15 @@ def line(spec: LineSpec) -> go.Figure:
     """Draw a line chart with dashed horizontal reference lines."""
     fig = go.Figure()
     for series in spec.series:
+        line_style = {"color": series.color or "#636EFA", "width": 2}
+        if series.dash is not None:
+            line_style["dash"] = series.dash
         fig.add_trace(
             go.Scatter(
                 x=series.x,
                 y=series.y,
-                mode="lines",
-                line={"color": series.color or "#636EFA", "width": 2},
+                mode="lines+markers" if series.markers else "lines",
+                line=line_style,
                 name=series.name,
             )
         )

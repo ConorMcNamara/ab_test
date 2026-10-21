@@ -13,6 +13,9 @@ from ab_test._plotting.spec import AxisFormat, ForestSpec, LineSpec
 
 __all__ = ["forest", "line"]
 
+# Vega stroke dashes for the spec's dash names; [1, 0] is solid.
+_DASHES = {None: [1, 0], "dash": [6, 4], "dot": [2, 3]}
+
 # Vega's "dark" theme, written into the chart so it holds in static exports
 # too, not only where vega-embed applies the theme.
 _DARK_BACKGROUND = "#333"
@@ -153,12 +156,19 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
     )
     names = [series.name for series in spec.series]
     colors = [series.color or "#636EFA" for series in spec.series]
-    color = alt.Color(
-        "series:N",
-        scale=alt.Scale(domain=names, range=colors),
-        # Like Plotly, a lone line gets no legend.
-        legend=alt.Legend(title=None, orient="top-right") if len(names) > 1 else None,
+    # Like Plotly, a lone line gets no legend.
+    # Above the plot like Plotly's, with line samples that show each dash pattern.
+    legend = (
+        alt.Legend(title=None, orient="top", direction="horizontal", symbolType="stroke", symbolStrokeWidth=2)
+        if len(names) > 1
+        else None
     )
+    color = alt.Color("series:N", scale=alt.Scale(domain=names, range=colors), legend=legend)
+    # Same field and legend as the color, so Vega merges them into one legend.
+    dash = alt.StrokeDash(
+        "series:N", scale=alt.Scale(domain=names, range=[_DASHES[s.dash] for s in spec.series]), legend=legend
+    )
+    marked = [series.name for series in spec.series if series.markers]
     y_scale = alt.Scale(domain=list(spec.y_range), nice=False) if spec.y_range is not None else alt.Scale(zero=False)
     base = alt.Chart(data).encode(
         x=alt.X("x:Q", title=spec.x_title),
@@ -167,8 +177,14 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
     )
     # Hovering anywhere marks the nearest x and shows every line's value there.
     nearest = alt.selection_point(nearest=True, on="pointerover", fields=["x"], empty=False)
-    layers: list[Any] = [
-        base.mark_line(strokeWidth=2),
+    layers: list[Any] = [base.mark_line(strokeWidth=2).encode(strokeDash=dash)]
+    if marked:
+        layers.append(
+            base.mark_point(filled=True, opacity=1.0).transform_filter(
+                alt.FieldOneOfPredicate(field="series", oneOf=marked)
+            )
+        )
+    layers += [
         base.mark_point(filled=True)
         .encode(
             opacity=alt.condition(nearest, alt.value(1.0), alt.value(0.0)),

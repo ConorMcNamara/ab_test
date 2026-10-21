@@ -7,11 +7,17 @@ import pytest
 
 from ab_test._display import effect_panel, forest_spec, render_forest_plot
 from ab_test._plotting import render, validate_backend
+from ab_test._plotting.curves import curve, sensitivity_curve_spec
+from ab_test.bayesian_binomial.cluster import plot_cluster_bayes_power_curve, plot_cluster_bayes_sensitivity_curve
 from ab_test.bayesian_binomial.contingency import BayesianContingencyTable
 from ab_test.bayesian_binomial.diff_in_diff import BayesianDiffInDiff
+from ab_test.bayesian_binomial.power_calculations import plot_bayes_power_curve, plot_bayes_sensitivity_curve
 from ab_test.bayesian_binomial.stratified import BayesianStratifiedContingencyTable
+from ab_test.frequentist_binomial.cluster import plot_cluster_power_curve, plot_cluster_sensitivity_curve
 from ab_test.frequentist_binomial.contingency import ContingencyTable
+from ab_test.frequentist_binomial.cupac import plot_cupac_power_curve, plot_cupac_sensitivity_curve
 from ab_test.frequentist_binomial.diff_in_diff import DiffInDiff
+from ab_test.frequentist_binomial.gst import plot_gst_power_curve, plot_gst_sensitivity_curve
 from ab_test.frequentist_binomial.power_calculations import plot_power_curve, plot_sensitivity_curve
 from ab_test.frequentist_binomial.stratified import StratifiedContingencyTable
 
@@ -310,3 +316,97 @@ class TestLineAltair:
     @staticmethod
     def test_plotly_figure_by_default():
         assert isinstance(plot_sensitivity_curve(0.1, sample_sizes=[1000, 2000]), go.Figure)
+
+
+BAYES_SIM = {"n_samples": 50, "mc_samples": 50, "seed": 0}
+
+# Each curve with cheap arguments; ``backend`` is passed through as a keyword.
+CURVES = {
+    "power": lambda **kw: plot_power_curve(0.1, 0.2, sample_sizes=[1000, 2000], **kw),
+    "sensitivity": lambda **kw: plot_sensitivity_curve(0.1, sample_sizes=[1000, 2000], **kw),
+    "cluster_power": lambda **kw: plot_cluster_power_curve(0.1, 0.2, 0.02, 50, sample_sizes=[2000, 4000], **kw),
+    "cluster_sensitivity": lambda **kw: plot_cluster_sensitivity_curve(0.1, 0.02, 50, sample_sizes=[2000, 4000], **kw),
+    "cupac_power": lambda **kw: plot_cupac_power_curve(0.1, 0.2, 0.3, n_points=3, **kw),
+    "cupac_sensitivity": lambda **kw: plot_cupac_sensitivity_curve(0.1, 0.3, n_points=3, **kw),
+    "gst_power": lambda **kw: plot_gst_power_curve(0.1, 0.2, 3, sample_sizes=[2000, 4000], **kw),
+    "gst_sensitivity": lambda **kw: plot_gst_sensitivity_curve(0.1, 3, sample_sizes=[2000, 4000], **kw),
+    "bayes_power": lambda **kw: plot_bayes_power_curve(
+        [1, 1], [1, 1], 0.1, alt_lift=0.2, sample_sizes=[500, 1000], **BAYES_SIM, **kw
+    ),
+    "bayes_sensitivity": lambda **kw: plot_bayes_sensitivity_curve(
+        [1, 1], [1, 1], 0.1, sample_sizes=[500, 1000], **BAYES_SIM, **kw
+    ),
+    "cluster_bayes_power": lambda **kw: plot_cluster_bayes_power_curve(
+        0.02, 100, 0.1, alt_lift=0.2, cluster_counts=[5, 10], **BAYES_SIM, **kw
+    ),
+    "cluster_bayes_sensitivity": lambda **kw: plot_cluster_bayes_sensitivity_curve(
+        0.02, 100, 0.1, cluster_counts=[5, 10], **BAYES_SIM, **kw
+    ),
+}
+
+
+def _series(chart_dict):
+    """Each line of an Altair line chart, as {name: (xs, ys)}."""
+    lines = {}
+    for row in _rows(chart_dict, chart_dict):
+        xs, ys = lines.setdefault(row["series"], ([], []))
+        xs.append(row["x"])
+        ys.append(row["y"])
+    return lines
+
+
+class TestCurvesAltair:
+    @pytest.mark.parametrize("name", CURVES)
+    def test_altair_draws_the_plotly_lines(self, name):
+        fig = CURVES[name]()
+        assert isinstance(fig, go.Figure)
+        chart = CURVES[name](backend="altair")
+        assert isinstance(chart, alt.LayerChart)
+        spec = chart.to_dict()
+        assert spec["title"] == fig.layout.title.text
+        lines = _series(spec)
+        assert list(lines) == [trace.name for trace in fig.data]
+        for trace in fig.data:
+            xs, ys = lines[trace.name]
+            assert xs == pytest.approx(list(trace.x))
+            assert ys == pytest.approx(list(trace.y))
+
+    @pytest.mark.parametrize("name", [name for name in CURVES if name.endswith("power")])
+    def test_power_curves_mark_80_percent(self, name):
+        spec = CURVES[name](backend="altair").to_dict()
+        rules = [
+            layer for layer in spec["layer"] if layer["mark"] == {"type": "rule", "color": "gray", "strokeDash": [6, 4]}
+        ]
+        assert [_rows(spec, rule) for rule in rules] == [[{"y": 0.8, "label": "80% power"}]]
+
+    @pytest.mark.parametrize(
+        ("name", "dash", "plotly_dash"),
+        [("cupac_power", [2, 3], "dot"), ("cluster_sensitivity", [2, 3], "dot"), ("gst_power", [6, 4], "dash")],
+    )
+    def test_baseline_is_dashed(self, name, dash, plotly_dash):
+        fig = CURVES[name]()
+        assert [trace.line.dash for trace in fig.data] == [None, plotly_dash]
+        line = CURVES[name](backend="altair").to_dict()["layer"][0]
+        assert line["encoding"]["strokeDash"]["scale"]["range"] == [[1, 0], dash]
+        # Two lines get one legend, carrying both color and dash.
+        assert line["encoding"]["color"]["legend"] == line["encoding"]["strokeDash"]["legend"]
+
+    @pytest.mark.parametrize("name", ["cluster_bayes_power", "cluster_bayes_sensitivity"])
+    def test_few_points_are_marked(self, name):
+        assert CURVES[name]().data[0].mode == "lines+markers"
+        layers = CURVES[name](backend="altair").to_dict()["layer"]
+        assert layers[1]["transform"] == [
+            {"filter": {"field": "series", "oneOf": ["Power" if "power" in name else "MDL"]}}
+        ]
+        assert layers[1]["mark"]["opacity"] == 1.0
+
+    @pytest.mark.parametrize("name", CURVES)
+    def test_dark_mode(self, name):
+        spec = CURVES[name](backend="altair", dark_mode=True).to_dict()
+        assert spec["usermeta"]["embedOptions"]["theme"] == "dark"
+
+    @staticmethod
+    def test_sensitivity_ticks_are_percent_only_for_rates():
+        series = [curve("MDL", [1, 2], [0.1, 0.2])]
+        assert sensitivity_curve_spec(series, "t", "x", "y", "relative").y_format.tickformat == ",.0%"
+        assert sensitivity_curve_spec(series, "t", "x", "y", "revenue").y_format.tickformat is None
