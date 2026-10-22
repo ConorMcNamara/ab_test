@@ -429,7 +429,9 @@ def forest_spec(
                     )
                 points.append(ForestPoint(row_name, row["lift"], row["ci_lower"], row["ci_upper"], c_row))
             axis_format = AxisFormat(**_lift_axis_format(result["lift_type"]))
-            panels.append(ForestPanel(points, x_title=label, x_format=axis_format))
+            # No effect is a lift of zero, except for CPA, where it is an infinite cost per acquisition.
+            vlines = [] if result["lift_type"] == "cpa" else [VLine(0.0)]
+            panels.append(ForestPanel(points, x_title=label, x_format=axis_format, vlines=vlines))
         compared = f"{names[0]} vs. {names[1]}" if len(names) == 2 else "Each Comparison"
         lift_labels = " and ".join(panel.x_title or "Lift" for panel in panels)
         title = f"{lift_labels} of {compared}{f': {subtitle}' if subtitle else ''}"

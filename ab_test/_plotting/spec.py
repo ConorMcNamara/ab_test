@@ -107,13 +107,25 @@ class ForestPanel:
     x_format : AxisFormat
         Tick labels of the x-axis.
     vlines : list of VLine
-        Vertical reference lines.
+        Vertical reference lines; the first is the null effect that an
+        interval must exclude for its marker to be drawn filled.
     """
 
     points: list[ForestPoint]
     x_title: str | None = None
     x_format: AxisFormat = field(default_factory=AxisFormat)
     vlines: list[VLine] = field(default_factory=list)
+
+    def filled(self, point: ForestPoint) -> bool:
+        """Whether ``point`` is drawn filled: hollow only when its interval spans the null.
+
+        Points without an interval, and every point of a panel without a
+        reference line, are filled.
+        """
+        if not self.vlines or point.lower is None or point.upper is None:
+            return True
+        null = self.vlines[0].x
+        return not point.lower <= null <= point.upper
 
 
 @dataclass(frozen=True)

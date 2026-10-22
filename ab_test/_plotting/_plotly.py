@@ -55,6 +55,9 @@ def forest(spec: ForestSpec) -> go.Figure:
         for point in panel.points:
             color = colors[point.label]
             marker: dict[str, Any] = {"symbol": point.shape, "size": point.size, "color": color}
+            if not panel.filled(point):
+                # Hollow when the interval spans the null effect.
+                marker.update(symbol=f"{point.shape}-open", line={"width": 2})
             trace = go.Scatter(x=[point.estimate], y=[point.label], marker=marker, name=point.label)  # type: ignore[attr-defined]
             if point.lower is not None and point.upper is not None:
                 error_x: dict[str, Any] = {
