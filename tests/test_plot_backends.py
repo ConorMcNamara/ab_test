@@ -168,6 +168,28 @@ class TestForestAltair:
         assert panel.filled(panel.points[0])
 
     @staticmethod
+    def test_cpa_markers_are_hollow_when_a_bound_is_infinite():
+        # A CPA bound is infinite when the incremental effect's interval reaches zero.
+        cpa = {"lift": 50.0, "ci_lower": 30.0, "ci_upper": float("inf"), "lift_type": "cpa"}
+        (panel,) = forest_spec(["A", "B"], {}, cpa, is_individual=False).panels
+        assert not panel.filled(panel.points[0])
+
+    @staticmethod
+    def test_segment_markers_are_hollow_when_the_interval_spans_zero():
+        panel = effect_panel(["a", "b"], [0.1, 0.2], [-0.1, 0.1], [0.3, 0.3], "absolute", pooled=(0.15, 0.05, 0.25))
+        assert [panel.filled(point) for point in panel.points] == [False, True, True]
+        fig = render(ForestSpec([panel], title="t", y_title="y"), "plotly")
+        assert [trace.marker.symbol for trace in fig.data] == ["circle-open", "circle", "diamond"]
+
+    @staticmethod
+    def test_cupac_markers_follow_their_intervals():
+        fig = _cupac().plot()
+        for trace in fig.data:
+            (estimate,) = trace.x
+            lower, upper = estimate - trace.error_x.arrayminus[0], estimate + trace.error_x.array[0]
+            assert trace.marker.symbol == ("diamond-open" if lower <= 0 <= upper else "diamond")
+
+    @staticmethod
     def test_both_lifts_are_side_by_side_panels():
         spec = forest_spec(["Control", "Treatment"], {}, [ABSOLUTE, RELATIVE], is_individual=False)
         chart = render(spec, "altair").to_dict()

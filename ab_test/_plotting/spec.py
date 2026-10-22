@@ -6,6 +6,7 @@ only data, labels and formats, never library objects, so both backends draw
 the same plot from it.
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -119,10 +120,16 @@ class ForestPanel:
     def filled(self, point: ForestPoint) -> bool:
         """Whether ``point`` is drawn filled: hollow only when its interval spans the null.
 
-        Points without an interval, and every point of a panel without a
-        reference line, are filled.
+        An infinite bound also counts as spanning the null: CPA's null is an
+        infinite cost, which its interval reaches whenever the incremental
+        effect's does zero. Points without an interval, and otherwise every
+        point of a panel without a reference line, are filled.
         """
-        if not self.vlines or point.lower is None or point.upper is None:
+        if point.lower is None or point.upper is None:
+            return True
+        if math.isinf(point.lower) or math.isinf(point.upper):
+            return False
+        if not self.vlines:
             return True
         null = self.vlines[0].x
         return not point.lower <= null <= point.upper
