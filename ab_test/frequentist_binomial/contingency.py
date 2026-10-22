@@ -114,7 +114,7 @@ class ContingencyTable(BaseContingencyTable):
     >>> table = table.add("Control", 1000, 10000).add("Treatment", 1100, 10000)
     >>> print(table.analyze(lift="relative"))  # doctest: +SKIP
     >>> print(table.analyze_individually())  # doctest: +SKIP
-    >>> table.plot(is_individual=False)  # doctest: +SKIP
+    >>> table.plot(is_individual=False).show()  # doctest: +SKIP
     """
 
     _columns: ClassVar[list[str]] = ["cell_name", "successes", "trials"]

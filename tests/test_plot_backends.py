@@ -1,5 +1,6 @@
 """Tests for drawing plot specs with the Plotly and Altair backends."""
 
+import datetime
 import importlib.util
 
 import plotly.graph_objects as go
@@ -10,6 +11,7 @@ from tests.test_dark_mode import _clusters, _cupac, _msprt_tables
 from ab_test._display import effect_panel, forest_spec, render_forest_plot
 from ab_test._plotting import render, validate_backend
 from ab_test._plotting.curves import curve, sensitivity_curve_spec
+from ab_test._plotting.spec import ForestPanel, ForestPoint, ForestSpec
 from ab_test.bayesian_binomial.cluster import (
     BayesianClusterRandomizedTrial,
     plot_cluster_bayes_power_curve,
@@ -117,6 +119,23 @@ class TestForestAltair:
         chart = render(forest_spec(["A", "B"], INDIVIDUAL, None), "altair").to_dict()
         ((whisker, _, _),) = _layers(chart)
         assert whisker["encoding"]["color"]["scale"]["range"] == ["#636EFA", "#EF553B", "#00CC96"]
+
+    @staticmethod
+    def test_row_takes_its_first_explicit_color_in_both_backends():
+        # Uncolored in the first panel, red in the second: red in both panels and both backends.
+        spec = ForestSpec(
+            panels=[
+                ForestPanel([ForestPoint("A", 0.1, 0.0, 0.2), ForestPoint("B", 0.2, 0.1, 0.3)]),
+                ForestPanel([ForestPoint("A", 0.1, 0.0, 0.2, color="#ff0000"), ForestPoint("B", 0.2, 0.1, 0.3)]),
+            ],
+            title="t",
+            y_title="y",
+        )
+        chart = render(spec, "altair").to_dict()
+        scale = _layers(chart)[0][0]["encoding"]["color"]["scale"]
+        assert dict(zip(scale["domain"], scale["range"], strict=True)) == {"A": "#ff0000", "B": "#EF553B"}
+        fig = render(spec, "plotly")
+        assert {(trace.name, trace.marker.color) for trace in fig.data} == {("A", "#ff0000"), ("B", "#EF553B")}
 
     @staticmethod
     def test_both_lifts_are_side_by_side_panels():
@@ -496,6 +515,22 @@ class TestOtherPlotsAltair:
         fig = OTHER_PLOTS["msprt"]()
         assert [trace.fill for trace in fig.data] == [None, "tonexty", None]
         assert fig.data[1].fillcolor == "rgba(99, 110, 250, 0.2)"
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        ("labels", "text"),
+        [
+            ([3, 1], ["3", "1"]),
+            ([datetime.date(2024, 1, 2), datetime.date(2024, 1, 1)], ["2024-01-02", "2024-01-01"]),
+        ],
+    )
+    def test_msprt_non_string_checkpoints_keep_their_order(labels, text):
+        chart = plot_msprt_over_time(_msprt_tables(), labels, backend="altair")
+        chart.to_json()  # Dates must serialize.
+        spec = chart.to_dict()
+        assert [row["x"] for row in _rows(spec, spec["layer"][0])] == text
+        assert spec["layer"][1]["encoding"]["x"]["sort"] == text
+        assert {row["x"] for row in _rows(spec, spec["layer"][1])} == set(text)
 
     @staticmethod
     def test_time_trend_error_bars():

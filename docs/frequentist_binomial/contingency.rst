@@ -57,7 +57,8 @@ With three or more cells (an A/B/n test), ``analyze()`` reports:
 
    ct.incremental_results["omnibus"]["p_value"]
    ct.incremental_results["comparisons"]["C vs A"]["p_value"]   # adjusted
-   ct.plot(is_individual=False)                            # one row per comparison
+   fig = ct.plot(is_individual=False)                      # one row per comparison
+   fig.show()
 
 Scaled lifts (``"incremental"``, ``"roas"``, ``"revenue"``, ``"cpa"``) are
 expressed over one common number of units for every comparison, the table's

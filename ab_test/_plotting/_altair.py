@@ -9,7 +9,7 @@ from typing import Any
 import altair as alt
 import pandas as pd
 
-from ab_test._plotting.spec import AxisFormat, ForestSpec, LineSpec
+from ab_test._plotting.spec import AxisFormat, ForestSpec, LineSpec, label_colors
 
 __all__ = ["forest", "line"]
 
@@ -77,12 +77,8 @@ def _color_scale(labels: list[str], colors: list[str | None]) -> alt.Scale:
     The domain is explicit, so a legend shared with another channel, such as
     stroke dash, merges into one.
     """
-    by_label: dict[str, str | None] = dict(zip(labels, colors, strict=True))
-    domain = list(by_label)
-    return alt.Scale(
-        domain=domain,
-        range=[by_label[label] or _PLOTLY_COLORS[i % len(_PLOTLY_COLORS)] for i, label in enumerate(domain)],
-    )
+    by_label = label_colors(labels, colors, _PLOTLY_COLORS)
+    return alt.Scale(domain=list(by_label), range=list(by_label.values()))
 
 
 def _rgba(color: str, alpha: float) -> str:
@@ -225,12 +221,17 @@ def _only(names: list[str]) -> alt.FieldOneOfPredicate:
     return alt.FieldOneOfPredicate(field="series", oneOf=names)
 
 
+def _x_value(x: Any, spec: LineSpec) -> Any:
+    """Turn a categorical x value into its label text, so it serializes and matches the sort order."""
+    return str(x) if spec.x_categorical else x
+
+
 def line(spec: LineSpec) -> alt.TopLevelMixin:
     """Draw a line chart with its bands, bars and dashed horizontal reference lines."""
     data = pd.DataFrame(
         {
             "series": [series.name for series in spec.series for _ in series.x],
-            "x": [x for series in spec.series for x in series.x],
+            "x": [_x_value(x, spec) for series in spec.series for x in series.x],
             "y": [y for series in spec.series for y in series.y],
             "err": [e for series in spec.series for e in (series.errors or [float("nan")] * len(series.x))],
             "shape": [series.marker_shape for series in spec.series for _ in series.x],
@@ -299,7 +300,7 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
         bands = pd.DataFrame(
             {
                 "series": [band.name for band in spec.bands for _ in band.x],
-                "x": [x for band in spec.bands for x in band.x],
+                "x": [_x_value(x, spec) for band in spec.bands for x in band.x],
                 "lower": [y for band in spec.bands for y in band.lower],
                 "upper": [y for band in spec.bands for y in band.upper],
             }

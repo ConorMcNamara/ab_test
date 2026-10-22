@@ -44,7 +44,8 @@ Usage
 
    test = DiffInDiff(men, women)
    print(test.analyze(lift="absolute", alpha=0.05, correction="holm"))
-   test.plot(lift="absolute", alpha=0.05)
+   fig = test.plot(lift="absolute", alpha=0.05)
+   fig.show()
 
 Segments must be **independent** — the same user should not appear in multiple
 segment tables.  If your segments overlap, the variance estimates (and therefore

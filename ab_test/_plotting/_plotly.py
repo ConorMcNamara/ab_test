@@ -6,7 +6,7 @@ import plotly.colors
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from ab_test._plotting.spec import AxisFormat, ForestSpec, LineSpec
+from ab_test._plotting.spec import AxisFormat, ForestSpec, LineSpec, label_colors
 
 __all__ = ["forest", "line"]
 
@@ -42,10 +42,10 @@ def forest(spec: ForestSpec) -> go.Figure:
     """Draw a forest plot, one subplot per panel sharing the y-axis."""
     multi = len(spec.panels) > 1
     # Each row keeps one color in every panel: its own, or Plotly's next default color.
-    palette = plotly.colors.qualitative.Plotly
-    colors: dict[str, str] = {}
-    for point in (point for panel in spec.panels for point in panel.points):
-        colors.setdefault(point.label, point.color or palette[len(colors) % len(palette)])
+    points = [point for panel in spec.panels for point in panel.points]
+    colors = label_colors(
+        [point.label for point in points], [point.color for point in points], plotly.colors.qualitative.Plotly
+    )
     fig = (
         make_subplots(rows=1, cols=len(spec.panels), shared_yaxes=True, horizontal_spacing=0.08)
         if multi

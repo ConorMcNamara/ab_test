@@ -32,7 +32,8 @@ Usage
    print(st.analyze_by_stratum(lift="absolute"))
 
    # Forest plot with pooled diamond
-   st.plot(lift="absolute")
+   fig = st.plot(lift="absolute")
+   fig.show()
 
 Three or More Variants
 ----------------------
