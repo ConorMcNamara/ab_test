@@ -2,7 +2,6 @@
 
 import math
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import numpy as np
@@ -240,15 +239,10 @@ def confidence_interval(
                 ub_lb = ote
                 ub_ub = min(ote + 0.01, 1.0)
 
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                lb_future = executor.submit(
-                    _search_lower_bound, test, trials, successes, lb_lb, lb_ub, alpha, lift, tol
-                )
-                ub_future = executor.submit(
-                    _search_upper_bound, test, trials, successes, ub_lb, ub_ub, alpha, lift, tol, upper_bound_exists
-                )
-                lb = lb_future.result()
-                ub = ub_future.result()
+            # Sequential: the searches are pure Python, so threads could not run them in parallel
+            # and starting a pool cost as much as the searches themselves.
+            lb = _search_lower_bound(test, trials, successes, lb_lb, lb_ub, alpha, lift, tol)
+            ub = _search_upper_bound(test, trials, successes, ub_lb, ub_ub, alpha, lift, tol, upper_bound_exists)
         else:
             raise NotImplementedError(f"binary_search is not implemented for {test}")
     else:

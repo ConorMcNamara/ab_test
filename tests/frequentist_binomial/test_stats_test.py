@@ -296,6 +296,20 @@ class TestFisherTest:
         assert fisher_test(trials, successes, crit=0.05) is True
 
 
+class TestFastPValues:
+    @staticmethod
+    def test_chi2_and_normal_tails_match_scipy():
+        # The score, likelihood-ratio, z and Wald tests use erfc instead of scipy's distributions,
+        # which made inverting them for confidence intervals several times faster.
+        from ab_test.frequentist_binomial.stats_tests import _chi2_df1_sf, _two_sided_normal_p
+
+        for x in [0.0, 1e-12, 1e-6, 0.5, 3.84, 10.0, 100.0, 700.0]:
+            assert _chi2_df1_sf(x) == pytest.approx(ss.chi2.sf(x, df=1), rel=1e-12, abs=1e-300)
+            z = math.sqrt(x)
+            assert _two_sided_normal_p(z) == pytest.approx(2 * ss.norm.cdf(-z), rel=1e-12, abs=1e-300)
+            assert _two_sided_normal_p(-z) == _two_sided_normal_p(z)
+
+
 @pytest.mark.slow
 class TestBarnardTest:
     # Note that this test takes a while to go through all the permutations
@@ -331,6 +345,15 @@ class TestBarnardTest:
         monkeypatch.setattr(ss, "boschloo_exact", lambda *args, **kwargs: pytest.fail("ran the test"))
         with pytest.raises(ValueError, match="score test"):
             test([10_000, 10_000], [1_000, 1_100])
+
+    @staticmethod
+    @pytest.mark.parametrize(("test", "n"), [(barnard_exact_test, 3_000), (boschloo_exact_test, 2_000)])
+    def test_samples_within_the_limit_run(test, n, monkeypatch):
+        # Barnard takes about 6 s at 3,000 per arm and Boschloo 27 s at 2,000, so both are allowed.
+        result = type("Result", (), {"pvalue": 0.5})()
+        monkeypatch.setattr(ss, "barnard_exact", lambda *args, **kwargs: result)
+        monkeypatch.setattr(ss, "boschloo_exact", lambda *args, **kwargs: result)
+        assert test([n, n], [n // 10, n // 9]) == 0.5
 
     @staticmethod
     @pytest.mark.parametrize("test", [fisher_test, barnard_exact_test, boschloo_exact_test])

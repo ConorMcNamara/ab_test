@@ -221,8 +221,17 @@ class BayesianContingencyTable(BaseContingencyTable):
             return self._analyze_pair(settings)
         return self._analyze_many(comparisons, settings)
 
-    def _compare(self, i: int, j: int, settings: dict[str, Any]) -> dict[str, Any]:
-        """Compare cell ``j`` against cell ``i``: posterior lift, interval, P(j > i), loss and ROPE."""
+    def _compare(
+        self,
+        i: int,
+        j: int,
+        settings: dict[str, Any],
+        samples: tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Compare cell ``j`` against cell ``i``: posterior lift, interval, P(j > i), loss and ROPE.
+
+        ``samples`` are posterior draws for cells ``i`` and ``j``; without them, new ones are drawn.
+        """
         lift = settings["lift"]
         cred_int_method = settings["cred_int_method"]
         confidence_level = settings["confidence_level"]
@@ -263,6 +272,7 @@ class BayesianContingencyTable(BaseContingencyTable):
                 low_threshold,
                 high_threshold,
                 loss_in_lift_units=True,
+                samples=samples,
             )
             lb, ub = credible_interval(
                 successes,
@@ -274,6 +284,7 @@ class BayesianContingencyTable(BaseContingencyTable):
                 is_sample,
                 n_samples,
                 cred_int_method,
+                samples=samples,
             )
         elif lift in ["incremental", "roas", "revenue", "cpa"]:
             results = calculate_metrics(
@@ -288,6 +299,7 @@ class BayesianContingencyTable(BaseContingencyTable):
                 spend=self.spend,
                 msrp=self.msrp,
                 loss_in_lift_units=True,
+                samples=samples,
             )
             lb, ub = credible_interval(
                 successes,
@@ -299,6 +311,7 @@ class BayesianContingencyTable(BaseContingencyTable):
                 is_sample,
                 n_samples,
                 cred_int_method,
+                samples=samples,
             )
         else:
             raise ValueError(f"No support for lift type {lift}")
@@ -391,9 +404,17 @@ class BayesianContingencyTable(BaseContingencyTable):
         confidence_level = settings["confidence_level"]
         k = len(self.names)
         pairs = [(0, j) for j in range(1, k)] if comparisons == "control" else list(itertools.combinations(range(k), 2))
+        # One joint draw across every arm, shared by "which arm is best" and every pairwise comparison,
+        # rather than fresh draws for each of up to k(k - 1)/2 pairs.
+        draws = np.column_stack(
+            [
+                sample_beta(s, n, a, b, settings["n_samples"])
+                for s, n, a, b in zip(self.successes, self.trials, self.alphas, self.betas)
+            ]
+        )
         compared: dict[str, dict[str, Any]] = {}
         for i, j in pairs:
-            result = self._compare(i, j, settings)
+            result = self._compare(i, j, settings, samples=(draws[:, i], draws[:, j]))
             compared[f"{self.names[j]} vs {self.names[i]}"] = {
                 "lift": result["lift"],
                 f"{self.names[i]}": result["rates"][0],
@@ -404,13 +425,6 @@ class BayesianContingencyTable(BaseContingencyTable):
                 "expected_loss": result["expected_loss"],
                 "prob_rope": result["prob_rope"],
             }
-        # One joint draw across every arm for "which arm is best" and its loss.
-        draws = np.column_stack(
-            [
-                sample_beta(s, n, a, b, settings["n_samples"])
-                for s, n, a, b in zip(self.successes, self.trials, self.alphas, self.betas)
-            ]
-        )
         best = np.argmax(draws, axis=1)
         prob_best = {name: float(np.mean(best == index)) for index, name in enumerate(self.names)}
         regret = draws.max(axis=1, keepdims=True) - draws

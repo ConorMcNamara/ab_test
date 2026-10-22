@@ -32,9 +32,11 @@ __all__ = [
 _validate_two_group = validate_two_group
 
 # SciPy's Barnard and Boschloo tests evaluate every possible table, (n1 + 1) * (n2 + 1) of them,
-# at each of 32 nuisance values. At 1,000 trials per arm that already takes about 1 s for Barnard
-# and 6 s for Boschloo; at 10,000 per arm Barnard takes most of a minute and over 7 GB.
-_MAX_EXACT_TABLES = 1_500_000
+# at each of 32 nuisance values. Each limit keeps a test to about half a minute and 1 GB: Barnard
+# takes about 6 s at 3,000 trials per arm, Boschloo, about six times slower, 27 s at 2,000 per arm.
+# At 10,000 per arm Barnard takes most of a minute and over 7 GB.
+_MAX_BARNARD_TABLES = 9_200_000
+_MAX_BOSCHLOO_TABLES = 4_100_000
 
 
 def _contingency_table(
@@ -43,6 +45,21 @@ def _contingency_table(
 ) -> np.ndarray[Any, Any]:
     non_successes = np.asarray(trials) - np.asarray(successes)
     return np.array([successes, non_successes])
+
+
+def _chi2_df1_sf(statistic: float) -> float:
+    """P-value of a chi-squared statistic with one degree of freedom.
+
+    P(Z**2 >= x) = erfc(sqrt(x / 2)) for standard normal Z. On a single number
+    this is hundreds of times faster than ``scipy.stats.chi2.sf``, which
+    matters when a confidence interval inverts a test dozens of times.
+    """
+    return math.erfc(math.sqrt(statistic / 2))
+
+
+def _two_sided_normal_p(z: float) -> float:
+    """Two-sided p-value of a standard normal statistic, P(|Z| >= |z|)."""
+    return math.erfc(abs(z) / math.sqrt(2))
 
 
 def _test_result(statistic: Any, pval: Any, crit: float | None) -> float | bool:
@@ -68,12 +85,12 @@ def _pvalue_decision(pval: Any, crit: float | None) -> float | bool:
     return bool(pval <= crit)
 
 
-def _require_feasible_exact(trials: np.ndarray[Any, Any] | list[Any], test_name: str) -> None:
+def _require_feasible_exact(trials: np.ndarray[Any, Any] | list[Any], test_name: str, max_tables: int) -> None:
     """Reject samples too large for an unconditional exact test to finish in reasonable time."""
     n_tables = (int(trials[0]) + 1) * (int(trials[1]) + 1)
-    if n_tables > _MAX_EXACT_TABLES:
+    if n_tables > max_tables:
         raise ValueError(
-            f"{test_name} would evaluate {n_tables:,} possible tables (at most {_MAX_EXACT_TABLES:,} are "
+            f"{test_name} would evaluate {n_tables:,} possible tables (at most {max_tables:,} are "
             "supported), so it would take minutes and gigabytes of memory. At these sample sizes the score "
             "test gives essentially the same p-value; Fisher's exact test also stays fast at any size."
         )
@@ -113,7 +130,7 @@ def _power_divergence_test(
             observed = np.asarray(contingency_table, dtype=float)
             expected = ss.contingency.expected_freq(observed)
             statistic = float(4 * np.sum((np.sqrt(observed) - np.sqrt(expected)) ** 2))
-            return _test_result(statistic, ss.chi2.sf(statistic, df=1), crit)
+            return _test_result(statistic, _chi2_df1_sf(statistic), crit)
     result = ss.chi2_contingency(contingency_table, correction=False, lambda_=lambda_)  # type: ignore[no-untyped-call, attr-defined, var-annotated]
     return _test_result(result.statistic, result.pvalue, crit)
 
@@ -256,12 +273,7 @@ def score_test(
     )
 
     if crit is None:
-        # Note: this line takes 80% of the time for the score test, including the
-        # MLE, which is really fast! So there's no real point in optimizing
-        # anything else here. On the other hand, if we can optimize this line, then
-        # great!
-        pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
-        return float(pval)
+        return _chi2_df1_sf(ts)
     return ts >= crit
 
 
@@ -320,8 +332,7 @@ def likelihood_ratio_test(
 
     ts = max(2 * (log_likelihood(p1) - log_likelihood(p0)), 0.0)
     if crit is None:
-        pval = ss.chi2.sf(ts, df=1)  # type: ignore[no-untyped-call]
-        return float(pval)
+        return _chi2_df1_sf(ts)
     return ts >= crit
 
 
@@ -392,7 +403,7 @@ def z_test(
         return 1.0 if crit is None else False
     z = (p1[1] - p1[0] - null_lift) / math.sqrt(sigma2)
     if crit is None:
-        return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]
+        return _two_sided_normal_p(z)
     return bool(abs(z) >= crit)
 
 
@@ -469,7 +480,7 @@ def wald_test(
         return significant
     z = diff / math.sqrt(sigma2)
     if crit is None:
-        return float(2.0 * ss.norm.cdf(-abs(z)))  # type: ignore[no-untyped-call]
+        return _two_sided_normal_p(z)
     return bool(abs(z) >= crit)
 
 
@@ -518,8 +529,8 @@ def barnard_exact_test(
     Raises
     ------
     ValueError
-        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 1,500,000, roughly
-        1,200 trials per group: the test's cost grows with that product.
+        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 9,200,000, roughly
+        3,000 trials per group: the test's cost grows with that product.
 
     Notes
     -----
@@ -529,7 +540,7 @@ def barnard_exact_test(
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     _require_zero_null(null_lift, "barnard_exact_test")
-    _require_feasible_exact(trials, "barnard_exact_test")
+    _require_feasible_exact(trials, "barnard_exact_test", _MAX_BARNARD_TABLES)
     contingency_table = _contingency_table(trials, successes)
     barnard = ss.barnard_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     return _pvalue_decision(barnard.pvalue, crit)
@@ -552,8 +563,8 @@ def boschloo_exact_test(
     Raises
     ------
     ValueError
-        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 1,500,000, roughly
-        1,200 trials per group: the test's cost grows with that product.
+        If ``(trials[0] + 1) * (trials[1] + 1)`` exceeds 4,100,000, roughly
+        2,000 trials per group: the test's cost grows with that product.
 
     Notes
     -----
@@ -563,7 +574,7 @@ def boschloo_exact_test(
     """
     _validate_two_group(trials, successes, null_lift, lift, allow_relative_null=False)
     _require_zero_null(null_lift, "boschloo_exact_test")
-    _require_feasible_exact(trials, "boschloo_exact_test")
+    _require_feasible_exact(trials, "boschloo_exact_test", _MAX_BOSCHLOO_TABLES)
     contingency_table = _contingency_table(trials, successes)
     boschloo = ss.boschloo_exact(contingency_table)  # type: ignore[no-untyped-call, attr-defined]
     return _pvalue_decision(boschloo.pvalue, crit)

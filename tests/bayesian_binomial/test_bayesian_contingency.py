@@ -596,6 +596,25 @@ class TestBayesianMultiArm:
         assert comparison["prob_rope"] == pytest.approx(pair.incremental_results["prob_rope"], abs=0.005)
 
     @staticmethod
+    def test_each_arm_is_drawn_once(monkeypatch):
+        # Every pairwise comparison reuses one draw per arm; with 200 arms, fresh draws
+        # for each of the 19,900 pairs took minutes.
+        from ab_test.bayesian_binomial import contingency, credible_intervals, stats_tests, utils
+
+        calls = []
+
+        def counting_sample_beta(*args):
+            calls.append(args)
+            return utils.sample_beta(*args)
+
+        for module in (contingency, credible_intervals, stats_tests):
+            monkeypatch.setattr(module, "sample_beta", counting_sample_beta)
+        table = _three_arms().add("D", 110, 1000, 1, 1)
+        table.analyze(comparisons="all", n_samples=1_000)
+        assert len(table.incremental_results["comparisons"]) == 6
+        assert len(calls) == 4
+
+    @staticmethod
     def test_output():
         table = _three_arms()
         np.random.seed(0)

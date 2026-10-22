@@ -10,9 +10,11 @@ probabilities instead of p-values and confidence intervals.
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable, Iterator
 from typing import Any, Literal, Self
 
 import numpy as np
+from scipy.special import polygamma
 from tabulate import tabulate
 
 from ab_test._display import (
@@ -197,7 +199,58 @@ class BayesianStratifiedContingencyTable:
             raise ValueError("msrp must be set for revenue calculations")
         return lift
 
-    def _draw_stratum_samples(
+    @staticmethod
+    def _iter_stratum_samples(
+        successes: np.ndarray[Any, Any],
+        trials: np.ndarray[Any, Any],
+        alphas: np.ndarray[Any, Any],
+        betas: np.ndarray[Any, Any],
+        lift: str,
+        n_samples: int,
+    ) -> Iterator[np.ndarray[Any, Any]]:
+        """Draw each stratum's posterior lift samples on the analysis scale, one stratum at a time.
+
+        For absolute/incremental/roas/revenue: risk-difference samples.
+        For relative: log-RR samples (pooling happens on this scale).
+        Drawing one stratum at a time keeps memory to a few arrays of
+        ``n_samples``, however many strata there are.
+        """
+        for k in range(successes.shape[0]):
+            samples_c = sample_beta(int(successes[k, 0]), int(trials[k, 0]), alphas[k, 0], betas[k, 0], n_samples)
+            samples_t = sample_beta(int(successes[k, 1]), int(trials[k, 1]), alphas[k, 1], betas[k, 1], n_samples)
+
+            if lift == "relative":
+                safe_c = np.where(samples_c == 0, 1e-9, samples_c)
+                safe_t = np.where(samples_t == 0, 1e-9, samples_t)
+                yield np.log(safe_t / safe_c)
+            else:
+                yield samples_t - samples_c
+
+    @staticmethod
+    def _pooling_weights(
+        successes: np.ndarray[Any, Any],
+        trials: np.ndarray[Any, Any],
+        alphas: np.ndarray[Any, Any],
+        betas: np.ndarray[Any, Any],
+        lift: str,
+    ) -> np.ndarray[Any, Any]:
+        """Weight the strata by inverse variance, using their exact posterior variances.
+
+        Each group's rate has a Beta(a, b) posterior, so a risk difference has
+        variance sum ab / ((a + b)^2 (a + b + 1)) over the two groups, and a log
+        risk ratio sum trigamma(a) - trigamma(a + b). Knowing the weights before
+        drawing lets the strata be pooled one at a time.
+        """
+        a = alphas + successes
+        b = betas + trials - successes
+        if lift == "relative":
+            variances = polygamma(1, a) - polygamma(1, a + b)
+        else:
+            variances = a * b / ((a + b) ** 2 * (a + b + 1))
+        weights = 1.0 / variances.sum(axis=1)
+        return weights / weights.sum()  # type: ignore[no-any-return]
+
+    def _pool_samples(
         self,
         successes: np.ndarray[Any, Any],
         trials: np.ndarray[Any, Any],
@@ -205,49 +258,35 @@ class BayesianStratifiedContingencyTable:
         betas: np.ndarray[Any, Any],
         lift: str,
         n_samples: int,
-    ) -> list[np.ndarray[Any, Any]]:
-        """Draw posterior samples and compute per-stratum lift on the analysis scale.
-
-        For absolute/incremental/roas/revenue: returns risk-difference samples.
-        For relative: returns log-RR samples (pooling happens on this scale).
-        """
-        K = successes.shape[0]
-        all_lift_samples: list[np.ndarray[Any, Any]] = []
-
-        for k in range(K):
-            samples_c = sample_beta(int(successes[k, 0]), int(trials[k, 0]), alphas[k, 0], betas[k, 0], n_samples)
-            samples_t = sample_beta(int(successes[k, 1]), int(trials[k, 1]), alphas[k, 1], betas[k, 1], n_samples)
-
-            if lift == "relative":
-                safe_c = np.where(samples_c == 0, 1e-9, samples_c)
-                safe_t = np.where(samples_t == 0, 1e-9, samples_t)
-                all_lift_samples.append(np.log(safe_t / safe_c))
-            else:
-                all_lift_samples.append(samples_t - samples_c)
-
-        return all_lift_samples
-
-    def _pool_samples(
-        self,
-        stratum_lift_samples: list[np.ndarray[Any, Any]],
-        trials: np.ndarray[Any, Any],
-        lift: str,
         n_scale: float | None = None,
-    ) -> np.ndarray[Any, Any]:
+        on_stratum: Callable[[int, np.ndarray[Any, Any]], None] | None = None,
+    ) -> tuple[np.ndarray[Any, Any], list[float], list[float]]:
         """Inverse-variance weighted pooling of per-stratum lift samples.
 
-        Returns pooled samples on the display scale, except for ``"cpa"``,
-        which is returned in incremental conversions (see :meth:`_summarize`).
-        Scaled lifts are expressed over ``n_scale`` units, by default the
-        larger group's total trials.
+        Returns the pooled samples on the display scale (in incremental
+        conversions for ``"cpa"``, see :meth:`_summarize`), and each stratum's
+        sample mean and variance on the pooling scale. Scaled lifts are
+        expressed over ``n_scale`` units, by default the larger group's total
+        trials. ``on_stratum(k, samples)``, when given, sees each stratum's
+        samples on the pooling scale as they are drawn.
         """
-        stacked = np.vstack(stratum_lift_samples)
-        variances = np.var(stacked, axis=1)
-        weights = 1.0 / variances
-        weights_norm = weights / weights.sum()
+        weights = self._pooling_weights(successes, trials, alphas, betas, lift)
+        pooled = np.zeros(n_samples)
+        means: list[float] = []
+        variances: list[float] = []
+        for k, samples in enumerate(self._iter_stratum_samples(successes, trials, alphas, betas, lift, n_samples)):
+            pooled += weights[k] * samples
+            means.append(float(np.mean(samples)))
+            variances.append(float(np.var(samples)))
+            if on_stratum is not None:
+                on_stratum(k, samples)
 
-        pooled = np.dot(weights_norm, stacked)
+        return self._pooled_display(pooled, trials, lift, n_scale), means, variances
 
+    def _pooled_display(
+        self, pooled: np.ndarray[Any, Any], trials: np.ndarray[Any, Any], lift: str, n_scale: float | None
+    ) -> np.ndarray[Any, Any]:
+        """Pooled samples from the pooling scale to the display scale (scaled lifts over ``n_scale`` units)."""
         if lift == "relative":
             return np.exp(pooled) - 1
 
@@ -419,8 +458,9 @@ class BayesianStratifiedContingencyTable:
         high_threshold = settings["high_threshold"]
         strata_names = range(successes.shape[0])
 
-        stratum_samples = self._draw_stratum_samples(successes, trials, alphas, betas, lift, n_samples)
-        pooled_samples = self._pool_samples(stratum_samples, trials, lift, n_scale)
+        pooled_samples, stratum_means, stratum_variances = self._pool_samples(
+            successes, trials, alphas, betas, lift, n_samples, n_scale
+        )
 
         pooled_mean, ci_lo, ci_hi, prob_t_gt_c = self._summarize(
             pooled_samples, lift, confidence_level, cred_int_method
@@ -474,9 +514,7 @@ class BayesianStratifiedContingencyTable:
         else:
             # Heterogeneity on the pooling scale (log risk ratio for relative lift), so stratum size does not
             # masquerade as a different effect; linear lifts are then rescaled like the pooled estimate.
-            tau_samples = _between_group_sd_samples(
-                [float(np.mean(s)) for s in stratum_samples], [float(np.var(s)) for s in stratum_samples], n_samples
-            )
+            tau_samples = _between_group_sd_samples(stratum_means, stratum_variances, n_samples)
             if lift in ("incremental", "roas", "revenue"):
                 tau_samples = scale_metric(tau_samples * n_max, lift, self.spend, self.msrp)
             tau_mean = float(np.mean(tau_samples))
@@ -713,15 +751,15 @@ class BayesianStratifiedContingencyTable:
         lift = self._validate_lift(lift)
         successes, trials, alphas, betas, strata_names = self._build_arrays(two_groups=True)
 
-        stratum_samples = self._draw_stratum_samples(successes, trials, alphas, betas, lift, n_samples)
+        stratum_samples = self._iter_stratum_samples(successes, trials, alphas, betas, lift, n_samples)
 
         def fmt_rate(v: float) -> str | float:
             return convert_to_tabulate_str(v, "absolute")
 
         self.stratum_results = {}
         table_list = []
-        for k, s_name in enumerate(strata_names):
-            display_samples = self._stratum_display_samples(stratum_samples[k], max(trials[k, 0], trials[k, 1]), lift)
+        for k, (s_name, samples) in enumerate(zip(strata_names, stratum_samples)):
+            display_samples = self._stratum_display_samples(samples, max(trials[k, 0], trials[k, 1]), lift)
             effect, ci_lo, ci_hi, prob_t_gt_c = self._summarize(
                 display_samples, lift, confidence_level, cred_int_method
             )
@@ -835,18 +873,20 @@ class BayesianStratifiedContingencyTable:
         lift = self._validate_lift(lift)
         successes, trials, alphas, betas, strata_names = self._build_arrays(two_groups=True)
 
-        stratum_samples = self._draw_stratum_samples(successes, trials, alphas, betas, lift, n_samples)
-        pooled_samples = self._pool_samples(stratum_samples, trials, lift)
-
         effects: list[float] = []
         ci_lowers: list[float] = []
         ci_uppers: list[float] = []
-        for k, samples in enumerate(stratum_samples):
+
+        def summarize_stratum(k: int, samples: np.ndarray[Any, Any]) -> None:
             display_samples = self._stratum_display_samples(samples, max(trials[k, 0], trials[k, 1]), lift)
             effect, lo, hi, _ = self._summarize(display_samples, lift, confidence_level, cred_int_method)
             effects.append(effect)
             ci_lowers.append(lo)
             ci_uppers.append(hi)
+
+        pooled_samples, _, _ = self._pool_samples(
+            successes, trials, alphas, betas, lift, n_samples, on_stratum=summarize_stratum
+        )
 
         pooled_est, pooled_lb, pooled_ub, _ = self._summarize(pooled_samples, lift, confidence_level, cred_int_method)
         return effect_panel(
