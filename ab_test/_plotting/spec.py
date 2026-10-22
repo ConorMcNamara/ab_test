@@ -6,6 +6,7 @@ only data, labels and formats, never library objects, so both backends draw
 the same plot from it.
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -107,13 +108,31 @@ class ForestPanel:
     x_format : AxisFormat
         Tick labels of the x-axis.
     vlines : list of VLine
-        Vertical reference lines.
+        Vertical reference lines; the first is the null effect that an
+        interval must exclude for its marker to be drawn filled.
     """
 
     points: list[ForestPoint]
     x_title: str | None = None
     x_format: AxisFormat = field(default_factory=AxisFormat)
     vlines: list[VLine] = field(default_factory=list)
+
+    def filled(self, point: ForestPoint) -> bool:
+        """Whether ``point`` is drawn filled: hollow only when its interval spans the null.
+
+        An infinite bound also counts as spanning the null: CPA's null is an
+        infinite cost, which its interval reaches whenever the incremental
+        effect's does zero. Points without an interval, and otherwise every
+        point of a panel without a reference line, are filled.
+        """
+        if point.lower is None or point.upper is None:
+            return True
+        if math.isinf(point.lower) or math.isinf(point.upper):
+            return False
+        if not self.vlines:
+            return True
+        null = self.vlines[0].x
+        return not point.lower <= null <= point.upper
 
 
 @dataclass(frozen=True)

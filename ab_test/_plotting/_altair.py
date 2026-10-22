@@ -157,6 +157,7 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
                 "upper": [point.upper for point in panel.points],
                 "shape": [point.shape for point in panel.points],
                 "area": [_area(point.shape, point.size) for point in panel.points],
+                "filled": [panel.filled(point) for point in panel.points],
             }
         )
         number = _tooltip_format(panel.x_format)
@@ -196,12 +197,18 @@ def forest(spec: ForestSpec) -> alt.TopLevelMixin:
             .encode(x=alt.X("end:Q", scale=x_scale))
             .transform_filter("isValid(datum.lower)")
             .transform_fold(["lower", "upper"], as_=["side", "end"]),
-            base.mark_point(filled=True, opacity=1.0).encode(
-                x=alt.X("estimate:Q", scale=x_scale),
-                shape=alt.Shape("shape:N", scale=None),
-                size=alt.Size("area:Q", scale=None),
-            ),
         ]
+        # Vega-Lite can't set ``filled`` per row, so filled and hollow markers are separate layers.
+        for filled in (True, False):
+            layers.append(
+                base.mark_point(filled=filled, opacity=1.0, strokeWidth=2)
+                .encode(
+                    x=alt.X("estimate:Q", scale=x_scale),
+                    shape=alt.Shape("shape:N", scale=None),
+                    size=alt.Size("area:Q", scale=None),
+                )
+                .transform_filter("datum.filled" if filled else "!datum.filled")
+            )
         for vline in panel.vlines:
             layers.append(
                 alt.Chart(pd.DataFrame({"x": [vline.x]}))

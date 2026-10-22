@@ -11,7 +11,7 @@ from tests.test_dark_mode import _clusters, _cupac, _msprt_tables
 from ab_test._display import effect_panel, forest_spec, render_forest_plot
 from ab_test._plotting import render, validate_backend
 from ab_test._plotting.curves import curve, sensitivity_curve_spec
-from ab_test._plotting.spec import ForestPanel, ForestPoint, ForestSpec
+from ab_test._plotting.spec import ForestPanel, ForestPoint, ForestSpec, VLine
 from ab_test.bayesian_binomial.cluster import (
     BayesianClusterRandomizedTrial,
     plot_cluster_bayes_power_curve,
@@ -99,7 +99,7 @@ class TestForestAltair:
         spec = forest_spec(["A", "B"], INDIVIDUAL, None, color="tol_bright", experiment_name="Exp", metric_name="Rate")
         chart = render(spec, "altair").to_dict()
         assert chart["title"]["text"] == "Individual Performance by Cell: Exp - Rate"
-        ((whisker, cap, dot),) = _layers(chart)
+        ((whisker, cap, dot, _),) = _layers(chart)
         assert [row["label"] for row in _rows(chart, _panels(chart)[0])] == ["A", "B", "Total"]
         assert whisker["encoding"]["x"]["axis"] == {"format": ",.0%", "title": "Rate", "tickCount": 5}
         assert cap["mark"]["type"] == "tick"
@@ -111,13 +111,13 @@ class TestForestAltair:
     @pytest.mark.parametrize(("reverse", "order"), [(True, ["A", "B", "Total"]), (False, ["Total", "B", "A"])])
     def test_reverse_puts_first_row_on_top(self, reverse, order):
         chart = render(forest_spec(["A", "B"], INDIVIDUAL, None, reverse_plot=reverse), "altair").to_dict()
-        ((whisker, _, _),) = _layers(chart)
+        ((whisker, _, _, _),) = _layers(chart)
         assert whisker["encoding"]["y"]["sort"] == order
 
     @staticmethod
     def test_default_colors_are_plotlys():
         chart = render(forest_spec(["A", "B"], INDIVIDUAL, None), "altair").to_dict()
-        ((whisker, _, _),) = _layers(chart)
+        ((whisker, _, _, _),) = _layers(chart)
         assert whisker["encoding"]["color"]["scale"]["range"] == ["#636EFA", "#EF553B", "#00CC96"]
 
     @staticmethod
@@ -138,6 +138,58 @@ class TestForestAltair:
         assert {(trace.name, trace.marker.color) for trace in fig.data} == {("A", "#ff0000"), ("B", "#EF553B")}
 
     @staticmethod
+    def test_markers_are_hollow_when_the_interval_spans_the_null():
+        # A excludes the null of 0.1, B spans it, C has no interval.
+        points = [ForestPoint("A", 0.3, 0.2, 0.4), ForestPoint("B", 0.15, 0.0, 0.3), ForestPoint("C", 0.05, None, None)]
+        spec = ForestSpec([ForestPanel(points, vlines=[VLine(0.1)])], title="t", y_title="y")
+        chart = render(spec, "altair").to_dict()
+        ((_, _, solid, hollow, _),) = _layers(chart)
+        assert (solid["mark"]["filled"], hollow["mark"]["filled"]) == (True, False)
+        assert {row["label"]: row["filled"] for row in _rows(chart, _panels(chart)[0])} == {
+            "A": True,
+            "B": False,
+            "C": True,
+        }
+        fig = render(spec, "plotly")
+        assert [trace.marker.symbol for trace in fig.data] == ["diamond", "diamond-open", "diamond"]
+
+    @staticmethod
+    def test_lift_panels_mark_the_null_except_for_cpa():
+        flat = {"lift": 0.01, "ci_lower": -0.02, "ci_upper": 0.04, "lift_type": "absolute"}
+        cpa = {"lift": 50.0, "ci_lower": 30.0, "ci_upper": 90.0, "lift_type": "cpa"}
+        spec = forest_spec(["A", "B"], {}, [ABSOLUTE, flat, cpa], is_individual=False)
+        assert [[vline.x for vline in panel.vlines] for panel in spec.panels] == [[0.0], [0.0], []]
+        fig = render(spec, "plotly")
+        assert [trace.marker.symbol for trace in fig.data] == ["diamond", "diamond-open", "diamond"]
+
+    @staticmethod
+    def test_markers_are_filled_without_a_reference_line():
+        panel = ForestPanel([ForestPoint("A", 0.1, -0.1, 0.3)])
+        assert panel.filled(panel.points[0])
+
+    @staticmethod
+    def test_cpa_markers_are_hollow_when_a_bound_is_infinite():
+        # A CPA bound is infinite when the incremental effect's interval reaches zero.
+        cpa = {"lift": 50.0, "ci_lower": 30.0, "ci_upper": float("inf"), "lift_type": "cpa"}
+        (panel,) = forest_spec(["A", "B"], {}, cpa, is_individual=False).panels
+        assert not panel.filled(panel.points[0])
+
+    @staticmethod
+    def test_segment_markers_are_hollow_when_the_interval_spans_zero():
+        panel = effect_panel(["a", "b"], [0.1, 0.2], [-0.1, 0.1], [0.3, 0.3], "absolute", pooled=(0.15, 0.05, 0.25))
+        assert [panel.filled(point) for point in panel.points] == [False, True, True]
+        fig = render(ForestSpec([panel], title="t", y_title="y"), "plotly")
+        assert [trace.marker.symbol for trace in fig.data] == ["circle-open", "circle", "diamond"]
+
+    @staticmethod
+    def test_cupac_markers_follow_their_intervals():
+        fig = _cupac().plot()
+        for trace in fig.data:
+            (estimate,) = trace.x
+            lower, upper = estimate - trace.error_x.arrayminus[0], estimate + trace.error_x.array[0]
+            assert trace.marker.symbol == ("diamond-open" if lower <= 0 <= upper else "diamond")
+
+    @staticmethod
     def test_both_lifts_are_side_by_side_panels():
         spec = forest_spec(["Control", "Treatment"], {}, [ABSOLUTE, RELATIVE], is_individual=False)
         chart = render(spec, "altair").to_dict()
@@ -154,7 +206,7 @@ class TestForestAltair:
     def test_revenue_axis_gets_dollar_prefix():
         revenue = {"lift": 1200.0, "ci_lower": 100.0, "ci_upper": 2300.0, "lift_type": "revenue"}
         chart = render(forest_spec(["A", "B"], {}, revenue, is_individual=False), "altair").to_dict()
-        ((whisker, _, _),) = _layers(chart)
+        ((whisker, *_),) = _layers(chart)
         assert whisker["encoding"]["x"]["axis"]["labelExpr"] == '"$" + format(datum.value, "~s")'
 
     @staticmethod
@@ -270,7 +322,7 @@ class TestSegmentPlots:
     def test_altair_single_lift(self, name):
         make, kwargs, rows = SEGMENT_PLOTS[name]
         chart = make().plot(lift="relative", backend="altair", **kwargs).to_dict()
-        ((whisker, _, dot, zero),) = _layers(chart)
+        ((whisker, _, dot, _, zero),) = _layers(chart)
         assert [row["label"] for row in _rows(chart, _panels(chart)[0])] == rows
         assert whisker["encoding"]["y"]["sort"] == rows
         assert whisker["encoding"]["x"]["axis"] == {"format": ",.1%", "title": "Relative Lift", "tickCount": 5}
@@ -304,7 +356,7 @@ class TestSegmentPlots:
         table = StratifiedContingencyTable("Checkout", "conversion", spend=5000.0, msrp=40.0)
         for stratum, (control, treatment) in {"desktop": (120, 140), "mobile": (80, 95)}.items():
             table.add("Control", control, 1000, stratum=stratum).add("Treatment", treatment, 1000, stratum=stratum)
-        ((whisker, _, _, _),) = _layers(table.plot(lift=lift, backend="altair").to_dict())
+        ((whisker, *_),) = _layers(table.plot(lift=lift, backend="altair").to_dict())
         assert whisker["encoding"]["x"]["axis"]["format"] == axis_format
 
     @staticmethod
