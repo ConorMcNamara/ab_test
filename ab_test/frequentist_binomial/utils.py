@@ -395,3 +395,27 @@ def wilson_significance(pval: float, alpha: float) -> float:
         W = 310.0
 
     return W
+
+
+def fieller_ratio_interval(
+    mean_num: float,
+    var_num: float,
+    mean_den: float,
+    var_den: float,
+    t_crit: float,
+) -> tuple[float, float]:
+    """Fieller confidence interval for ``mean_num / mean_den`` from independent estimates.
+
+    The interval is the set of ratios ``R`` with
+    ``(mean_num - R * mean_den)**2 <= t_crit**2 * (var_num + R**2 * var_den)``.
+    Unlike dividing a difference interval by ``mean_den``, it accounts for the
+    uncertainty in the denominator. It is unbounded when ``mean_den`` is not
+    clearly separated from zero.
+    """
+    a = mean_den**2 - t_crit**2 * var_den
+    if a <= 0:
+        return -math.inf, math.inf
+    b = mean_num * mean_den
+    c = mean_num**2 - t_crit**2 * var_num
+    root = math.sqrt(max(b**2 - a * c, 0.0))
+    return (b - root) / a, (b + root) / a

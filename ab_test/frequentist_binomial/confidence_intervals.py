@@ -2,7 +2,6 @@
 
 import math
 from collections.abc import Callable
-from math import sqrt
 from typing import Any
 
 import numpy as np
@@ -10,7 +9,7 @@ import scipy.stats as ss
 
 from ab_test._lift import _SCALED_LIFTS, scale_bounds
 from ab_test.frequentist_binomial.stats_tests import score_test
-from ab_test.frequentist_binomial.utils import observed_lift
+from ab_test.frequentist_binomial.utils import fieller_ratio_interval, observed_lift
 
 __all__ = [
     "confidence_interval",
@@ -542,17 +541,13 @@ def wilson_interval(s: int, n: int, alpha: float = 0.05, z: float | None = None)
     return (ctr - wdth) / denom, (ctr + wdth) / denom
 
 
-import numpy as np
-import scipy.stats as ss
-from typing import Any
-
 def fieller_interval(
-        trials: np.ndarray | list,
-        successes: np.ndarray | list,
-        alpha: float = 0.05,
-        z: float | None = None
+    trials: np.ndarray[Any, Any] | list[Any],
+    successes: np.ndarray[Any, Any] | list[Any],
+    alpha: float = 0.05,
+    z: float | None = None,
 ) -> tuple[float, float]:
-    """Compute the confidence interval for Binomial Proportions ratio / relative lift.
+    """Compute Fieller's confidence interval for the relative lift between two Binomial Proportions.
 
     Parameters
     ----------
@@ -569,45 +564,27 @@ def fieller_interval(
     Returns
     -------
     lb, ub : float
-        Lower and upper bounds on the relative lift confidence interval.
+        Lower and upper bounds on the relative lift ``p_test / p_control - 1``.
+        With a zero control rate this is ``(-1, inf)``. When the control rate is
+        not clearly separated from zero the Fieller set is unbounded, and this
+        is ``(-inf, inf)``.
+
+    Notes
+    -----
+    The interval is the set of ratios ``R`` with
+    ``(p_test - R * p_control)**2 <= z**2 * (var_test + R**2 * var_control)``,
+    using the Binomial variances ``p * (1 - p) / n``. Unlike the delta method it
+    accounts for the uncertainty in the control rate, so it is asymmetric
+    around the point estimate.
     """
     if z is None:
-        z = float(ss.norm.isf(alpha / 2))
-
-    n_control, n_test = trials[0], trials[1]
-    success_control, success_test = successes[0], successes[1]
-
-    # Compute proportions
-    p_control = success_control / n_control
-    p_test = success_test / n_test
-
-    # Binomial variances of the proportions
-    var_control = (p_control * (1 - p_control)) / n_control
-    var_test = (p_test * (1 - p_test)) / n_test
-
-    # Point estimate for relative lift: (test / control) - 1
-    point_estimate = (p_test / p_control) - 1
-
-    # Fieller / Delta method adjustment factor (g)
-    # g measures the relative uncertainty of the control group mean
-    g = (z**2 * var_control) / (p_control**2)
-
-    # Standard error for the ratio using Delta method / Fieller approximation
-    # SE^2 = (1 / p_c^2) * var_test + (p_t^2 / p_c^4) * var_control
-    rel_variance = (var_test / (p_control**2)) + ((p_test**2 * var_control) / (p_control**4))
-    se = np.sqrt(rel_variance)
-
-    # Fieller-adjusted bounds calculation
-    # When g < 1, the interval is bounded properly.
-    if g < 1:
-        scale = 1 / (1 - g)
-        center_adjustment = scale * (point_estimate + 1) - 1
-        margin = scale * z * se # approximation alignment
-        lb = center_adjustment - margin
-        ub = center_adjustment + margin
-    else:
-        # Fallback to standard Delta method when control denominator is imprecise (g >= 1)
-        lb = point_estimate - z * se
-        ub = point_estimate + z * se
-
-    return float(lb), float(ub)
+        z = float(ss.norm.isf(alpha / 2))  # type: ignore[no-untyped-call]
+    p_control = successes[0] / trials[0]
+    p_test = successes[1] / trials[1]
+    if p_control == 0:
+        # The ratio is undefined with a zero denominator.
+        return -1.0, math.inf
+    var_control = p_control * (1 - p_control) / trials[0]
+    var_test = p_test * (1 - p_test) / trials[1]
+    ratio_lo, ratio_hi = fieller_ratio_interval(p_test, var_test, p_control, var_control, z)
+    return float(ratio_lo - 1), float(ratio_hi - 1)

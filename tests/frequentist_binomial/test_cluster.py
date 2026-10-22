@@ -8,7 +8,6 @@ import scipy.stats as ss
 from ab_test.frequentist_binomial.cluster import (
     ClusterRandomizedTrial,
     _welch_anova,
-    _fieller_ratio_interval,
     cluster_adjusted_power,
     cluster_minimum_detectable_lift,
     cluster_required_clusters,
@@ -18,6 +17,7 @@ from ab_test.frequentist_binomial.cluster import (
     plot_cluster_power_curve,
     plot_cluster_sensitivity_curve,
 )
+from ab_test.frequentist_binomial.utils import fieller_ratio_interval
 from ab_test.frequentist_binomial.power_calculations import (
     abtest_power,
     minimum_detectable_lift,
@@ -620,14 +620,14 @@ class TestFiellerRelativeInterval:
     @staticmethod
     @pytest.mark.parametrize("args", [(0.15, 1e-4, 0.10, 1e-4, 2.2), (0.12, 4e-4, 0.10, 2e-4, 2.8)])
     def test_matches_brute_force(args):
-        lo, hi = _fieller_ratio_interval(*args)
+        lo, hi = fieller_ratio_interval(*args)
         b_lo, b_hi = _brute_force_fieller(*args)
         assert lo == pytest.approx(b_lo, abs=1e-5)
         assert hi == pytest.approx(b_hi, abs=1e-5)
 
     @staticmethod
     def test_unbounded_when_denominator_not_significant():
-        assert _fieller_ratio_interval(0.05, 1e-4, 0.01, 1e-4, 2.0) == (-np.inf, np.inf)
+        assert fieller_ratio_interval(0.05, 1e-4, 0.01, 1e-4, 2.0) == (-np.inf, np.inf)
 
     @staticmethod
     def test_analyze_uses_fieller_not_scaled_difference():

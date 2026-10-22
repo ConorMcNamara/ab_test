@@ -4,9 +4,12 @@ import warnings
 
 import numpy as np
 import pytest
+import scipy.stats as ss
 
 from ab_test.frequentist_binomial.confidence_intervals import (
     confidence_interval,
+    delta_interval,
+    fieller_interval,
     wilson_interval,
     agresti_coull_interval,
     jeffrey_interval,
@@ -659,6 +662,67 @@ class TestJeffreysBoundaries:
         assert jeffrey_interval(n, n)[1] == 1.0
         assert 0 < jeffrey_interval(0, n)[1] < 1
         assert 0 < jeffrey_interval(n, n)[0] < 1
+
+
+def _brute_force_fieller_lift(trials, successes, z):
+    p_c, p_t = successes[0] / trials[0], successes[1] / trials[1]
+    v_c, v_t = p_c * (1 - p_c) / trials[0], p_t * (1 - p_t) / trials[1]
+    ratios = np.linspace(-5, 40, 4_500_001)
+    accepted = ratios[(p_t - ratios * p_c) ** 2 <= z**2 * (v_t + ratios**2 * v_c)]
+    return accepted.min() - 1, accepted.max() - 1
+
+
+class TestFiellerInterval:
+    @staticmethod
+    @pytest.mark.parametrize(
+        "trials, successes",
+        [([10000, 10000], [1000, 1100]), ([200, 200], [20, 30]), ([40, 40], [4, 9]), ([500, 300], [60, 30])],
+    )
+    def test_matches_brute_force(trials, successes):
+        lb, ub = fieller_interval(trials, successes)
+        b_lb, b_ub = _brute_force_fieller_lift(trials, successes, ss.norm.isf(0.025))
+        assert lb == pytest.approx(b_lb, abs=2e-5)
+        assert ub == pytest.approx(b_ub, abs=2e-5)
+
+    @staticmethod
+    def test_small_sample_lower_bound_stays_above_minus_one():
+        # Used to give (-2.55, 33.71) by widening the delta-method margin.
+        lb, ub = fieller_interval([40, 40], [4, 9])
+        assert lb == pytest.approx(-0.2292, abs=1e-4)
+        assert ub == pytest.approx(31.3975, abs=1e-4)
+
+    @staticmethod
+    def test_asymmetric_around_estimate():
+        lb, ub = fieller_interval([200, 200], [20, 30])
+        assert ub - 0.5 > 0.5 - lb
+
+    @staticmethod
+    def test_approaches_delta_method_for_large_samples():
+        trials, successes = [1_000_000, 1_000_000], [100_000, 101_000]
+        assert fieller_interval(trials, successes) == pytest.approx(delta_interval(trials, successes, 0.05), abs=1e-4)
+
+    @staticmethod
+    @pytest.mark.parametrize("trials, successes", [([20, 20], [2, 5]), ([10, 10], [1, 4])])
+    def test_unbounded_when_control_rate_not_significant(trials, successes):
+        # Used to fall back to a finite delta-method interval.
+        assert fieller_interval(trials, successes) == (-np.inf, np.inf)
+
+    @staticmethod
+    def test_zero_control_rate():
+        # Used to raise ZeroDivisionError.
+        assert fieller_interval([100, 100], [0, 5]) == (-1.0, np.inf)
+
+    @staticmethod
+    def test_z_overrides_alpha():
+        assert fieller_interval([200, 200], [20, 30], z=ss.norm.isf(0.05)) == fieller_interval(
+            [200, 200], [20, 30], alpha=0.10
+        )
+
+    @staticmethod
+    def test_numpy_inputs_match_lists():
+        expected = fieller_interval([200, 200], [20, 30])
+        assert fieller_interval(np.array([200, 200]), np.array([20, 30])) == pytest.approx(expected)
+        assert all(type(bound) is float for bound in fieller_interval(np.array([200, 200]), np.array([20, 30])))
 
 
 if __name__ == "__main__":
