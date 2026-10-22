@@ -130,7 +130,7 @@ See the [docs/](docs/) directory for detailed usage examples and API reference f
 
 ### `conf_int_method`
 
-`"binary_search"`, `"wilson"`, `"jeffrey"`, `"agresti-coull"`, `"clopper-pearson"`, `"wald"`, `"delta"`
+`"binary_search"`, `"wilson"`, `"jeffrey"`, `"agresti-coull"`, `"clopper-pearson"`, `"wald"`, `"delta"`, `"fieller"`
 
 ### `cred_int_method`
 

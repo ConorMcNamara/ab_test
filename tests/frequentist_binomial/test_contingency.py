@@ -8,7 +8,7 @@ import scipy.stats as ss
 from polars.testing import assert_frame_equal
 
 from ab_test.frequentist_binomial.contingency import ContingencyTable, _omnibus_test
-from ab_test.frequentist_binomial.confidence_intervals import confidence_interval
+from ab_test.frequentist_binomial.confidence_intervals import confidence_interval, fieller_interval
 from ab_test.frequentist_binomial.stats_tests import ab_test, likelihood_ratio_test, score_test, wald_test, z_test
 
 
@@ -384,6 +384,13 @@ class TestAnalyzeTestMapping:
         expected = ab_test([1000, 1000], [100, 130], null_lift=0.0, lift="absolute", method=method)
         assert table.incremental_results["p_value"] == pytest.approx(expected)
         lb, ub = confidence_interval([1000, 1000], [100, 130], lift="absolute", method="wilson")
+        assert table.incremental_results["ci_lower"] == pytest.approx(lb)
+        assert table.incremental_results["ci_upper"] == pytest.approx(ub)
+
+    def test_fieller_interval_for_relative_lift(self):
+        table = self._table()
+        table.analyze(lift="relative", conf_int_method="fieller")
+        lb, ub = fieller_interval([1000, 1000], [100, 130])
         assert table.incremental_results["ci_lower"] == pytest.approx(lb)
         assert table.incremental_results["ci_upper"] == pytest.approx(ub)
 

@@ -562,7 +562,7 @@ class TestSearchNearLimits:
 
 class TestScaledLiftIntervals:
     @staticmethod
-    @pytest.mark.parametrize("method", ["binary_search", "wilson", "wald", "delta"])
+    @pytest.mark.parametrize("method", ["binary_search", "wilson", "wald", "delta", "fieller"])
     def test_incremental_is_absolute_interval_scaled(method):
         # Used to give (19.97, 20.03): a count-scale estimate with a proportion-scale width.
         lb, ub = confidence_interval([1000, 1000], [100, 120], lift="incremental", method=method)
@@ -717,6 +717,18 @@ class TestFiellerInterval:
         assert fieller_interval([200, 200], [20, 30], z=ss.norm.isf(0.05)) == fieller_interval(
             [200, 200], [20, 30], alpha=0.10
         )
+
+    @staticmethod
+    @pytest.mark.parametrize("trials, successes", [([200, 200], [20, 30]), ([20, 20], [2, 5]), ([100, 100], [0, 5])])
+    def test_confidence_interval_method_relative(trials, successes):
+        actual = confidence_interval(trials, successes, alpha=0.1, lift="relative", method="fieller")
+        assert actual == fieller_interval(trials, successes, alpha=0.1)
+
+    @staticmethod
+    def test_confidence_interval_method_absolute_is_delta():
+        # With no denominator, Fieller's interval is the delta-method interval.
+        actual = confidence_interval([200, 200], [20, 30], lift="absolute", method="fieller")
+        assert actual == pytest.approx(delta_interval([200, 200], [20, 30], 0.05, "absolute"))
 
     @staticmethod
     def test_numpy_inputs_match_lists():

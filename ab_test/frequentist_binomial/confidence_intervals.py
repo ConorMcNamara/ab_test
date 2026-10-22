@@ -186,7 +186,7 @@ def confidence_interval(
         `maximum_likelihood_estimation`. The scaled lifts (incremental, roas,
         revenue, cpa) are computed on the absolute scale and then scaled by
         ``max(trials)`` and converted with ``spend`` or ``msrp``.
-    method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald', 'delta'}
+    method : {'binary_search', "wilson", "jeffrey", "agresti-coull", "clopper-pearson", 'wald', 'delta', 'fieller'}
         How we want to calculate the confidence interval
     tol : float, default=1e-06
         The tolerance for our binary search. Lower values means narrower CIs
@@ -206,7 +206,10 @@ def confidence_interval(
     ``agresti-coull`` and ``clopper-pearson`` combine the two single-group
     intervals with the MOVER method: Newcombe's hybrid interval for absolute
     lift, and Donner & Zou's ratio interval for relative lift. ``wald`` and
-    ``delta`` use the delta method.
+    ``delta`` use the delta method. ``fieller`` uses Fieller's interval for
+    relative lift, which accounts for the uncertainty in the control rate.
+    For absolute lift there is no denominator, and Fieller's interval is the
+    delta-method interval.
     """
     if lift in _SCALED_LIFTS:
         # Build the interval where the variance lives (proportions), then convert its bounds.
@@ -284,6 +287,11 @@ def confidence_interval(
             ub = ote + math.sqrt(var_g)
         elif method == "delta":
             lb, ub = delta_interval(trials, successes, alpha, lift)
+        elif method == "fieller":
+            if lift == "relative":
+                lb, ub = fieller_interval(trials, successes, alpha)
+            else:
+                lb, ub = delta_interval(trials, successes, alpha, lift)
         else:
             raise NotImplementedError(f"No support for {method} method of generating confidence intervals")
     return lb, ub
