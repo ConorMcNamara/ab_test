@@ -834,8 +834,7 @@ class StratifiedContingencyTable:
             If a dict, keys are stratum names (use ``"Overall"`` for
             the pooled row).
         dark_mode : bool, default=False
-            Render on a dark background with light text and gridlines (Plotly's
-            ``"plotly_dark"`` template).
+            Render on a dark background with light text and gridlines.
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
 

@@ -701,10 +701,9 @@ class CupacExperiment:
         ----------
         color : str, list, dict, or None, optional
             Color specification. Supports colorblind-friendly palette names
-            (e.g. ``"ibm"``), a list of colors, or None for Plotly defaults.
+            (e.g. ``"ibm"``), a list of colors, or None for the default colors.
         dark_mode : bool, default=False
-            Render on a dark background with light text and gridlines (Plotly's
-            ``"plotly_dark"`` template).
+            Render on a dark background with light text and gridlines.
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
@@ -953,8 +952,7 @@ def plot_cupac_power_curve(
         ``alpha / m`` (see :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`).
         Ignored with two groups.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
@@ -1071,8 +1069,7 @@ def plot_cupac_sensitivity_curve(
         ``alpha / m`` (see :func:`~ab_test.frequentist_binomial.power_calculations.abtest_power`).
         Ignored with two groups.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 

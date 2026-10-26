@@ -204,8 +204,7 @@ def plot_msprt_over_time(
         Pass a fixed value to hold the scale constant
         across checkpoints.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 

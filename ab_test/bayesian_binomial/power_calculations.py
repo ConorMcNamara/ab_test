@@ -1011,8 +1011,7 @@ def plot_bayes_power_curve(
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 50.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
     seed : int, numpy.random.Generator or None, optional
@@ -1146,8 +1145,7 @@ def plot_bayes_sensitivity_curve(
         Number of sample-size points to evaluate when ``sample_sizes`` is
         ``None``. Defaults to 50.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
     seed : int, numpy.random.Generator or None, optional

@@ -390,8 +390,7 @@ class BayesianDiffInDiff:
             Colorblind palette name, mapping of segment names to colors,
             list of colors, or ``None`` for the backend's default colors.
         dark_mode : bool, default=False
-            Render on a dark background with light text and gridlines (Plotly's
-            ``"plotly_dark"`` template).
+            Render on a dark background with light text and gridlines.
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
 

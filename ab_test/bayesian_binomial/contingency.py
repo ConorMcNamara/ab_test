@@ -573,15 +573,14 @@ class BayesianContingencyTable(BaseContingencyTable):
             Number of posterior samples drawn to estimate the win probability,
             by default 100_000.
         color : str, list, dict, or None, optional
-            Controls the colors used for each variant. If None, uses Plotly's
+            Controls the colors used for each variant. If None, uses the
             default color scheme. If a string, one of the colorblind-friendly
             palette names: ``"ibm"``, ``"wong"``, ``"ito"``, ``"tol"``,
             ``"tol_bright"``, ``"tol_vibrant"``, ``"tol_muted"``, ``"tol_light"``.
             If a list, each item corresponds to a variant in order. If a dict,
             keys are variant names and values are colors.
         dark_mode : bool, default=False
-            Render on a dark background with light text and gridlines (Plotly's
-            ``"plotly_dark"`` template).
+            Render on a dark background with light text and gridlines.
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
