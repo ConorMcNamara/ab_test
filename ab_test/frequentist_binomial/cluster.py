@@ -1028,8 +1028,7 @@ class ClusterRandomizedTrial:
             Color specification (see
             :func:`~ab_test._display.resolve_plot_color`).
         dark_mode : bool, default=False
-            Render on a dark background with light text and gridlines (Plotly's
-            ``"plotly_dark"`` template).
+            Render on a dark background with light text and gridlines.
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
@@ -1134,8 +1133,7 @@ def plot_cluster_power_curve(
         with t degrees of freedom from the clusters in that comparison's two
         arms. Ignored with two groups.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
@@ -1251,8 +1249,7 @@ def plot_cluster_sensitivity_curve(
         with t degrees of freedom from the clusters in that comparison's two
         arms. Ignored with two groups.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 

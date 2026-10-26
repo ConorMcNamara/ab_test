@@ -511,8 +511,7 @@ class GroupSequentialDesign:
         Parameters
         ----------
         dark_mode : bool, default=False
-            Render on a dark background with light text and gridlines (Plotly's
-            ``"plotly_dark"`` template).
+            Render on a dark background with light text and gridlines.
         backend : {"plotly", "altair"}, default="plotly"
             Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
@@ -787,8 +786,7 @@ def plot_gst_power_curve(
     n_points : int
         Number of sample-size points when ``sample_sizes`` is ``None``.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
@@ -899,8 +897,7 @@ def plot_gst_sensitivity_curve(
     n_points : int
         Number of sample-size points when ``sample_sizes`` is ``None``.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 

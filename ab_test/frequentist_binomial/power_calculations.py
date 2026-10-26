@@ -493,8 +493,7 @@ def plot_power_curve(
         With three or more groups in ``group_proportions``, which comparisons
         ``analyze()`` will make (see :func:`abtest_power`).
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template, or Vega's ``"dark"`` theme).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
@@ -595,8 +594,7 @@ def plot_sensitivity_curve(
         With three or more groups in ``group_proportions``, which comparisons
         ``analyze()`` will make (see :func:`abtest_power`).
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template, or Vega's ``"dark"`` theme).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 

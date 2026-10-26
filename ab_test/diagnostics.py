@@ -137,8 +137,7 @@ def time_trend_test(
         Display labels for each period (e.g. dates).  When ``None``,
         periods are numbered ``1, 2, …, T``.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template).
+        Render on a dark background with light text and gridlines.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 

@@ -71,7 +71,7 @@ def resolve_plot_color(
     Parameters
     ----------
     color : str, list, dict, or None
-        If ``None``, defers to Plotly's default color scheme (returns ``None``).
+        If ``None``, defers to the default color scheme (returns ``None``).
         If a string, one of the names in :data:`COLORBLIND_PALETTES`.
         If a list or dict, returned unchanged.
 
@@ -333,9 +333,9 @@ def render_forest_plot(
         Name of the metric being plotted, included in the plot title and, for
         individual plots, the x-axis label.
     dark_mode : bool, default=False
-        Render on a dark background with light text and gridlines (Plotly's
-        ``"plotly_dark"`` template). Very dark palette colors, such as the
-        first colors of ``"tol"``, can be hard to see on it.
+        Render on a dark background with light text and gridlines. Very dark
+        palette colors, such as the first colors of ``"tol"``, can be hard to
+        see on it.
     backend : {"plotly", "altair"}, default="plotly"
         Library to draw with. ``"altair"`` needs the ``altair`` extra.
 
