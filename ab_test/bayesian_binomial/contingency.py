@@ -64,6 +64,9 @@ class BayesianContingencyTable(BaseContingencyTable):
         super().__init__(name, metric_name, spend, msrp)
         self.alphas: list[float] = []
         self.betas: list[float] = []
+        # Posterior draws (one column per cell) that analyze() reuses instead of drawing anew; set
+        # only while plot(lift="both") reruns it, so both panels describe the same posterior.
+        self._shared_draws: np.ndarray[Any, Any] | None = None
 
     def _total_row(self) -> list[Any]:
         """Return the ``"Total"`` row appended to :meth:`to_list`."""
@@ -82,6 +85,33 @@ class BayesianContingencyTable(BaseContingencyTable):
         """Restore per-cell Beta prior parameters during :meth:`deserialize`."""
         self.alphas = [v["alpha"] for v in serial["table"].values()]
         self.betas = [v["beta"] for v in serial["table"].values()]
+
+    def _posterior_draws(self, n_samples: int) -> np.ndarray[Any, Any]:
+        """Joint posterior draws, one column per cell: the shared ones if set, otherwise new ones."""
+        if self._shared_draws is not None:
+            return self._shared_draws
+        return np.column_stack(
+            [
+                sample_beta(s, n, a, b, n_samples)
+                for s, n, a, b in zip(self.successes, self.trials, self.alphas, self.betas)
+            ]
+        )
+
+    def _both_lift_results(self) -> list[dict[str, Any]]:
+        """Rerun analyze() for absolute and relative lift on one set of posterior draws.
+
+        Sampling both intervals from the same draws makes them agree on whether the lift
+        is positive, which the normal approximation does not guarantee.
+        """
+        if self.incremental_results is None or self._analyze_settings is None:
+            raise ValueError("Call .analyze() before plotting incremental results.")
+        saved_settings = self._analyze_settings
+        self._analyze_settings = {**saved_settings, "is_sample": True}
+        self._shared_draws = self._posterior_draws(saved_settings["n_samples"])
+        try:
+            return super()._both_lift_results()
+        finally:
+            self._analyze_settings, self._shared_draws = saved_settings, None
 
     def add(self, cell_name: str, successes: int, trials: int, alpha: float, beta: float) -> "BayesianContingencyTable":
         """Add cells to our contingency table.
@@ -347,7 +377,10 @@ class BayesianContingencyTable(BaseContingencyTable):
         """Two variants: one comparison, reported as before multi-arm support."""
         lift = settings["lift"]
         confidence_level = settings["confidence_level"]
-        result = self._compare(0, 1, settings)
+        samples = None
+        if self._shared_draws is not None:
+            samples = (self._shared_draws[:, 0], self._shared_draws[:, 1])
+        result = self._compare(0, 1, settings, samples=samples)
         test_lift, success_rate, lb, ub = result["lift"], result["rates"], result["ci_lower"], result["ci_upper"]
         self.incremental_results = {
             "lift_type": lift,
@@ -406,12 +439,7 @@ class BayesianContingencyTable(BaseContingencyTable):
         pairs = [(0, j) for j in range(1, k)] if comparisons == "control" else list(itertools.combinations(range(k), 2))
         # One joint draw across every arm, shared by "which arm is best" and every pairwise comparison,
         # rather than fresh draws for each of up to k(k - 1)/2 pairs.
-        draws = np.column_stack(
-            [
-                sample_beta(s, n, a, b, settings["n_samples"])
-                for s, n, a, b in zip(self.successes, self.trials, self.alphas, self.betas)
-            ]
-        )
+        draws = self._posterior_draws(settings["n_samples"])
         compared: dict[str, dict[str, Any]] = {}
         for i, j in pairs:
             result = self._compare(i, j, settings, samples=(draws[:, i], draws[:, j]))

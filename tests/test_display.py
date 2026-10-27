@@ -115,6 +115,21 @@ class TestForestPlotBothLifts:
         assert table.incremental_results["lift_type"] == "relative"
 
     @staticmethod
+    def test_bayesian_panels_agree_on_sign():
+        # The normal approximation's relative interval used to cross zero here while the absolute one did not.
+        table = BayesianContingencyTable("Exp", "conversion")
+        for name, successes, trials in [("Control", 65, 2701), ("Delay", 199, 5714), ("Immediate", 227, 5835)]:
+            table.add(name, successes, trials, 1, 1)
+        table.analyze(confidence_level=0.975, comparisons="all")
+        settings = dict(table._analyze_settings)
+        absolute, relative = table._both_lift_results()
+        for label, row in absolute["comparisons"].items():
+            assert (row["ci_lower"] > 0) == (relative["comparisons"][label]["ci_lower"] > 0)
+        assert absolute["comparisons"]["Delay vs Control"]["ci_lower"] > 0
+        assert table._analyze_settings == settings
+        assert table._shared_draws is None
+
+    @staticmethod
     def test_single_result_unchanged():
         table = _table()
         table.analyze(lift="relative")

@@ -256,7 +256,8 @@ class BaseContingencyTable:
             plots absolute and relative lift side by side, each with its own
             interval, by rerunning .analyze() for both scales with the same
             settings (only for ``is_individual=False``; the stored results are
-            left unchanged).
+            left unchanged). A Bayesian table samples both intervals from one
+            set of posterior draws, so they agree on whether the lift is positive.
         dark_mode : bool, default=False
             Render on a dark background with light text and gridlines.
         backend : {"plotly", "altair"}, default="plotly"

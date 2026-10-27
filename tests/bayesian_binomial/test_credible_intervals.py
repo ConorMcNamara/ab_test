@@ -10,7 +10,7 @@ class TestCredibleIntervalComparison:
         [
             ("relative", True, -0.14798553466796882, 0.4204476928710939, 1e-02),
             ("absolute", True, -0.016966857910156258, 0.037053527832031245, 1e-03),
-            ("relative", False, -0.181, 0.380, 1e-03),
+            ("relative", False, -0.1483, 0.4195, 1e-03),
             ("absolute", False, -0.016966857910156258, 0.037053527832031245, 1e-03),
         ],
         ids=["relative-sample", "absolute-sample", "relative-z", "absolute-z"],
@@ -27,6 +27,18 @@ class TestCredibleIntervalComparison:
 
         assert actual_low == pytest.approx(expected_low, abs=abs_tol)
         assert actual_high == pytest.approx(expected_high, abs=abs_tol)
+
+    @staticmethod
+    def test_normal_relative_interval_does_not_cross_zero_before_absolute():
+        # A symmetric relative interval crossed zero here while the absolute one did not.
+        args = ([65, 199], [2701, 5714], [1, 1], [1, 1], 0.975)
+        abs_low, _ = credible_interval(*args, lift="absolute", is_sample=False)
+        rel_low, rel_high = credible_interval(*args, lift="relative", is_sample=False)
+        assert abs_low > 0
+        assert rel_low > 0
+        # Right-skewed around the posterior means' ratio, like the ratio's posterior.
+        point = (200 / 5716) / (66 / 2703) - 1
+        assert rel_high - point > point - rel_low
 
     @staticmethod
     @pytest.mark.parametrize(
