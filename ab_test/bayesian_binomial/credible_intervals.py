@@ -1,6 +1,6 @@
 """Calculates credible intervals for AB Tests."""
 
-from math import sqrt
+from math import exp, log, sqrt
 from typing import Any, Literal
 
 import numpy as np
@@ -34,7 +34,9 @@ def credible_interval(
 
     Either samples from the Beta posterior of each variant and derives the
     interval from the resulting lift distribution, or uses a normal
-    approximation via the delta method when ``is_sample=False``.
+    approximation via the delta method when ``is_sample=False`` (on the log
+    scale for relative lift, so its interval is skewed like the ratio's
+    posterior).
 
     Parameters
     ----------
@@ -61,9 +63,9 @@ def credible_interval(
         Number of posterior samples to draw per variant, by default 100_000.
     method : {"credible", "hdi"}, optional
         Method used to compute the interval. ``"credible"`` uses equal-tailed
-        percentiles; ``"hdi"`` uses the Highest Density Interval. Note that if_sample = False
-        creates a symmetric interval, thereby both ``"credible"`` and ``"hdi"``
-        return the same interval. By default, ``"credible"``.
+        percentiles; ``"hdi"`` uses the Highest Density Interval. With
+        ``is_sample=False`` both return the same equal-tailed interval of the
+        normal approximation. By default, ``"credible"``.
     samples : tuple of np.ndarray, optional
         Posterior draws for the control and treatment to use instead of
         drawing ``n_samples`` new ones when ``is_sample=True``.
@@ -102,15 +104,18 @@ def credible_interval(
         mu_2 = (successes[1] + prior_alphas[1]) / (trials[1] + prior_alphas[1] + prior_betas[1])
         var_2 = (mu_2 * (1 - mu_2)) / (trials[1] + prior_alphas[1] + prior_betas[1] + 1)
 
+        z = norm.ppf(upper_bound)
         if lift == "relative":
-            lift_mu = mu_2 / mu_1 - 1
-            lift_std = sqrt((mu_2**2 / mu_1**4) * var_1 + (1 / mu_1**2) * var_2)
+            # The ratio's posterior is right-skewed, so build the interval on the log scale:
+            # a symmetric one around mu_2 / mu_1 sits too low and can cross zero when the
+            # absolute interval does not.
+            log_ratio = log(mu_2 / mu_1)
+            log_std = sqrt(var_1 / mu_1**2 + var_2 / mu_2**2)
+            lb, ub = exp(log_ratio - z * log_std) - 1, exp(log_ratio + z * log_std) - 1
         else:
             lift_mu = mu_2 - mu_1
             lift_std = sqrt(var_2 + var_1)
-
-        z = norm.ppf(upper_bound)
-        lb, ub = lift_mu - z * lift_std, lift_mu + z * lift_std
+            lb, ub = lift_mu - z * lift_std, lift_mu + z * lift_std
     return lb, ub
 
 
