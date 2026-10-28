@@ -17,6 +17,7 @@ from ab_test._plotting.spec import (
     LineSeries,
     LineSpec,
     Segment,
+    Span,
     VLine,
 )
 
@@ -38,6 +39,7 @@ __all__ = [
     "LineSeries",
     "LineSpec",
     "Segment",
+    "Span",
     "VLine",
 ]
 

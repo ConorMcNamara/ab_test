@@ -103,8 +103,11 @@ def _rgba(color: str, opacity: float) -> str:
 
 
 def line(spec: LineSpec) -> go.Figure:
-    """Draw a line chart with its bands, bars and dashed horizontal reference lines."""
+    """Draw a line chart with its bands, bars and dashed reference lines."""
     fig = go.Figure()
+    for span in spec.spans:
+        label = {"annotation_text": span.label, "annotation_position": "top left"} if span.label else {}
+        fig.add_vrect(x0=span.x0, x1=span.x1, fillcolor="gray", opacity=0.15, line_width=0, layer="below", **label)
     for band in spec.bands:
         # Fill from the lower edge up to the invisible upper one drawn just before it.
         fig.add_trace(
@@ -140,6 +143,12 @@ def line(spec: LineSpec) -> go.Figure:
                 marker["size"] = series.marker_size
             if series.color is not None and not series.lines:
                 marker["color"] = series.color
+            if series.filled is not None and not all(series.filled):
+                # Hollow where the point's interval spans the null.
+                shape = series.marker_shape
+                marker["symbol"] = [shape if filled else f"{shape}-open" for filled in series.filled]
+                # Only hollow markers get an outline, or filled ones are ringed in Plotly's default dark gray.
+                marker["line"] = {"width": [0 if filled else 2 for filled in series.filled]}
             if marker:
                 trace.update(marker=marker)
         if series.fill:
@@ -154,11 +163,27 @@ def line(spec: LineSpec) -> go.Figure:
             x1=segment.x1,
             y0=segment.y,
             y1=segment.y,
-            line={"color": segment.color, "width": segment.width},
+            line={"color": segment.color, "width": segment.width, "dash": segment.dash or "solid"},
         )
     for hline in spec.hlines:
         label = {"annotation_text": hline.label, "annotation_position": "top left"} if hline.label else {}
         fig.add_hline(y=hline.y, line_dash=hline.dash, line_color="gray", opacity=hline.opacity, **label)
+    for vline in spec.vlines:
+        # A shape and an annotation rather than add_vline, whose label can't sit on a categorical axis.
+        fig.add_shape(
+            type="line",
+            x0=vline.x,
+            x1=vline.x,
+            y0=0,
+            y1=1,
+            yref="paper",
+            line={"dash": "dash", "color": "gray"},
+            opacity=vline.opacity,
+        )
+        if vline.label:
+            fig.add_annotation(
+                x=vline.x, y=1, yref="paper", text=vline.label, showarrow=False, xanchor="left", yanchor="top"
+            )
     fig.update_layout(
         title=spec.title,
         xaxis_title=spec.x_title,

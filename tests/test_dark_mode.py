@@ -100,6 +100,15 @@ PLOTS = {
         BayesianContingencyTable("x", "y").add("A", 100, 1000, 1, 1).add("B", 130, 1000, 1, 1).plot_pdf(dark_mode=dm)
     ),
     "bayes_cluster_pdf": lambda dm: _clusters(BayesianClusterRandomizedTrial).plot_pdf(dark_mode=dm),
+    "bayes_contingency_lift_pdf": lambda dm: (
+        BayesianContingencyTable("x", "y")
+        .add("A", 100, 1000, 1, 1)
+        .add("B", 130, 1000, 1, 1)
+        .plot_lift_pdf(n_samples=2_000, dark_mode=dm)
+    ),
+    "bayes_cluster_lift_pdf": lambda dm: _clusters(BayesianClusterRandomizedTrial).plot_lift_pdf(
+        n_samples=2_000, dark_mode=dm
+    ),
     "time_trend": lambda dm: time_trend_test([100, 98, 102], [1000] * 3, [140, 128, 118], [1000] * 3, dark_mode=dm)[
         "figure"
     ],

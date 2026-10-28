@@ -14,7 +14,12 @@ Supported lift types include relative, absolute, incremental, ROAS, and revenue.
 
 The class also exposes :meth:`analyze_individually` for per-cell posterior summaries and
 :meth:`plot_pdf` for visualizing overlapping posterior Beta distributions with HDI
-annotations and a win-probability title. Like its frequentist counterpart, it supports
+annotations and a win-probability title. Overlapping per-variant intervals don't mean
+the variants are alike, so :meth:`plot_lift_pdf` plots what the decision rests on: the
+posterior of each variant's lift over the control. Its interval is drawn solid when it
+excludes zero and dashed when it spans it, the ROPE is shaded, and the title (or, with
+three or more variants, each legend entry) says whether the interval lies outside the
+ROPE, inside it or overlaps it. Like its frequentist counterpart, it supports
 chainable ``add()`` calls, DataFrame export, and serialization.
 
 A uniform prior ``Beta(1, 1)`` is a common non-informative choice. If historical data
@@ -40,6 +45,10 @@ Example
 
    # Plot overlapping posterior distributions
    fig = bct.plot_pdf(confidence_level=0.95)
+   fig.show()
+
+   # Posterior of the lift, with its HDI against zero and the ROPE
+   fig = bct.plot_lift_pdf(lift="relative")
    fig.show()
 
 Three or More Variants

@@ -234,7 +234,7 @@ def _x_value(x: Any, spec: LineSpec) -> Any:
 
 
 def line(spec: LineSpec) -> alt.TopLevelMixin:
-    """Draw a line chart with its bands, bars and dashed horizontal reference lines."""
+    """Draw a line chart with its bands, bars and dashed reference lines."""
     data = pd.DataFrame(
         {
             "series": [series.name for series in spec.series for _ in series.x],
@@ -244,6 +244,7 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
             "shape": [series.marker_shape for series in spec.series for _ in series.x],
             # Plotly's default marker diameter is 6.
             "area": [_area(series.marker_shape, series.marker_size or 6) for series in spec.series for _ in series.x],
+            "filled": [f for series in spec.series for f in (series.filled or [True] * len(series.x))],
         }
     )
     # Bands share the series' color scale and legend, after the series as in
@@ -303,6 +304,21 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
     base = alt.Chart(data).encode(x=x_channel(), y=alt.Y("y:Q", scale=y_scale, axis=y_axis), color=color)
 
     layers: list[Any] = []
+    if spec.spans:
+        spans = pd.DataFrame(
+            {
+                "x0": [span.x0 for span in spec.spans],
+                "x1": [span.x1 for span in spec.spans],
+                "label": [span.label or "" for span in spec.spans],
+            }
+        )
+        shaded = alt.Chart(spans).encode(x=alt.X("x0:Q"))
+        layers.append(shaded.mark_rect(color="gray", opacity=0.15).encode(x2="x1:Q"))
+        layers.append(
+            shaded.mark_text(align="left", baseline="top", dx=4, dy=4, color="gray").encode(
+                y=alt.value(0), text="label:N"
+            )
+        )
     if spec.bands:
         bands = pd.DataFrame(
             {
@@ -326,11 +342,16 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
     line_layer = base.mark_line(strokeWidth=2).encode(strokeDash=dash)
     layers.append(line_layer if len(lined) == len(spec.series) else line_layer.transform_filter(_only(lined)))
     if marked:
-        layers.append(
-            base.mark_point(filled=True, opacity=1.0)
-            .encode(shape=alt.Shape("shape:N", scale=None), size=alt.Size("area:Q", scale=None))
-            .transform_filter(_only(marked))
-        )
+        markers = base.encode(shape=alt.Shape("shape:N", scale=None), size=alt.Size("area:Q", scale=None))
+        layers.append(markers.mark_point(filled=True, opacity=1.0).transform_filter(_only(marked)))
+        if not all(data["filled"]):
+            # Vega-Lite can't set ``filled`` per point, so hollow markers are a second layer.
+            layers[-1] = layers[-1].transform_filter("datum.filled")
+            layers.append(
+                markers.mark_point(filled=False, opacity=1.0, strokeWidth=2)
+                .transform_filter(_only(marked))
+                .transform_filter("!datum.filled")
+            )
     if with_errors:
         errors = base.transform_filter(_only(with_errors)).transform_calculate(
             lo="datum.y - datum.err", hi="datum.y + datum.err"
@@ -356,19 +377,21 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
         )
         .add_params(nearest)
     )
-    if spec.segments:
+    # One layer per dash pattern, since a mark's dash can't come from its data.
+    for dash in dict.fromkeys(segment.dash for segment in spec.segments):
+        dashed = [segment for segment in spec.segments if segment.dash == dash]
         segments = pd.DataFrame(
             {
-                "x0": [segment.x0 for segment in spec.segments],
-                "x1": [segment.x1 for segment in spec.segments],
-                "y": [segment.y for segment in spec.segments],
-                "stroke": [segment.color for segment in spec.segments],
-                "width": [segment.width for segment in spec.segments],
+                "x0": [segment.x0 for segment in dashed],
+                "x1": [segment.x1 for segment in dashed],
+                "y": [segment.y for segment in dashed],
+                "stroke": [segment.color for segment in dashed],
+                "width": [segment.width for segment in dashed],
             }
         )
         layers.append(
             alt.Chart(segments)
-            .mark_rule()
+            .mark_rule(strokeDash=_DASHES[dash])
             .encode(
                 x=alt.X("x0:Q"),
                 x2="x1:Q",
@@ -387,6 +410,20 @@ def line(spec: LineSpec) -> alt.TopLevelMixin:
             layers.append(
                 rule.mark_text(align="left", baseline="bottom", dx=4, dy=-2, color="gray").encode(
                     x=alt.value(0), text="label:N"
+                )
+            )
+    for vline in spec.vlines:
+        rule = alt.Chart(pd.DataFrame({"x": [_x_value(vline.x, spec)], "label": [vline.label or ""]})).encode(
+            x=x_channel()
+        )
+        style = {"color": "gray", "strokeDash": _DASHES["dash"]}
+        if vline.opacity != 1.0:
+            style["opacity"] = vline.opacity
+        layers.append(rule.mark_rule(**style))
+        if vline.label:
+            layers.append(
+                rule.mark_text(align="left", baseline="top", dx=4, dy=4, color="gray").encode(
+                    y=alt.value(0), text="label:N"
                 )
             )
     chart = alt.layer(*layers).properties(width=_WIDTH, height=_HEIGHT)

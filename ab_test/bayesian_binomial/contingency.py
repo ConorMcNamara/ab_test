@@ -17,6 +17,7 @@ from ab_test._display import (
 from ab_test._plotting import Figure, render, validate_backend
 from ab_test._plotting.spec import AxisFormat, LineSeries, LineSpec, Segment
 from ab_test._lift import scale_bounds, scale_metric
+from ab_test.bayesian_binomial._lift_plot import lift_pdf_spec, variant_colors
 from ab_test.bayesian_binomial.credible_intervals import credible_interval, individual_credible_interval
 from ab_test.bayesian_binomial.stats_tests import calculate_metrics, prob_lift_exceeds
 from ab_test.bayesian_binomial.utils import _default_rope_half_width, posterior_mean, sample_beta
@@ -669,6 +670,95 @@ class BayesianContingencyTable(BaseContingencyTable):
                 Segment(hdi_a[0], hdi_a[1], -max_y * 0.05, color_a, width=5),
                 Segment(hdi_b[0], hdi_b[1], -max_y * 0.10, color_b, width=5),
             ],
+            dark_mode=dark_mode,
+        )
+        return render(spec, backend)
+
+    def plot_lift_pdf(
+        self,
+        lift: str = "relative",
+        confidence_level: float = 0.95,
+        cred_int_method: Literal["credible", "hdi"] = "hdi",
+        n_samples: int = 100_000,
+        low_threshold: float | None = None,
+        high_threshold: float | None = None,
+        color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
+        backend: str = "plotly",
+    ) -> Figure:
+        """Plot the posterior density of each variant's lift over the control (the first cell added).
+
+        Unlike :meth:`plot_pdf`, whose per-variant intervals can overlap even
+        when the difference is clear, this plot shows the quantity the
+        decision rests on. Each variant's interval is a bar beneath its
+        density: solid when it excludes zero, dashed when it spans it. A gray
+        band marks the Region of Practical Equivalence (ROPE), and each legend
+        entry (or, with two variants, the title) says whether the interval
+        lies outside the ROPE (a meaningful difference), inside it
+        (practically equivalent) or overlaps it (inconclusive).
+
+        Parameters
+        ----------
+        lift : {"relative", "absolute"}, default="relative"
+            Kind of lift to plot.
+        confidence_level : float, default=0.95
+            Probability mass of each interval.
+        cred_int_method : {"credible", "hdi"}, default="hdi"
+            Equal-tailed interval or Highest Density Interval, as in
+            :meth:`analyze`. The default HDI is the one the HDI+ROPE decision
+            rule uses.
+        n_samples : int, default=100_000
+            Number of posterior draws per variant.
+        low_threshold, high_threshold : float, optional
+            Bounds of the ROPE, in the units of ``lift``. By default, +/-10% of
+            the control's posterior rate in those units, as in :meth:`analyze`.
+        color : str, list, dict, or None, optional
+            Colors of the variants, as in :meth:`plot_pdf`; a list's first
+            color is the control's, which has no density of its own.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or altair.LayerChart
+            An interactive Plotly figure, or Altair chart, of the lift
+            posteriors, their intervals, zero and the ROPE.
+
+        Raises
+        ------
+        ValueError
+            If the table has fewer than two variants, or ``lift`` is not
+            ``"relative"`` or ``"absolute"``.
+        """
+        validate_backend(backend)
+        if len(self.names) < 2:
+            raise ValueError(f"plot_lift_pdf requires at least 2 variants, got {len(self.names)}")
+        lift = lift.casefold()
+        if lift not in ("relative", "absolute"):
+            raise ValueError(f"lift must be 'relative' or 'absolute', got {lift!r}")
+        if low_threshold is None or high_threshold is None:
+            control_rate = posterior_mean(self.successes[0], self.trials[0], self.alphas[0], self.betas[0])
+            default_rope = _default_rope_half_width(control_rate, lift, max(self.trials))
+            low_threshold = -default_rope if low_threshold is None else low_threshold
+            high_threshold = default_rope if high_threshold is None else high_threshold
+        draws = self._posterior_draws(n_samples)
+        if len(self.names) == 2:
+            p_b_better = float(np.mean(draws[:, 1] > draws[:, 0]))
+            title = f"Bayesian Binary Test: P({self.names[1]} > {self.names[0]}) = {p_b_better:.1%}"
+        else:
+            title = f"Posterior {lift} lift vs {self.names[0]}"
+        spec = lift_pdf_spec(
+            self.names,
+            list(draws.T),
+            lift,
+            confidence_level,
+            cred_int_method,
+            (low_threshold, high_threshold),
+            variant_colors(color, self.names),
+            title,
             dark_mode=dark_mode,
         )
         return render(spec, backend)

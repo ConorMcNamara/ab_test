@@ -270,7 +270,7 @@ class TestPlotMsprtOverTime:
             ct.add("Treatment", successes=int(n * 0.12), trials=n)
             tables.append(ct)
         fig = plot_msprt_over_time(tables, ["Day 1", "Day 2"])
-        assert len(fig.data) == 3
+        assert len(fig.data) == 5
 
     @staticmethod
     def test_absolute_lift():
@@ -293,7 +293,7 @@ class TestPlotMsprtOverTime:
             ct.add("Treatment", successes=int(n * 0.12), trials=n)
             tables.append(ct)
         fig = plot_msprt_over_time(tables, ["Day 1", "Day 2"], tau=0.05)
-        assert len(fig.data) == 3
+        assert len(fig.data) == 5
 
     @staticmethod
     def test_mismatched_lengths():

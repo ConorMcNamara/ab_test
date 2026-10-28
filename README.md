@@ -47,7 +47,7 @@ pip install "abtest-analysis[sklearn] @ git+https://github.com/ConorMcNamara/ab_
 
 Other extras: `pyspark`, `modin`, `ibis`, and `narwhals` for DataFrame export.
 
-`altair` adds an Altair plotting backend. Plots use Plotly by default; pass `backend="altair"` to any plot (`.plot()`, `.plot_pdf()`, the `plot_*` functions, or `time_trend_test`) to draw it with Altair instead.
+`altair` adds an Altair plotting backend. Plots use Plotly by default; pass `backend="altair"` to any plot (`.plot()`, `.plot_pdf()`, `.plot_lift_pdf()`, the `plot_*` functions, or `time_trend_test`) to draw it with Altair instead.
 
 ### Development setup
 
