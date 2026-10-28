@@ -11,7 +11,8 @@ from tests.test_dark_mode import _clusters, _cupac, _msprt_tables
 from ab_test._display import effect_panel, forest_spec, render_forest_plot
 from ab_test._plotting import render, validate_backend
 from ab_test._plotting.curves import curve, sensitivity_curve_spec
-from ab_test._plotting.spec import ForestPanel, ForestPoint, ForestSpec, VLine
+from ab_test._plotting.spec import ForestPanel, ForestPoint, ForestSpec, LineSeries, LineSpec, Segment, Span, VLine
+from ab_test.bayesian_binomial._lift_plot import rope_verdict
 from ab_test.bayesian_binomial.cluster import (
     BayesianClusterRandomizedTrial,
     plot_cluster_bayes_power_curve,
@@ -541,6 +542,10 @@ OTHER_PLOTS = {
         BayesianContingencyTable("x", "y").add("A", 100, 1000, 1, 1).add("B", 130, 1000, 1, 1).plot_pdf(**kw)
     ),
     "cluster_pdf": lambda **kw: _bayes_clusters().plot_pdf(n_samples=2_000, **kw),
+    "lift_pdf": lambda **kw: (
+        BayesianContingencyTable("x", "y").add("A", 100, 1000, 1, 1).add("B", 130, 1000, 1, 1).plot_lift_pdf(**kw)
+    ),
+    "cluster_lift_pdf": lambda **kw: _bayes_clusters().plot_lift_pdf(n_samples=2_000, **kw),
     "gst_boundaries": lambda **kw: GroupSequentialDesign(n_analyses=3, sided="two").plot_boundaries(**kw),
     "msprt": lambda **kw: plot_msprt_over_time(_msprt_tables(), ["Day 1", "Day 2"], **kw),
     "time_trend": lambda **kw: _trend(**kw)["figure"],
@@ -578,13 +583,13 @@ class TestOtherPlotsAltair:
         spec = OTHER_PLOTS["msprt"](backend="altair").to_dict()
         band = spec["layer"][0]
         assert band["mark"] == {"type": "area"}
-        # The band's translucency is in its color, so its legend entry shows it too.
-        assert band["encoding"]["color"]["scale"]["range"] == ["#636EFA", "rgba(99, 110, 250, 0.2)"]
-        assert [row["x"] for row in _rows(spec, band)] == ["Day 1", "Day 2"]
+        # The bands' translucency is in their color, so their legend entries show it too.
+        assert band["encoding"]["color"]["scale"]["range"] == ["#636EFA"] + ["rgba(99, 110, 250, 0.2)"] * 2
+        assert [row["x"] for row in _rows(spec, band)] == ["Day 1", "Day 2"] * 2
         assert spec["layer"][1]["encoding"]["x"]["sort"] == ["Day 1", "Day 2"]
-        # Plotly keeps its three traces: the band's two edges and the estimate.
+        # Plotly draws each band's two edges, then the estimate.
         fig = OTHER_PLOTS["msprt"]()
-        assert [trace.fill for trace in fig.data] == [None, "tonexty", None]
+        assert [trace.fill for trace in fig.data] == [None, "tonexty", None, "tonexty", None]
         assert fig.data[1].fillcolor == "rgba(99, 110, 250, 0.2)"
 
     @staticmethod
@@ -599,7 +604,7 @@ class TestOtherPlotsAltair:
         chart = plot_msprt_over_time(_msprt_tables(), labels, backend="altair")
         chart.to_json()  # Dates must serialize.
         spec = chart.to_dict()
-        assert [row["x"] for row in _rows(spec, spec["layer"][0])] == text
+        assert [row["x"] for row in _rows(spec, spec["layer"][0])] == text * 2
         assert spec["layer"][1]["encoding"]["x"]["sort"] == text
         assert {row["x"] for row in _rows(spec, spec["layer"][1])} == set(text)
 
@@ -631,3 +636,199 @@ class TestOtherPlotsAltair:
         spec = OTHER_PLOTS[name](backend="altair").to_dict()
         ((whisker, _),) = [panel[:2] for panel in _layers(spec)]
         assert whisker["transform"] == [{"filter": "isValid(datum.lower)"}]
+
+
+def _rising_tables():
+    """Four looks at a 13% vs 10% split: the null is rejected from the third on."""
+    return [
+        ContingencyTable("t", "c").add("Control", n // 10, n).add("Treatment", int(n * 0.13), n)
+        for n in (500, 2000, 5000, 8000)
+    ]
+
+
+def _bayes_table(*cells):
+    table = BayesianContingencyTable("x", "y")
+    for name, successes in cells:
+        table.add(name, successes, 1000, 1, 1)
+    return table
+
+
+class TestSignificanceMarks:
+    @staticmethod
+    def test_line_series_hollow_markers():
+        spec = LineSpec(
+            series=[
+                LineSeries("s", [1, 2, 3], [1, 2, 3], markers=True, marker_shape="diamond", filled=[False, True, True])
+            ],
+            title="t",
+            x_title="x",
+            y_title="y",
+        )
+        marker = render(spec).data[0].marker
+        assert marker.symbol == ("diamond-open", "diamond", "diamond")
+        # Only hollow markers get an outline.
+        assert marker.line.width == (2, 0, 0)
+        layers = render(spec, "altair").to_dict()["layer"]
+        points = [layer for layer in layers if layer["mark"]["type"] == "point" and "shape" in layer["encoding"]]
+        assert [(p["mark"]["filled"], p["transform"][-1]) for p in points] == [
+            (True, {"filter": "datum.filled"}),
+            (False, {"filter": "!datum.filled"}),
+        ]
+
+    @staticmethod
+    def test_all_filled_markers_need_no_hollow_layer():
+        spec = LineSpec(
+            series=[LineSeries("s", [1, 2], [1, 2], markers=True, filled=[True, True])],
+            title="t",
+            x_title="x",
+            y_title="y",
+        )
+        assert render(spec).data[0].marker.symbol is None
+        layers = render(spec, "altair").to_dict()["layer"]
+        assert [layer["mark"].get("filled") for layer in layers if layer["mark"]["type"] == "point"] == [True, True]
+
+    @staticmethod
+    def test_dashed_segments_spans_and_vlines():
+        spec = LineSpec(
+            series=[LineSeries("s", [0.0, 1.0], [1.0, 1.0])],
+            title="t",
+            x_title="x",
+            y_title="y",
+            segments=[Segment(0.1, 0.2, -1, "#000000"), Segment(0.3, 0.4, -2, "#000000", dash="dash")],
+            vlines=[VLine(0.5, label="here")],
+            spans=[Span(0.2, 0.6, "ROPE")],
+        )
+        fig = render(spec)
+        lines = [shape for shape in fig.layout.shapes if shape.type == "line"]
+        assert [shape.line.dash for shape in lines] == ["solid", "dash", "dash"]
+        assert lines[-1].x0 == 0.5
+        rect = next(shape for shape in fig.layout.shapes if shape.type == "rect")
+        assert (rect.x0, rect.x1) == (0.2, 0.6)
+        assert {annotation.text for annotation in fig.layout.annotations} == {"ROPE", "here"}
+        chart = render(spec, "altair").to_dict()
+        marks = [layer["mark"] for layer in chart["layer"]]
+        assert marks[0] == {"type": "rect", "color": "gray", "opacity": 0.15}
+        rules = [mark["strokeDash"] for mark in marks if mark["type"] == "rule" and "strokeDash" in mark]
+        assert rules == [[1, 0], [6, 4], [6, 4]]
+        texts = [layer for layer in chart["layer"] if layer["mark"]["type"] == "text"]
+        assert len(texts) == 2
+
+    @staticmethod
+    def test_msprt_hollow_until_each_look_excludes_the_null():
+        fig = plot_msprt_over_time(_rising_tables(), ["d1", "d2", "d3", "d4"])
+        assert fig.data[-1].marker.symbol == ("diamond-open", "diamond-open", "diamond", "diamond")
+
+    @staticmethod
+    def test_msprt_marks_the_first_rejecting_look():
+        labels = ["d1", "d2", "d3", "d4"]
+        fig = plot_msprt_over_time(_rising_tables(), labels)
+        (vline,) = [shape for shape in fig.layout.shapes if shape.x0 == shape.x1]
+        assert vline.x0 == "d3"
+        assert "H₀ rejected" in [annotation.text for annotation in fig.layout.annotations]
+        chart = plot_msprt_over_time(_rising_tables(), labels, backend="altair").to_dict()
+        rule = next(
+            layer for layer in chart["layer"] if layer["mark"].get("strokeDash") == [6, 4] and "x" in layer["encoding"]
+        )
+        assert _rows(chart, rule)[0]["x"] == "d3"
+        assert rule["encoding"]["x"]["sort"] == labels
+
+    @staticmethod
+    def test_msprt_no_rejection_line_while_the_null_stands():
+        fig = OTHER_PLOTS["msprt"]()
+        assert not [shape for shape in fig.layout.shapes if shape.x0 == shape.x1]
+
+    @staticmethod
+    def test_msprt_confidence_sequence_is_the_running_intersection():
+        fig = plot_msprt_over_time(_rising_tables(), ["d1", "d2", "d3", "d4"])
+        look_upper, look_lower, seq_upper, seq_lower = (fig.data[i].y for i in range(4))
+        assert list(seq_lower) == [max(look_lower[: i + 1]) for i in range(4)]
+        assert list(seq_upper) == [min(look_upper[: i + 1]) for i in range(4)]
+        assert fig.data[3].name == "95% confidence sequence"
+
+    @staticmethod
+    def test_lift_pdf_interval_solid_when_it_excludes_zero():
+        fig = _bayes_table(("A", 100), ("B", 160)).plot_lift_pdf()
+        (bar,) = [shape for shape in fig.layout.shapes if shape.type == "line" and shape.yref != "paper"]
+        assert bar.x0 > 0
+        assert bar.line.dash == "solid"
+        assert "outside ROPE" in fig.layout.title.text
+
+    @staticmethod
+    def test_lift_pdf_interval_dashed_when_it_spans_zero():
+        fig = _bayes_table(("A", 100), ("B", 105)).plot_lift_pdf()
+        (bar,) = [shape for shape in fig.layout.shapes if shape.type == "line" and shape.yref != "paper"]
+        assert bar.x0 < 0 < bar.x1
+        assert bar.line.dash == "dash"
+        assert "overlaps ROPE" in fig.layout.title.text
+
+    @staticmethod
+    def test_lift_pdf_zero_line_and_default_rope():
+        fig = _bayes_table(("A", 100), ("B", 130)).plot_lift_pdf(lift="absolute")
+        rect = next(shape for shape in fig.layout.shapes if shape.type == "rect")
+        # +/-10% of the control's posterior rate, 101/1002.
+        assert rect.x1 == pytest.approx(0.1 * 101 / 1002)
+        assert rect.x0 == pytest.approx(-rect.x1)
+        assert any(shape.yref == "paper" and shape.x0 == 0 for shape in fig.layout.shapes)
+        assert fig.layout.xaxis.title.text == "Absolute lift"
+
+    @staticmethod
+    def test_lift_pdf_custom_rope_inside():
+        fig = _bayes_table(("A", 100), ("B", 105)).plot_lift_pdf(low_threshold=-0.5, high_threshold=0.5)
+        rect = next(shape for shape in fig.layout.shapes if shape.type == "rect")
+        assert (rect.x0, rect.x1) == (-0.5, 0.5)
+        assert "inside ROPE" in fig.layout.title.text
+
+    @staticmethod
+    def test_lift_pdf_names_each_comparison_in_the_legend():
+        fig = _bayes_table(("A", 100), ("B", 160), ("C", 100)).plot_lift_pdf(cred_int_method="credible")
+        assert [trace.name for trace in fig.data] == ["B vs A: outside ROPE", "C vs A: overlaps ROPE"]
+        assert fig.layout.title.text == "Posterior relative lift vs A (bars: 95% credible interval)"
+        bars = [shape.line.dash for shape in fig.layout.shapes if shape.type == "line" and shape.yref != "paper"]
+        assert bars == ["solid", "dash"]
+
+    @staticmethod
+    def test_lift_pdf_density_integrates_to_about_one():
+        fig = _bayes_table(("A", 100), ("B", 130)).plot_lift_pdf()
+        x, y = fig.data[0].x, fig.data[0].y
+        assert sum(y) * (x[1] - x[0]) == pytest.approx(1, abs=0.01)
+
+    @staticmethod
+    @pytest.mark.parametrize("table", [lambda: _bayes_table(("A", 100), ("B", 130)), _bayes_clusters])
+    def test_lift_pdf_rejects_other_lifts(table):
+        with pytest.raises(ValueError, match="lift must be"):
+            table().plot_lift_pdf(lift="roas")
+
+    @staticmethod
+    def test_lift_pdf_needs_two_variants():
+        with pytest.raises(ValueError, match="at least 2 variants"):
+            _bayes_table(("A", 100)).plot_lift_pdf()
+
+    @staticmethod
+    def test_lift_pdf_colors_follow_the_variants():
+        fig = _bayes_table(("A", 100), ("B", 130)).plot_lift_pdf(color={"B": "#000000"})
+        assert fig.data[0].line.color == "#000000"
+        fig = _bayes_table(("A", 100), ("B", 130)).plot_lift_pdf(color=["#111111", "#222222"])
+        assert fig.data[0].line.color == "#222222"
+
+    @staticmethod
+    def test_cluster_lift_pdf_title():
+        fig = OTHER_PLOTS["cluster_lift_pdf"]()
+        assert "Lift Posterior | P(" in fig.layout.title.text
+        assert "ROPE" in fig.layout.title.text
+
+
+class TestRopeVerdict:
+    @staticmethod
+    @pytest.mark.parametrize(
+        ("lower", "upper", "verdict"),
+        [
+            (0.2, 0.3, "outside ROPE"),
+            (-0.3, -0.2, "outside ROPE"),
+            (-0.05, 0.05, "inside ROPE"),
+            (-0.1, 0.1, "inside ROPE"),
+            (0.05, 0.3, "overlaps ROPE"),
+            (-0.3, 0.3, "overlaps ROPE"),
+        ],
+    )
+    def test_verdict(lower, upper, verdict):
+        assert rope_verdict(lower, upper, -0.1, 0.1) == verdict

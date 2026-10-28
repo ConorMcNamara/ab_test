@@ -61,8 +61,14 @@ analysis would be: lift, credible interval, probability of being greater,
 expected loss in the lift's units, and the ROPE probability with its default
 scaled to that comparison's reference group. Posterior probabilities need no
 multiple-comparison correction, but stopping as soon as one crosses a
-threshold still inflates false wins. ``plot()`` and ``plot_pdf()`` show
-every group. With two groups the output is unchanged.
+threshold still inflates false wins. ``plot()``, ``plot_pdf()`` and
+``plot_lift_pdf()`` show every group. With two groups the output is unchanged.
+
+``plot_lift_pdf()`` draws the posterior of each group's lift over the control,
+with its interval as a bar beneath it (solid when it excludes zero, dashed
+when it spans it) and the ROPE as a gray band. Whether two groups' rate
+intervals in ``plot_pdf()`` overlap says little about their difference; this
+plot shows the difference itself.
 
 API Reference
 -------------

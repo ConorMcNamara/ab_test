@@ -19,6 +19,7 @@ __all__ = [
     "LineSeries",
     "Band",
     "Segment",
+    "Span",
     "HLine",
     "LineSpec",
     "label_colors",
@@ -89,10 +90,21 @@ class ForestPoint:
 
 @dataclass(frozen=True)
 class VLine:
-    """A dashed gray vertical reference line, such as zero (no effect)."""
+    """A dashed gray vertical reference line, such as zero (no effect).
 
-    x: float
+    Parameters
+    ----------
+    x : float or str
+        Position of the line; a label when the x-axis is categorical.
+    opacity : float
+        Opacity of the line.
+    label : str or None
+        Text at its top end, drawn in line charts only; ``None`` leaves it unlabelled.
+    """
+
+    x: float | str
     opacity: float = 1.0
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -131,7 +143,7 @@ class ForestPanel:
             return False
         if not self.vlines:
             return True
-        null = self.vlines[0].x
+        null = float(self.vlines[0].x)
         return not point.lower <= null <= point.upper
 
 
@@ -197,6 +209,9 @@ class LineSeries:
         density.
     errors : sequence of float or None
         Half-width of a vertical error bar at each point.
+    filled : sequence of bool or None
+        Whether each point's marker is filled; a hollow one marks a point
+        whose interval spans the null. ``None`` fills every marker.
     """
 
     name: str
@@ -210,6 +225,7 @@ class LineSeries:
     marker_size: float | None = None
     fill: bool = False
     errors: Sequence[float] | None = None
+    filled: Sequence[bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -237,13 +253,29 @@ class Band:
 
 @dataclass(frozen=True)
 class Segment:
-    """A thick horizontal bar from ``x0`` to ``x1`` at height ``y``, such as an interval under a density."""
+    """A thick horizontal bar from ``x0`` to ``x1`` at height ``y``, such as an interval under a density.
+
+    ``dash`` draws it dashed, such as for an interval that spans the null; ``None`` draws it solid.
+    """
 
     x0: float
     x1: float
     y: float
     color: str
     width: float = 4.0
+    dash: str | None = None
+
+
+@dataclass(frozen=True)
+class Span:
+    """A translucent gray vertical band from ``x0`` to ``x1``, such as a region of practical equivalence.
+
+    ``label`` is drawn at its top left; ``None`` leaves it unlabelled.
+    """
+
+    x0: float
+    x1: float
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -297,6 +329,11 @@ class LineSpec:
         Shaded bands, drawn beneath the series.
     segments : list of Segment
         Horizontal bars, such as intervals drawn under densities.
+    vlines : list of VLine
+        Vertical reference lines, such as zero lift or the look at which a
+        result became significant.
+    spans : list of Span
+        Shaded vertical bands, drawn beneath the series.
     """
 
     series: list[LineSeries]
@@ -312,3 +349,5 @@ class LineSpec:
     x_tick_step: float | None = None
     bands: list[Band] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
+    vlines: list[VLine] = field(default_factory=list)
+    spans: list[Span] = field(default_factory=list)

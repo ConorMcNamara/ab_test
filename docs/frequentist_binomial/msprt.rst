@@ -23,7 +23,11 @@ the running minimum of this over all looks so far. The per-look value is never
 below it, so it is valid but conservative, and it can rise between looks; take
 the minimum over looks to get the always-valid p-value. Likewise,
 :func:`~ab_test.frequentist_binomial.msprt.plot_msprt_over_time` draws each
-look's interval without intersecting them across looks.
+look's interval without intersecting them across looks, with its marker hollow
+while that interval contains the null. A second, darker band is their running
+intersection, the confidence sequence, and a dashed line marks the first look
+at which it excludes the null: from then on the null is rejected, whatever
+later looks' own intervals show.
 
 The module also includes
 :func:`~ab_test.frequentist_binomial.msprt.plot_msprt_over_time` for

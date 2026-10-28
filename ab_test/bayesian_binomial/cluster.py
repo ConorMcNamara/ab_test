@@ -34,6 +34,7 @@ from ab_test._display import (
 from ab_test._plotting import Figure, render, validate_backend
 from ab_test._plotting.spec import AxisFormat, ForestPanel, ForestPoint, ForestSpec, LineSeries, LineSpec, Segment
 from ab_test._plotting.curves import curve, power_curve_spec, sensitivity_curve_spec
+from ab_test.bayesian_binomial._lift_plot import lift_pdf_spec, variant_colors
 from ab_test.bayesian_binomial.credible_intervals import calculate_hdi_from_samples
 from ab_test.bayesian_binomial.power_calculations import (
     Seed,
@@ -1006,6 +1007,91 @@ class BayesianClusterRandomizedTrial:
             y_title="Density",
             x_format=AxisFormat(tickformat=",.1%"),
             segments=segments,
+            dark_mode=dark_mode,
+        )
+        return render(spec, backend)
+
+    def plot_lift_pdf(
+        self,
+        lift: str = "relative",
+        confidence_level: float = 0.95,
+        cred_int_method: Literal["credible", "hdi"] = "hdi",
+        n_samples: int = 100_000,
+        low_threshold: float | None = None,
+        high_threshold: float | None = None,
+        color: str | dict[str, Any] | list[Any] | None = None,
+        *,
+        dark_mode: bool = False,
+        backend: str = "plotly",
+    ) -> Figure:
+        """Plot the posterior density of each arm's lift over the control (the first arm).
+
+        Unlike :meth:`plot_pdf`, whose per-arm intervals can overlap even when
+        the difference is clear, this plot shows the quantity the decision
+        rests on. Each arm's interval is a bar beneath its density: solid when
+        it excludes zero, dashed when it spans it. A gray band marks the Region
+        of Practical Equivalence (ROPE), and each legend entry (or, with two
+        arms, the title) says whether the interval lies outside the ROPE (a
+        meaningful difference), inside it (practically equivalent) or overlaps
+        it (inconclusive).
+
+        Parameters
+        ----------
+        lift : {"relative", "absolute"}, default="relative"
+            Kind of lift to plot.
+        confidence_level : float, default=0.95
+            Probability mass of each interval.
+        cred_int_method : {"credible", "hdi"}, default="hdi"
+            Equal-tailed interval or Highest Density Interval, as in
+            :meth:`analyze`. The default HDI is the one the HDI+ROPE decision
+            rule uses.
+        n_samples : int, default=100_000
+            Number of posterior draws per arm.
+        low_threshold, high_threshold : float, optional
+            Bounds of the ROPE, in the units of ``lift``. By default, +/-10% of
+            the control's posterior rate in those units, as in :meth:`analyze`.
+        color : str, list, dict, or None, default=None
+            Colorblind palette name, list of colors, or dict keyed by arm; a
+            list's first color is the control's, which has no density of its own.
+        dark_mode : bool, default=False
+            Render on a dark background with light text and gridlines.
+        backend : {"plotly", "altair"}, default="plotly"
+            Library to draw with. ``"altair"`` needs the ``altair`` extra.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure or altair.LayerChart
+            Plotly figure, or Altair chart, of the lift posteriors, their
+            intervals, zero and the ROPE.
+
+        Raises
+        ------
+        ValueError
+            If ``lift`` is not ``"relative"`` or ``"absolute"``.
+        """
+        validate_backend(backend)
+        lift = lift.casefold()
+        if lift not in _VALID_LIFTS:
+            raise ValueError(f"lift must be one of {sorted(_VALID_LIFTS)}, got {lift!r}")
+        params = self.model_params if self.model_params is not None else self._fit_model()
+        groups = self._groups
+        if low_threshold is None or high_threshold is None:
+            default_rope = _default_rope_half_width(params[groups[0]]["mean"], lift, 1)
+            low_threshold = -default_rope if low_threshold is None else low_threshold
+            high_threshold = default_rope if high_threshold is None else high_threshold
+        draws = [_sample_mu(params[g]["logit_mu_grid"], params[g]["mu_weights"], n_samples) for g in groups]
+        title = f"{self.experiment_name} — {self.metric_name} Lift Posterior"
+        if len(groups) == 2:
+            title += f" | P({groups[1]} > {groups[0]}) = {float(np.mean(draws[1] > draws[0])):.4f}"
+        spec = lift_pdf_spec(
+            groups,
+            draws,
+            lift,
+            confidence_level,
+            cred_int_method,
+            (low_threshold, high_threshold),
+            variant_colors(color, groups),
+            title,
             dark_mode=dark_mode,
         )
         return render(spec, backend)

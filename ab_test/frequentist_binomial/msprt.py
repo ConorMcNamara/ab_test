@@ -18,7 +18,7 @@ import numpy as np
 
 from ab_test._display import format_percent
 from ab_test._plotting import Figure, render, validate_backend
-from ab_test._plotting.spec import AxisFormat, Band, HLine, LineSeries, LineSpec
+from ab_test._plotting.spec import AxisFormat, Band, HLine, LineSeries, LineSpec, VLine
 from ab_test.frequentist_binomial.utils import mle_under_alternative, mle_under_null, observed_lift, validate_two_group
 
 if TYPE_CHECKING:
@@ -181,8 +181,11 @@ def plot_msprt_over_time(
 
     Each checkpoint's interval inverts the mSPRT at that look. They are not
     intersected across looks, so an interval can widen between checkpoints;
-    the running intersection of the intervals is Johari et al.'s confidence
-    sequence.
+    the running intersection of the intervals, Johari et al.'s confidence
+    sequence, is drawn as a second, darker band. A checkpoint's marker is
+    hollow when its own interval contains ``null_lift``, and a dashed line
+    marks the first checkpoint at which the confidence sequence excludes it,
+    from which on the null is rejected.
 
     Parameters
     ----------
@@ -212,8 +215,9 @@ def plot_msprt_over_time(
     -------
     plotly.graph_objects.Figure or altair.LayerChart
         An interactive Plotly figure, or Altair chart, showing the point
-        estimate as a line with markers, a shaded confidence band, and a dashed
-        null-lift reference.
+        estimate as a line with markers, the shaded per-look intervals and
+        confidence sequence, a dashed null-lift reference, and, once the
+        null is rejected, a dashed line at the first look that rejects it.
     """
     validate_backend(backend)
     if len(tables) != len(labels):
@@ -234,6 +238,14 @@ def plot_msprt_over_time(
         lbs.append(lb)
         ubs.append(ub)
 
+    # The running intersection is the confidence sequence; the null is rejected
+    # from the first look at which it falls outside, whatever later looks show.
+    seq_lbs = np.maximum.accumulate(lbs).tolist()
+    seq_ubs = np.minimum.accumulate(ubs).tolist()
+    rejected = [lb > null_lift or ub < null_lift for lb, ub in zip(seq_lbs, seq_ubs)]
+    vlines = [VLine(labels[rejected.index(True)], label="H₀ rejected")] if any(rejected) else []
+    level = format_percent(1 - alpha)
+
     spec = LineSpec(
         series=[
             LineSeries(
@@ -244,6 +256,7 @@ def plot_msprt_over_time(
                 markers=True,
                 marker_shape="diamond",
                 marker_size=8,
+                filled=[not lb <= null_lift <= ub for lb, ub in zip(lbs, ubs)],
             )
         ],
         title="mSPRT Confidence Sequence Over Time",
@@ -252,7 +265,11 @@ def plot_msprt_over_time(
         y_format=AxisFormat(tickformat=",.0%" if lift in ("relative", "absolute") else "~s"),
         hlines=[HLine(null_lift, "H₀")],
         x_categorical=True,
-        bands=[Band(f"{format_percent(1 - alpha)}% CI", labels, lbs, ubs)],
+        bands=[
+            Band(f"{level}% CI at each look", labels, lbs, ubs),
+            Band(f"{level}% confidence sequence", labels, seq_lbs, seq_ubs),
+        ],
+        vlines=vlines,
         dark_mode=dark_mode,
     )
     return render(spec, backend)
