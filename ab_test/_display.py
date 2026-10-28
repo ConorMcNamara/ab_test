@@ -245,7 +245,9 @@ def effect_panel(
     """Describe one lift's forest-plot panel of per-segment (or per-stratum) effects.
 
     Each segment is a circle with its interval; a pooled estimate, if given, is
-    a diamond labelled ``"Overall"`` below them. A dashed line marks zero.
+    a diamond labelled ``"Overall"`` below them. A dashed line marks zero,
+    except for CPA, whose null is an infinite cost: its markers are hollow
+    when a bound is infinite, as in :func:`render_forest_plot`.
 
     Parameters
     ----------
@@ -284,7 +286,7 @@ def effect_panel(
         points,
         x_title=label,
         x_format=AxisFormat(tickformat=_EFFECT_TICK_FORMATS[lift]),
-        vlines=[VLine(0.0, opacity=zero_line_opacity)],
+        vlines=[] if lift == "cpa" else [VLine(0.0, opacity=zero_line_opacity)],
     )
 
 

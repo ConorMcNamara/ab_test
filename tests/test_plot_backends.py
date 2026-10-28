@@ -341,6 +341,25 @@ class TestSegmentPlots:
         assert chart["usermeta"]["embedOptions"]["theme"] == "dark"
 
     @staticmethod
+    @pytest.mark.parametrize(
+        ("cls", "prior"), [(StratifiedContingencyTable, ()), (BayesianStratifiedContingencyTable, (1, 1))]
+    )
+    def test_cpa_has_no_zero_line(cls, prior):
+        table = _strata(cls, *prior)
+        table.spend = 1000.0
+        kwargs = {"n_samples": 2_000} if prior else {}
+        fig = table.plot(lift="cpa", **kwargs)
+        assert not fig.layout.shapes
+        # Every row's interval reaches an infinite CPA, so every marker is hollow.
+        assert [trace.marker.symbol for trace in fig.data] == ["circle-open", "circle-open", "diamond-open"]
+
+    @staticmethod
+    def test_cpa_markers_filled_when_bounds_are_finite():
+        panel = effect_panel(["a"], [50.0], [40.0], [60.0], "cpa")
+        assert panel.vlines == []
+        assert panel.filled(panel.points[0])
+
+    @staticmethod
     def test_pooled_row_is_larger_diamond():
         chart = _strata(StratifiedContingencyTable).plot(backend="altair").to_dict()
         data = _rows(chart, _panels(chart)[0])
