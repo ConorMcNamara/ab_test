@@ -450,17 +450,14 @@ class TestStratifiedPlotNewLifts:
         return st
 
     def test_plot_incremental(self):
-
         st = self._make_table()
         st.plot(lift="incremental")
 
     def test_plot_roas(self):
-
         st = self._make_table()
         st.plot(lift="roas")
 
     def test_plot_revenue(self):
-
         st = self._make_table()
         st.plot(lift="revenue")
 

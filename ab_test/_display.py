@@ -42,7 +42,7 @@ COLORBLIND_PALETTES: dict[str, list[str]] = {
     "high_contrast": ["#1b365d", "#008b8e", "#e87722", "#f5f5f5", "#333333"],
     "warm_and_accessible": ["#4a3728", "#f2a900", "#5c2d91", "#fff8e7", "#4a4a4a"],
     "five_color": ["#a53606", "#b32db5", "#881a58", "#0e288e", "#164c64"],
-    "tropical_candy": ["#e58606", "#5d69b1", "#52bca3", "#99c945", "#cc61b0", "#24796c"]
+    "tropical_candy": ["#e58606", "#5d69b1", "#52bca3", "#99c945", "#cc61b0", "#24796c"],
 }
 
 
@@ -101,7 +101,7 @@ def resolve_plot_color(
         if color not in COLORBLIND_PALETTES:
             raise ValueError(f"No support for color scheme {color}")
         return COLORBLIND_PALETTES[color]
-    if isinstance(color, (list, dict)):
+    if isinstance(color, list | dict):
         return color
     raise TypeError("Color can be a string, list, dict, or None")
 
@@ -155,7 +155,7 @@ def convert_to_tabulate_str(value: float | list[Any], lift: str) -> str | list[A
             return val
         raise ValueError(f"No support for {lift}")
 
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return _format_one(value)
     if isinstance(value, list):
         return [_format_one(val) for val in value]
