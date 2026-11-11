@@ -246,9 +246,12 @@ class BaseContingencyTable:
             Whether we are reversing the order of our plot or not.
         color : str, list, dict, or None, default=None
             If None, uses the backend's default color scheme.
-            If a string, one of the colorblind-friendly palette names: ``"ibm"``,
-            ``"wong"``, ``"ito"``, ``"tol"``, ``"tol_bright"``, ``"tol_vibrant"``,
-            ``"tol_muted"``, ``"tol_light"``.
+            If a string, one of the colorblind-friendly palette names:
+            ``"ibm"``, ``"wong"``, ``"ito"``, ``"tol"``,
+            ``"tol_bright"``, ``"tol_vibrant"``, ``"tol_muted"``, ``"tol_light"``,
+            ``"audio_eye"``, ``"medium_earthy"``, ``"magma"``, ``"virgis"``,
+            ``"high_contrast"``, ``"warm_and_accessible"``, ``"five_colors"``,
+            ``"tropical_candy"``.
             If a list, each item corresponds to a color for the relevant group.
             If a dict, keys are group names and values are colors.
         lift : {None, "both"}, default=None

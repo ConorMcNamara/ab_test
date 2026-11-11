@@ -605,7 +605,10 @@ class BayesianContingencyTable(BaseContingencyTable):
             Controls the colors used for each variant. If None, uses the
             default color scheme. If a string, one of the colorblind-friendly
             palette names: ``"ibm"``, ``"wong"``, ``"ito"``, ``"tol"``,
-            ``"tol_bright"``, ``"tol_vibrant"``, ``"tol_muted"``, ``"tol_light"``.
+            ``"tol_bright"``, ``"tol_vibrant"``, ``"tol_muted"``, ``"tol_light"``,
+            ``"audio_eye"``, ``"medium_earthy"``, ``"magma"``, ``"virgis"``,
+            ``"high_contrast"``, ``"warm_and_accessible"``, ``"five_colors"``
+            ``"tropical_candy"``.
             If a list, each item corresponds to a variant in order. If a dict,
             keys are variant names and values are colors.
         dark_mode : bool, default=False
