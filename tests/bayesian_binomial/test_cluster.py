@@ -3,6 +3,7 @@
 import numpy as np
 import plotly.graph_objects as go
 import pytest
+from scipy.integrate import trapezoid
 
 from ab_test.bayesian_binomial.cluster import (
     BayesianClusterRandomizedTrial,
@@ -778,8 +779,8 @@ class TestPlotPdfAndPooledIcc:
         fig = crt.plot_pdf()
         for trace, group in zip(fig.data, ["Control", "Treatment"]):
             x, y = np.asarray(trace.x), np.asarray(trace.y)
-            assert np.trapezoid(y, x) == pytest.approx(1.0, abs=1e-3)
-            assert np.trapezoid(x * y, x) == pytest.approx(crt.model_params[group]["mean"], abs=1e-4)
+            assert trapezoid(y, x) == pytest.approx(1.0, abs=1e-3)
+            assert trapezoid(x * y, x) == pytest.approx(crt.model_params[group]["mean"], abs=1e-4)
         for shape in fig.layout.shapes:
             assert shape.x1 - shape.x0 < 0.05
 
